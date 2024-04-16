@@ -29,7 +29,11 @@ def ascii_text(orig):
     return ascii
 
 
+
+import re
 def ascii_filename(orig, substitute='_'):
+    return re.sub(r'[/\:*?"<>|]', substitute, orig)  # 替换为下划线
+
     if isinstance(substitute, bytes):
         substitute = substitute.decode(filesystem_encoding)
     orig = ascii_text(orig).replace('?', '_')
