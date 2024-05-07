@@ -642,9 +642,11 @@ class GetTranslations(Translations):  # {{{
             self.upload_to_vcs('Fixed translations')
 
     def check_for_user_manual_errors(self):
+        sys.path.insert(0, self.j(self.d(self.SRC), 'setup'))
+        import polib
+        del sys.path[0]
         self.info('Checking user manual translations...')
         srcbase = self.j(self.d(self.SRC), 'translations', 'manual')
-        import polib
         changes = defaultdict(set)
         for lang in os.listdir(srcbase):
             if lang.startswith('en_') or lang == 'en':
@@ -737,7 +739,7 @@ class GetTranslations(Translations):  # {{{
         subprocess.check_call(pofilter)
         errfiles = glob.glob(errors+os.sep+'*.po')
         if errfiles:
-            subprocess.check_call(['vim', '-f', '-p', '--']+errfiles)
+            subprocess.check_call([os.environ.get('EDITOR', 'vim'), '-f', '-p', '--']+errfiles)
             for f in errfiles:
                 with open(f, 'r+b') as f:
                     raw = f.read()
