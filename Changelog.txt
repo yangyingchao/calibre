@@ -23,6 +23,82 @@
 # - title by author
 # }}}
 
+{{{ 7.12.0 2024-05-30
+
+:: new features
+
+- [2067167] E-book polishing: Add option to download external resources (images/stylesheets/etc.)
+
+- Conversion: Add an option under Structure detection to automatically fill in blank alt attributes for images that have alt text in the image file metadata
+
+- [2067437] Content server: Use the book title as the filename for downloaded highlights
+
+- Review downloaded metadata dialog: Add a "Previous" button to go back to the last reviewed book
+
+:: bug fixes
+
+- Content server viewer: Fix the bottom of the text being cut off on mobile browsers when not in full screen mode. Unfortunately, this means the viewer now requires a browser no more than two years old.
+
+- [2067168] Kindle driver: Increase the size of the cover thumbnails sent to the Scribe
+
+- [1943495] Kindle output: Fix cover images that contain EXIF data without a rotation not displaying on the Kindle lockscreen
+
+- E-book viewer: Fix ruby tags not excluded when searching for text
+
+- [2067128] Content server viewer: Fix a regression in the previous release that broke searching
+
+:: improved recipes
+- Economist Espresso
+- Slate
+
+}}}
+
+{{{ 7.11.0 2024-05-24
+
+:: new features
+
+- Kindle driver: Add support for sending cover thumbnails to the Kindle Scribe
+
+- A new options under Preferences->Look & feel to draw covers with rounded corners
+
+- [2064674] Bulk metadata edit: Add a new tab where you can create rules to transform tags/authors/publishers for the selected books
+
+- [2065544] Tag browser context menu for Formats now has Open with menu items
+
+- [2064665] E-book viewer: When hovering over the top/bottom margin show a button indicating that a click will open the viewer controls. Can be configured via The Headers and footers section of the viewer Preferences.
+
+- Spell check dialog: Also show count of currently displayed words
+
+:: bug fixes
+
+- [2065249] E-book viewer: Fix searching not ignoring ruby text
+
+- Edit book: Save the state of the current book when opening a new book via File->Open book
+
+- [2064887] Edit book: Fix importing a list of words into a user dictionary not working
+
+- EPUB3 metadata: Do not fail to read metadata in the presence on invalid calibre user metadata in the OPF file with empty keys
+
+- Get books: Fix rules to map tags on adding books not being applied to books downloaded via Get books
+
+- [2064792] Spellcheck dialog: Move the checkbox to hide correctly spelled words with the rest of the checkboxes that filter the word list
+
+:: improved recipes
+- Slate
+- Wall Street Journal
+- London Review of Books
+- Economist
+- Bloomberg
+- Business Week
+- The World Ahead
+- National Geographic
+
+:: new recipes
+- Collider, Comic Book Archive, Make Use Of, MoviewWeb and ScreenRant by Spicy Poison
+- Lex Fridman Podcast by unkn0wn
+
+}}}
+
 {{{ 7.10.0 2024-05-03
 
 :: new features
