@@ -68,6 +68,8 @@ def render_highlight_as_text(hl, lines, as_markdown=False, link_prefix=None):
         spine_index = (1 + hl['spine_index']) * 2
         link = (link_prefix + quote(f'epubcfi(/{spine_index}{cfi})')).replace(')', '%29')
         date = f'[{date}]({link})'
+    if as_markdown:
+        date = f'*{date}*'
     lines.append(date)
     notes = hl.get('notes')
     if notes:
@@ -170,7 +172,7 @@ def render_note_line(line):
         yield prepare_string_for_xml(line)
         return
     pos = 0
-    for (s, e) in urls:
+    for s,e in urls:
         if s > pos:
             yield prepare_string_for_xml(line[pos:s])
         yield '<a href="{0}">{0}</a>'.format(prepare_string_for_xml(line[s:e], True))
@@ -183,10 +185,9 @@ def render_notes(notes, tag='p'):
     for line in notes.splitlines():
         if line:
             current_lines.append(''.join(render_note_line(line)))
-        else:
-            if current_lines:
-                yield '<{0}>{1}</{0}>'.format(tag, '\n'.join(current_lines))
-                current_lines = []
+        elif current_lines:
+            yield '<{0}>{1}</{0}>'.format(tag, '\n'.join(current_lines))
+            current_lines = []
     if current_lines:
         yield '<{0}>{1}</{0}>'.format(tag, '\n'.join(current_lines))
 
@@ -210,6 +211,7 @@ class AnnotsResultsDelegate(ResultsDelegate):
 
     add_ellipsis = False
     emphasize_text = False
+    has_icons = True
 
     def result_data(self, result):
         if not isinstance(result, dict):
@@ -225,7 +227,6 @@ class AnnotsResultsDelegate(ResultsDelegate):
         else:
             text = parts[0]
         return False, before, text, after, bool(result.get('annotation', {}).get('notes'))
-
 
 # }}}
 
@@ -269,7 +270,7 @@ def css_for_highlight_style(style):
     elif 'background-color' in style:
         ans = 'background-color: ' + style['background-color']
         if 'color' in style:
-            ans += '; color: ' + style["color"]
+            ans += '; color: ' + style['color']
     elif kind == 'decoration':
         which = style.get('which')
         if which is not None:
@@ -398,6 +399,8 @@ class ResultsList(QTreeWidget):
         self.currentItemChanged.connect(self.current_item_changed)
         self.number_of_results = 0
         self.item_map = []
+        self.icon_size = 12
+        self.setIconSize(QSize(self.icon_size, self.icon_size))
 
     def show_context_menu(self, pos):
         item = self.itemAt(pos)
@@ -439,6 +442,9 @@ class ResultsList(QTreeWidget):
             self.open_annotation.emit(r['book_id'], r['format'], r['annotation'])
 
     def set_results(self, results, emphasize_text):
+        from calibre.gui2.viewer.highlights import decoration_for_style
+        is_dark = is_dark_theme()
+        dpr = self.devicePixelRatioF()
         self.clear()
         self.delegate.emphasize_text = emphasize_text
         self.number_of_results = 0
@@ -464,6 +470,11 @@ class ResultsList(QTreeWidget):
                 item.setData(0, Qt.ItemDataRole.UserRole, result)
                 item.setData(0, Qt.ItemDataRole.UserRole + 1, self.number_of_results)
                 self.number_of_results += 1
+                a = result.get('annotation')
+                if a and (s := a.get('style')):
+                    dec = decoration_for_style(self.palette(), s, self.icon_size, dpr, is_dark)
+                    if dec:
+                        item.setData(0, Qt.ItemDataRole.DecorationRole, dec)
         if self.item_map:
             self.setCurrentItem(self.item_map[0])
 
@@ -883,7 +894,7 @@ class DetailsPanel(QWidget):
         paras = []
 
         def p(text, tag='p'):
-            paras.append('<{0}>{1}</{0}>'.format(tag, a(text)))
+            paras.append(f'<{tag}>{a(text)}</{tag}>')
 
         if annot['type'] == 'bookmark':
             p(annot['title'])

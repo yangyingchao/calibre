@@ -1,10 +1,11 @@
 __license__   = 'GPL v3'
 __copyright__ = '2008, Kovid Goyal <kovid at kovidgoyal.net>'
 
-""" The GUI """
+''' The GUI '''
 
 import glob
 import os
+import queue
 import signal
 import sys
 import threading
@@ -38,7 +39,9 @@ from qt.core import (
     QLocale,
     QNetworkProxyFactory,
     QObject,
+    QPainterPath,
     QPalette,
+    QRectF,
     QResource,
     QSettings,
     QSocketNotifier,
@@ -46,7 +49,8 @@ from qt.core import (
     Qt,
     QThread,
     QTimer,
-    QTranslator,
+    QToolBar,
+    QToolButton,
     QUrl,
     QWidget,
     pyqtSignal,
@@ -54,7 +58,7 @@ from qt.core import (
 )
 
 import calibre.gui2.pyqt6_compat as pqc
-from calibre import as_unicode, prints
+from calibre import as_unicode, prints, timed_print
 from calibre.constants import (
     DEBUG,
     __version__,
@@ -70,6 +74,7 @@ from calibre.constants import (
     isxp,
     numeric_version,
     plugins_loc,
+    sanitize_env_vars,
 )
 from calibre.constants import __appname__ as APP_UID
 from calibre.ebooks.metadata import MetaInformation
@@ -83,14 +88,14 @@ from calibre.utils.config_base import tweaks
 from calibre.utils.date import UNDEFINED_DATE
 from calibre.utils.file_type_icons import EXT_MAP
 from calibre.utils.img import set_image_allocation_limit
-from calibre.utils.localization import get_lang
+from calibre.utils.localization import get_lang, install_qt_translator
 from calibre.utils.resources import get_image_path as I
 from calibre.utils.resources import get_path as P
 from calibre.utils.resources import user_dir
-from polyglot import queue
-from polyglot.builtins import iteritems, string_or_bytes
+from calibre_extensions.progress_indicator import icon_from_name, set_icon_theme
 
 del pqc, geometry_for_restore_as_dict
+timed_print  # for plugin compat
 NO_URL_FORMATTING = QUrl.UrlFormattingOption.None_
 BOOK_DETAILS_DISPLAY_DEBOUNCE_DELAY = 100  # 100 ms is threshold for human visual response
 
@@ -135,6 +140,7 @@ class IconResourceManager:
         any_light = (self.user_any_theme_name + '-light') if self.user_any_theme_name else ''
         self.dark_theme_name = self.user_dark_theme_name or any_dark or self.default_dark_theme_name
         self.light_theme_name = self.user_light_theme_name or any_light or self.default_light_theme_name
+        # self.dump_available_icon_resource_names()
 
     @lru_cache(maxsize=4)
     def user_icon_theme_metadata(self, which):
@@ -169,14 +175,20 @@ class IconResourceManager:
     def user_theme_name(self):
         return self.active_user_theme_metadata.get('name', 'default')
 
+    def dump_available_icon_resource_names(self):
+        from qt.core import QDirIterator
+        it = QDirIterator(':', QDirIterator.IteratorFlag.Subdirectories)
+        while it.hasNext():
+            val = it.next()
+            if val.startswith(':/icons/calibre-'):
+                print(val)
+
     def initialize(self):
         if self.initialized:
             return
         self.icon_cache = {}
         self.initialized = True
         QResource.registerResource(P('icons.rcc', allow_user_override=False))
-        QIcon.setFallbackSearchPaths([])
-        QIcon.setThemeSearchPaths([':/icons'])
         self.override_icon_path = None
         q = os.path.join(user_dir, 'images')
         items = []
@@ -247,7 +259,7 @@ class IconResourceManager:
             icon = self.icon_cache[name] = self(name)
         return icon
 
-    def __call__(self, name):
+    def __call__(self, name: str, fallback: bytes = b'') -> QIcon:
         if isinstance(name, QIcon):
             return name
         if not name:
@@ -258,13 +270,8 @@ class IconResourceManager:
             qi = QIcon(self.overriden_icon_path(name))
             if qi.is_ok():
                 return qi
-        icon_name = os.path.splitext(name.replace('\\', '__').replace('/', '__'))[0]
-        ans = QIcon.fromTheme(icon_name)
-        if not ans.is_ok():
-            if 'user-any' in QIcon.themeName():
-                q = QIcon(f':/icons/calibre-default-{self.color_palette}/images/{name}')
-                if q.is_ok():
-                    ans = q
+        icon_name = name.replace('\\', '__').replace('/', '__')
+        ans = icon_from_name(icon_name, fallback)
         return ans
 
     def icon_as_png(self, name, as_bytearray=False, compression_level=0):
@@ -283,15 +290,8 @@ class IconResourceManager:
 
     def set_theme(self):
         self.icon_cache = {}
-        current = QIcon.themeName()
         is_dark = QApplication.instance().is_dark_theme
-        self.color_palette = 'dark' if is_dark else 'light'
-        new = self.dark_theme_name if is_dark else self.light_theme_name
-        if current == new and current not in (self.default_dark_theme_name, self.default_light_theme_name):
-            # force reload of user icons by first changing theme to default and
-            # then to user
-            QIcon.setThemeName(self.default_dark_theme_name if QApplication.instance().is_dark_theme else self.default_light_theme_name)
-        QIcon.setThemeName(new)
+        set_icon_theme(is_dark, bool(self.user_dark_theme_name), bool(self.user_light_theme_name), bool(self.user_any_theme_name))
 
 
 icon_resource_manager = IconResourceManager()
@@ -299,6 +299,16 @@ QIcon.ic = icon_resource_manager
 QIcon.icon_as_png = icon_resource_manager.icon_as_png
 QIcon.is_ok = lambda self: not self.isNull() and len(self.availableSizes()) > 0
 QIcon.cached_icon = icon_resource_manager.cached_icon
+qtb_init = QToolBar.__init__
+
+
+def configure_toolbar_extension_button(self, parent=None):
+    qtb_init(self, parent)
+    if teb := self.findChild(QToolButton, name='qt_toolbar_ext_button'):
+        teb.setToolTip(_('Show more buttons'))
+
+
+QToolBar.__init__ = configure_toolbar_extension_button
 
 
 # Setup gprefs {{{
@@ -409,23 +419,30 @@ def create_defs():
     defs['tag_browser_old_look'] = False
     defs['tag_browser_hide_empty_categories'] = False
     defs['tag_browser_always_autocollapse'] = False
+    defs['tag_browser_restore_tree_expansion'] = False
     defs['tag_browser_allow_keyboard_focus'] = False
     defs['book_list_tooltips'] = True
     defs['show_layout_buttons'] = False
+    # defs['show_sb_preference_button'] = False
+    defs['show_sb_all_actions_button'] = False
     defs['bd_show_cover'] = True
     defs['bd_overlay_cover_size'] = False
     defs['tags_browser_category_icons'] = {}
+    defs['tags_browser_value_icons'] = {}
     defs['cover_browser_reflections'] = True
+    defs['cover_browser_max_font_size'] = 11
     defs['book_list_extra_row_spacing'] = 0
     defs['refresh_book_list_on_bulk_edit'] = True
     defs['cover_grid_width'] = 0
     defs['cover_grid_height'] = 0
     defs['cover_grid_spacing'] = 0
-    defs['cover_grid_color'] = (80, 80, 80)
+    defs['cover_grid_background'] = {
+        'migrated': False, 'light': (80, 80, 80), 'dark': (45, 45, 45), 'light_texture': None, 'dark_texture': None}
     defs['cover_grid_cache_size_multiple'] = 5
     defs['cover_grid_disk_cache_size'] = 2500
     defs['cover_grid_show_title'] = False
-    defs['cover_grid_texture'] = None
+    defs['cover_corner_radius'] = 0
+    defs['cover_corner_radius_unit'] = 'px'
     defs['show_vl_tabs'] = False
     defs['vl_tabs_closable'] = True
     defs['show_highlight_toggle_button'] = False
@@ -461,7 +478,7 @@ def create_defs():
     defs['books_autoscroll_time'] = 2.0
     defs['edit_metadata_single_use_2_cols_for_custom_fields'] = True
     defs['edit_metadata_elide_labels'] = True
-    defs['edit_metadata_elision_point'] = "right"
+    defs['edit_metadata_elision_point'] = 'right'
     defs['edit_metadata_bulk_cc_label_length'] = 25
     defs['edit_metadata_single_cc_label_length'] = 12
     defs['edit_metadata_templates_only_F2_on_booklist'] = False
@@ -478,6 +495,43 @@ def create_defs():
     defs['dark_palettes'] = {}
     defs['light_palettes'] = {}
     defs['saved_layouts'] = {}
+    defs['book_details_note_link_icon_width'] = 1.0
+    defs['tag_browser_show_category_icons'] = True
+    defs['tag_browser_show_value_icons'] = True
+    defs['template_editor_run_as_you_type'] = True
+    defs['template_editor_show_all_selected_books'] = True
+    defs['bookshelf_disk_cache_size'] = 3000
+    defs['bookshelf_cache_size_multiple'] = 5
+    defs['bookshelf_shadow'] = True
+    defs['bookshelf_thumbnail'] = 'crops'
+    defs['bookshelf_thumbnail_opacity'] = 30
+    defs['bookshelf_variable_height'] = True
+    defs['bookshelf_fade_time'] = 400
+    defs['bookshelf_hover'] = 'shift'
+    defs['bookshelf_up_to_down'] = False
+    defs['bookshelf_height'] = 119
+    defs['bookshelf_make_space_for_second_line'] = False
+    defs['bookshelf_emblem_position'] = 'auto'
+    defs['bookshelf_divider_text_right'] = False
+    defs['bookshelf_start_with_divider'] = False
+    defs['bookshelf_divider_style'] = 'text'
+    defs['bookshelf_theme_override'] = 'none'
+    defs['bookshelf_use_custom_background'] = False
+    defs['bookshelf_custom_background'] = {
+        'light': (255, 255, 255), 'dark': (64, 64, 64), 'light_texture': None, 'dark_texture': None
+    }
+    defs['bookshelf_min_font_multiplier'] = 0.75
+    defs['bookshelf_max_font_multiplier'] = 1.3
+    defs['bookshelf_outline_width'] = 0
+    defs['bookshelf_font'] = {'family': None, 'style': None}
+    defs['bookshelf_use_custom_colors'] = False
+    defs['bookshelf_custom_colors'] = {
+        'light': {}, 'dark': {},
+    }
+
+    # Migrate beta bookshelf_thumbnail
+    if isinstance(btv := gprefs.get('bookshelf_thumbnail'), bool):
+        gprefs['bookshelf_thumbnail'] = 'full' if btv else 'none'
 
     def migrate_tweak(tweak_name, pref_name):
         # If the tweak has been changed then leave the tweak in the file so
@@ -612,7 +666,6 @@ def _config():  # {{{
 
 
 config = _config()
-
 # }}}
 
 QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, config_dir)
@@ -621,12 +674,8 @@ QSettings.setDefaultFormat(QSettings.Format.IniFormat)
 
 
 def default_author_link():
-    from calibre.ebooks.metadata.book.render import DEFAULT_AUTHOR_LINK
-    ans = gprefs.get('default_author_link')
-    if ans == 'https://en.wikipedia.org/w/index.php?search={author}':
-        # The old default value for this setting
-        ans = DEFAULT_AUTHOR_LINK
-    return ans or DEFAULT_AUTHOR_LINK
+    from calibre.ebooks.metadata.book.render import resolve_default_author_link
+    return resolve_default_author_link(gprefs.get('default_author_link'))
 
 
 def available_heights():
@@ -662,7 +711,7 @@ def is_widescreen():
     if _is_widescreen is None:
         try:
             _is_widescreen = available_width()/available_height() > 1.4
-        except:
+        except Exception:
             _is_widescreen = False
     return _is_widescreen
 
@@ -839,7 +888,7 @@ class FunctionDispatcher(QObject):
     def dispatch(self, q, args, kwargs):
         try:
             res = self.func(*args, **kwargs)
-        except:
+        except Exception:
             res = None
         q.put(res)
 
@@ -870,7 +919,7 @@ class GetMetadata(QObject):
         from calibre.ebooks.metadata.meta import metadata_from_formats
         try:
             mi = metadata_from_formats(*args, **kwargs)
-        except:
+        except Exception:
             mi = MetaInformation('', [_('Unknown')])
         self.metadataf.emit(id, mi)
 
@@ -878,7 +927,7 @@ class GetMetadata(QObject):
         from calibre.ebooks.metadata.meta import get_metadata
         try:
             mi = get_metadata(*args, **kwargs)
-        except:
+        except Exception:
             mi = MetaInformation('', [_('Unknown')])
         self.metadata.emit(id, mi)
 
@@ -998,8 +1047,11 @@ def choose_files_and_remember_all_files(
 
 
 def is_dark_theme():
-    pal = QApplication.instance().palette()
-    return pal.is_dark_theme()
+    app = QApplication.instance()
+    if app is not None:
+        pal = QApplication.instance().palette()
+        return pal.is_dark_theme()
+    return False
 
 
 def choose_osx_app(window, name, title, default_dir='/Applications'):
@@ -1016,7 +1068,7 @@ def pixmap_to_data(pixmap, format='JPEG', quality=None):
     Return the QPixmap pixmap as a string saved in the specified format.
     '''
     if quality is None:
-        if format.upper() == "PNG":
+        if format.upper() == 'PNG':
             # For some reason on windows with Qt 5.6 using a quality of 90
             # generates invalid PNG data. Many other quality values work
             # but we use -1 for the default quality which is most likely to
@@ -1063,22 +1115,6 @@ class ResizableDialog(QDialog):
         nh = min(self.height(), nh)
         nw = min(self.width(), nw)
         self.resize(nw, nh)
-
-
-class Translator(QTranslator):
-    '''
-    Translator to load translations for strings in Qt from the calibre
-    translations. Does not support advanced features of Qt like disambiguation
-    and plural forms.
-    '''
-
-    def translate(self, *args, **kwargs):
-        try:
-            src = str(args[1])
-        except:
-            return ''
-        t = _
-        return t(src)
 
 
 gui_thread = None
@@ -1171,7 +1207,10 @@ class Application(QApplication):
     shutdown_signal_received = pyqtSignal()
     palette_changed = pyqtSignal()
 
-    def __init__(self, args=(), force_calibre_style=False, override_program_name=None, headless=False, color_prefs=gprefs, windows_app_uid=None):
+    def __init__(
+        self, args=(), force_calibre_style=False, override_program_name=None, headless=False, color_prefs=gprefs, windows_app_uid=None,
+        should_handle_calibre_urls=False
+    ):
         if not args:
             args = sys.argv[:1]
         args = [args[0]]
@@ -1192,9 +1231,15 @@ class Application(QApplication):
             args.extend(('-platformpluginpath', plugins_loc, '-platform', os.environ.get('CALIBRE_HEADLESS_PLATFORM', 'headless')))
         else:
             args.extend(self.palette_manager.args_to_qt)
+        # We disable GPU acceleration as it causes crashes/black screen in some Windows systems and
+        # isnt really needed for performance for our use cases.
+        if not tweaks['qt_webengine_uses_gpu']:
+            args.extend(('--webEngineArgs', '--disable-gpu'))
         self.headless = headless
         from calibre_extensions import progress_indicator
         self.pi = progress_indicator
+        self._file_open_paths = []
+        self._file_open_lock = RLock()
         QApplication.setOrganizationName('calibre-ebook.com')
         QApplication.setOrganizationDomain(QApplication.organizationName())
         QApplication.setApplicationVersion(__version__)
@@ -1202,7 +1247,11 @@ class Application(QApplication):
         if override_program_name and hasattr(QApplication, 'setDesktopFileName'):
             QApplication.setDesktopFileName(override_program_name)
         QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)  # needed for webengine
+        self._store_args_to_prevent_gc = args  # Qt barfs is python garbage collects these
         QApplication.__init__(self, args)
+        if should_handle_calibre_urls:
+            # See https://bugreports.qt.io/browse/QTBUG-134316
+            QDesktopServices.setUrlHandler('calibre', self.handle_calibre_url)
         set_image_allocation_limit()
         self.palette_manager.initialize()
         icon_resource_manager.initialize()
@@ -1230,6 +1279,7 @@ class Application(QApplication):
             self.setup_unix_signals()
         if islinux or isbsd:
             self.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeMenuBar, 'CALIBRE_NO_NATIVE_MENUBAR' in os.environ)
+        self.setAttribute(Qt.ApplicationAttribute.AA_DontShowIconsInMenus, 'CALIBRE_NO_ICONS_IN_MENUS' in os.environ)
         self.palette_manager.setup_styles()
         self.setup_ui_font()
         fi = gprefs['font']
@@ -1243,7 +1293,7 @@ class Application(QApplication):
             # Qt 5.10.1 on Linux resets the global font on first event loop tick.
             # So workaround it by setting the font once again in a timer.
             font_from_prefs = self.font()
-            QTimer.singleShot(0, lambda : QApplication.setFont(font_from_prefs))
+            QTimer.singleShot(0, lambda: QApplication.setFont(font_from_prefs))
         self.line_height = max(12, QFontMetrics(self.font()).lineSpacing())
 
         dl = QLocale(get_lang())
@@ -1251,11 +1301,8 @@ class Application(QApplication):
             QLocale.setDefault(dl)
         global gui_thread, qt_app
         gui_thread = QThread.currentThread()
-        self._translator = None
         self.load_translations()
         qt_app = self
-        self._file_open_paths = []
-        self._file_open_lock = RLock()
 
         if not ismacos:
             # OS X uses a native color dialog that does not support custom
@@ -1282,6 +1329,10 @@ class Application(QApplication):
             cft = cursor_blink_time()
             if cft >= 0:
                 self.setCursorFlashTime(int(cft))
+
+    @property
+    def using_calibre_style(self) -> bool:
+        return self.palette_manager.using_calibre_style
 
     @property
     def is_dark_theme(self):
@@ -1326,10 +1377,9 @@ class Application(QApplication):
                 f.setFamily('Segoe UI')
                 f.setPointSize(9)
                 QApplication.setFont(f)
-        else:
-            if q == ('Sans Serif', 9):  # Hard coded Qt settings, no user preference detected
-                f.setPointSize(10)
-                QApplication.setFont(f)
+        elif q == ('Sans Serif', 9):  # Hard coded Qt settings, no user preference detected
+            f.setPointSize(10)
+            QApplication.setFont(f)
         f = QFontInfo(f)
         self.original_font = (f.family(), f.pointSize(), f.weight(), f.italic(), 100)
 
@@ -1371,34 +1421,47 @@ class Application(QApplication):
     def _send_file_open_events(self):
         with self._file_open_lock:
             if self._file_open_paths:
-                self.file_event_hook(self._file_open_paths)
+                if callable(self.file_event_hook):
+                    self.file_event_hook(self._file_open_paths)
                 self._file_open_paths = []
 
+    def get_pending_file_open_events(self):
+        with self._file_open_lock:
+            ans = self._file_open_paths
+            self._file_open_paths = []
+        return ans
+
     def load_translations(self):
-        if self._translator is not None:
-            self.removeTranslator(self._translator)
-        self._translator = Translator(self)
-        self.installTranslator(self._translator)
+        install_qt_translator()
 
     def event(self, e):
         etype = e.type()
-        if callable(self.file_event_hook) and etype == QEvent.Type.FileOpen:
-            url = e.url().toString(QUrl.ComponentFormattingOption.FullyEncoded)
-            if url and url.startswith('calibre://'):
+        if etype == QEvent.Type.FileOpen:
+            added_event = False
+            qurl = e.url()
+            if qurl.isLocalFile():
                 with self._file_open_lock:
-                    self._file_open_paths.append(url)
-                QTimer.singleShot(1000, self._send_file_open_events)
-                return True
-            path = str(e.file())
-            if os.access(path, os.R_OK):
-                with self._file_open_lock:
-                    self._file_open_paths.append(path)
+                    path = qurl.toLocalFile()
+                    if os.access(path, os.R_OK):
+                        self._file_open_paths.append(path)
+                    added_event = True
+            elif qurl.isValid():
+                if qurl.scheme() == 'calibre':
+                    self.handle_calibre_url(qurl)
+            if added_event:
                 QTimer.singleShot(1000, self._send_file_open_events)
             return True
         else:
             if etype == QEvent.Type.ApplicationPaletteChange:
                 self.palette_manager.on_qt_palette_change()
             return QApplication.event(self, e)
+
+    @pyqtSlot(QUrl)
+    def handle_calibre_url(self, qurl):
+        url = qurl.toString(QUrl.ComponentFormattingOption.FullyEncoded)
+        with self._file_open_lock:
+            self._file_open_paths.append(url)
+        QTimer.singleShot(100, self._send_file_open_events)
 
     @property
     def current_custom_colors(self):
@@ -1445,51 +1508,11 @@ class Application(QApplication):
 _store_app = None
 
 
-@contextmanager
-def sanitize_env_vars():
-    '''Unset various environment variables that calibre uses. This
-    is needed to prevent library conflicts when launching external utilities.'''
-
-    if islinux and isfrozen:
-        env_vars = {
-            'LD_LIBRARY_PATH':'/lib', 'OPENSSL_MODULES': '/lib/ossl-modules',
-        }
-    elif iswindows:
-        env_vars = {'OPENSSL_MODULES': None}
-    elif ismacos:
-        env_vars = {k:None for k in (
-                    'FONTCONFIG_FILE FONTCONFIG_PATH SSL_CERT_FILE OPENSSL_ENGINES OPENSSL_MODULES').split()}
-    else:
-        env_vars = {}
-
-    originals = {x:os.environ.get(x, '') for x in env_vars}
-    changed = {x:False for x in env_vars}
-    for var, suffix in env_vars.items():
-        paths = [x for x in originals[var].split(os.pathsep) if x]
-        npaths = [] if suffix is None else [x for x in paths if x != (sys.frozen_path + suffix)]
-        if len(npaths) < len(paths):
-            if npaths:
-                os.environ[var] = os.pathsep.join(npaths)
-            else:
-                del os.environ[var]
-            changed[var] = True
-
-    try:
-        yield
-    finally:
-        for var, orig in originals.items():
-            if changed[var]:
-                if orig:
-                    os.environ[var] = orig
-                elif var in os.environ:
-                    del os.environ[var]
-
-
 SanitizeLibraryPath = sanitize_env_vars  # For old plugins
 
 
 def open_url(qurl):
-    if isinstance(qurl, string_or_bytes):
+    if isinstance(qurl, (str, bytes)):
         qurl = QUrl(qurl)
     scheme = qurl.scheme().lower() or 'file'
     import fnmatch
@@ -1517,7 +1540,7 @@ def open_url(qurl):
             # QDesktopServices::openUrl()
             ensure_app()
             cmd = ['xdg-open', qurl.toLocalFile() if qurl.isLocalFile() else qurl.toString(QUrl.ComponentFormattingOption.FullyEncoded)]
-            if isfrozen and QApplication.instance().platformName() == "wayland":
+            if isfrozen and QApplication.instance().platformName() == 'wayland':
                 # See https://bugreports.qt.io/browse/QTBUG-119438
                 run_cmd(cmd)
                 ok = True
@@ -1535,7 +1558,7 @@ def open_url(qurl):
 
 
 def safe_open_url(qurl):
-    if isinstance(qurl, string_or_bytes):
+    if isinstance(qurl, (str, bytes)):
         qurl = QUrl(qurl)
     if qurl.scheme() in ('', 'file'):
         path = qurl.toLocalFile()
@@ -1571,6 +1594,7 @@ def open_local_file(path):
 
 _ea_lock = Lock()
 
+
 def simple_excepthook(t, v, tb):
     return sys.__excepthook__(t, v, tb)
 
@@ -1580,9 +1604,15 @@ def ensure_app(headless=True):
     with _ea_lock:
         if _store_app is None and QApplication.instance() is None:
             args = sys.argv[:1]
+            if not headless:
+                _store_app = Application([])
+                sys.excepthook = simple_excepthook
+                return
             has_headless = ismacos or islinux or isbsd
             if headless and has_headless:
                 args += ['-platformpluginpath', plugins_loc, '-platform', os.environ.get('CALIBRE_HEADLESS_PLATFORM', 'headless')]
+                # WebEngine GPU not needed in headless mode
+                args += ['--webEngineArgs', '--disable-gpu']
                 if ismacos:
                     os.environ['QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM'] = '1'
             if headless and iswindows:
@@ -1598,7 +1628,7 @@ def ensure_app(headless=True):
             # unhandled python exception in a slot or virtual method. Since ensure_app()
             # is used in worker processes for background work like rendering html
             # or running a headless browser, we circumvent this as I really
-            # dont feel like going through all the code and making sure no
+            # don't feel like going through all the code and making sure no
             # unhandled exceptions ever occur. All the actual GUI apps already
             # override sys.excepthook with a proper error handler.
             sys.excepthook = simple_excepthook
@@ -1659,7 +1689,7 @@ def elided_text(text, font=None, width=300, pos='middle'):
         font = QApplication.instance().font()
     fm = (font if isinstance(font, QFontMetrics) else QFontMetrics(font))
     delta = 4
-    ellipsis = '\u2026'
+    ellipsis = '…'
 
     def remove_middle(x):
         mid = len(x) // 2
@@ -1678,7 +1708,7 @@ if is_running_from_develop:
 
 def event_type_name(ev_or_etype):
     etype = ev_or_etype.type() if isinstance(ev_or_etype, QEvent) else ev_or_etype
-    for name, num in iteritems(vars(QEvent)):
+    for name, num in vars(QEvent).items():
         if num == etype:
             return name
     return 'UnknownEventType'
@@ -1719,16 +1749,7 @@ def make_view_use_window_background(view):
     return view
 
 
-def timed_print(*a, **kw):
-    if not DEBUG:
-        return
-    from time import monotonic
-    if not hasattr(timed_print, 'startup_time'):
-        timed_print.startup_time = monotonic()
-    print(f'[{monotonic() - timed_print.startup_time:.2f}]', *a, **kw)
-
-
-def local_path_for_resource(qurl: QUrl, base_qurl: 'QUrl | None' = None) -> str:
+def local_path_for_resource(qurl: QUrl, base_qurl: QUrl | None = None) -> str:
     if base_qurl and qurl.isRelative():
         qurl = base_qurl.resolved(qurl)
 
@@ -1746,7 +1767,7 @@ def raise_and_focus(self: QWidget) -> None:
 
 def raise_without_focus(self: QWidget) -> None:
     if QApplication.instance().platformName() == 'wayland':
-        # On fucking Wayland, we cant raise a dialog without also giving it
+        # On fucking Wayland, we can't raise a dialog without also giving it
         # keyboard focus. What a joke.
         self.raise_and_focus()
     else:
@@ -1755,3 +1776,48 @@ def raise_without_focus(self: QWidget) -> None:
 
 QWidget.raise_and_focus = raise_and_focus
 QWidget.raise_without_focus = raise_without_focus
+
+
+@contextmanager
+def clip_border_radius(painter, rect):
+    painter.save()
+    r = gprefs['cover_corner_radius']
+    if r > 0:
+        pp = QPainterPath()
+        pp.addRoundedRect(QRectF(rect), r, r, Qt.SizeMode.RelativeSize if gprefs['cover_corner_radius_unit'] == '%' else Qt.SizeMode.AbsoluteSize)
+        painter.setClipPath(pp)
+    try:
+        yield
+    finally:
+        painter.restore()
+
+
+def resolve_custom_background(name: str ,which='color', for_dark: bool | None = None, use_defaults: bool = False):
+    if use_defaults:
+        s = gprefs.defaults[name]
+    else:
+        s = gprefs[name]
+        if name == 'cover_grid_background' and not s.get('migrated'):
+            s = s.copy()
+            s['migrated'] = True
+            legacy = gprefs.pop('cover_grid_color', None)
+            if legacy is not None and tuple(legacy) != (80, 80, 80):
+                s['light'] = s['dark'] = legacy
+            legacy = gprefs.pop('cover_grid_texture', None)
+            if legacy is not None:
+                s['light_texture'] = s['dark_texture'] = legacy
+            gprefs[name] = s
+    if for_dark is None:
+        for_dark = QApplication.instance().is_dark_theme
+    key = 'dark' if for_dark else 'light'
+    if which == 'color':
+        return s[key]
+    return s[f'{key}_texture']
+
+
+def resolve_grid_color(which='color', for_dark: bool | None = None, use_defaults: bool = False):
+    return resolve_custom_background('cover_grid_background', which=which, for_dark=for_dark, use_defaults=use_defaults)
+
+
+def resolve_bookshelf_color(which='color', for_dark: bool | None = None, use_defaults: bool = False):
+    return resolve_custom_background('bookshelf_custom_background', which=which, for_dark=for_dark, use_defaults=use_defaults)

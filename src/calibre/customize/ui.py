@@ -7,13 +7,16 @@ import shutil
 import sys
 import traceback
 from collections import defaultdict
+from collections.abc import Iterator
 from itertools import chain, repeat
 
 from calibre.constants import DEBUG, ismacos, numeric_version, system_plugins_loc
 from calibre.customize import (
+    AIProviderPlugin,
     CatalogPlugin,
     EditBookToolPlugin,
     FileTypePlugin,
+    InterfaceActionBase,
     InvalidPlugin,
     LibraryClosedPlugin,
     MetadataReaderPlugin,
@@ -33,10 +36,19 @@ from calibre.devices.interface import DevicePlugin
 from calibre.ebooks.metadata import MetaInformation
 from calibre.ebooks.metadata.sources.base import Source
 from calibre.utils.config import Config, ConfigProxy, OptionParser, make_config_dir, plugin_dir
-from polyglot.builtins import iteritems, itervalues
 
 builtin_names = frozenset(p.name for p in builtin_plugins)
-BLACKLISTED_PLUGINS = frozenset({'Marvin XD', 'iOS reader applications'})
+BLACKLISTED_PLUGINS = frozenset({
+    'Marvin XD',
+    'iOS reader applications',
+
+    # Subsumed by builtin functionality
+    'KoboTouchExtended',
+    'KePub Input',
+    'KePub Output',
+    'KePub Metadata Reader',
+    'KePub Metadata Writer',
+})
 
 
 def zip_value(iterable, value):
@@ -74,24 +86,29 @@ def load_plugin(path_to_zip_file):  # {{{
     :return: A :class:`Plugin` instance.
     '''
     return loader.load(path_to_zip_file)
-
 # }}}
 
+
 # Enable/disable plugins {{{
+
+def disable_plugin_by_name(name: str) -> None:
+    dp = config['disabled_plugins']
+    dp.add(name)
+    config['disabled_plugins'] = dp
+    ep = config['enabled_plugins']
+    if name in ep:
+        ep.remove(name)
+        config['enabled_plugins'] = ep
 
 
 def disable_plugin(plugin_or_name):
     x = getattr(plugin_or_name, 'name', plugin_or_name)
     plugin = find_plugin(x)
-    if not plugin.can_be_disabled:
-        raise ValueError('Plugin %s cannot be disabled'%x)
-    dp = config['disabled_plugins']
-    dp.add(x)
-    config['disabled_plugins'] = dp
-    ep = config['enabled_plugins']
-    if x in ep:
-        ep.remove(x)
-    config['enabled_plugins'] = ep
+    if plugin is None:
+        raise ValueError(f'No plugin named: {x} found')
+    if not can_be_disabled(plugin):
+        raise ValueError(f'Plugin {x} cannot be disabled')
+    disable_plugin_by_name(x)
 
 
 def enable_plugin(plugin_or_name):
@@ -103,6 +120,26 @@ def enable_plugin(plugin_or_name):
     ep = config['enabled_plugins']
     ep.add(x)
     config['enabled_plugins'] = ep
+
+
+def is_internal_plugin(plugin_or_name):
+    x = getattr(plugin_or_name, 'name', plugin_or_name)
+    plugin = find_plugin(x)
+    return (plugin.installation_type is PluginInstallationType.BUILTIN
+            and isinstance(plugin, (
+                                    InterfaceActionBase,
+                                    PreferencesPlugin,
+                                    InputFormatPlugin,
+                                    OutputFormatPlugin,
+                                    InputProfile,
+                                    OutputProfile,
+                                )))
+
+
+def can_be_disabled(plugin_or_name):
+    x = getattr(plugin_or_name, 'name', plugin_or_name)
+    plugin = find_plugin(x)
+    return not is_internal_plugin(x) and plugin.can_be_disabled
 
 
 def restore_plugin_state_to_default(plugin_or_name):
@@ -122,15 +159,15 @@ default_disabled_plugins = {
 }
 
 
-def is_disabled(plugin):
-    if plugin.name in config['enabled_plugins']:
+def is_disabled(plugin_or_name):
+    name = getattr(plugin_or_name, 'name', plugin_or_name)
+    if name in config['enabled_plugins']:
         return False
-    return plugin.name in config['disabled_plugins'] or \
-            plugin.name in default_disabled_plugins
+    return name in config['disabled_plugins'] or name in default_disabled_plugins
 # }}}
 
-# File type plugins {{{
 
+# File type plugins {{{
 
 _on_import           = {}
 _on_postimport       = {}
@@ -197,8 +234,8 @@ def _run_filetype_plugins(path_to_file, ft=None, occasion='preprocess'):
                 pass
             try:
                 nfp = plugin.run(nfp) or nfp
-            except:
-                print('Running file type plugin %s failed with traceback:'%plugin.name, file=oe)
+            except Exception:
+                print(f'Running file type plugin {plugin.name} failed with traceback:', file=oe)
                 traceback.print_exc(file=oe)
         sys.stdout, sys.stderr = oo, oe
     def x(j):
@@ -268,8 +305,8 @@ def run_plugins_on_postadd(db, book_id, fmt_map):
 
 # }}}
 
-# Plugin customization {{{
 
+# Plugin customization {{{
 
 def customize_plugin(plugin, custom):
     d = config['plugin_customization']
@@ -282,8 +319,8 @@ def plugin_customization(plugin):
 
 # }}}
 
-# Input/Output profiles {{{
 
+# Input/Output profiles {{{
 
 def input_profiles():
     for plugin in _initialized_plugins:
@@ -297,8 +334,8 @@ def output_profiles():
             yield plugin
 # }}}
 
-# Interface Actions # {{{
 
+# Interface Actions # {{{
 
 def interface_actions():
     customization = config['plugin_customization']
@@ -309,8 +346,8 @@ def interface_actions():
                 yield plugin
 # }}}
 
-# Preferences Plugins # {{{
 
+# Preferences Plugins # {{{
 
 def preferences_plugins():
     customization = config['plugin_customization']
@@ -321,8 +358,8 @@ def preferences_plugins():
                 yield plugin
 # }}}
 
-# Library Closed Plugins # {{{
 
+# Library Closed Plugins # {{{
 
 def available_library_closed_plugins():
     customization = config['plugin_customization']
@@ -341,8 +378,20 @@ def has_library_closed_plugins():
     return False
 # }}}
 
-# Store Plugins # {{{
 
+# AI Provider Plugins {{{
+def available_ai_provider_plugins() -> Iterator[AIProviderPlugin]:
+    customization = config['plugin_customization']
+    for plugin in _initialized_plugins:
+        if isinstance(plugin, AIProviderPlugin):
+            if not is_disabled(plugin):
+                plugin.site_customization = customization.get(plugin.name, '')
+                yield plugin
+
+# }}}
+
+
+# Store Plugins # {{{
 
 def store_plugins():
     customization = config['plugin_customization']
@@ -373,8 +422,8 @@ def available_stores():
 
 # }}}
 
-# Metadata read/write {{{
 
+# Metadata read/write {{{
 
 _metadata_readers = {}
 _metadata_writers = {}
@@ -400,7 +449,7 @@ def reread_metadata_plugins():
         return order, plugin.name
 
     for group in (_metadata_readers, _metadata_writers):
-        for plugins in itervalues(group):
+        for plugins in group.values():
             if len(plugins) > 1:
                 plugins.sort(key=key)
 
@@ -480,7 +529,7 @@ def get_file_type_metadata(stream, ftype):
                             stream.seek(0)
                         mi = plugin.get_metadata(stream, ftype.lower().strip())
                         break
-                    except:
+                    except Exception:
                         traceback.print_exc()
                         continue
     return mi
@@ -499,7 +548,7 @@ def set_file_type_metadata(stream, mi, ftype, report_error=None):
                         plugin.site_customization = customization.get(plugin.name, '')
                         plugin.set_metadata(stream, mi, ftype.lower().strip())
                         break
-                    except:
+                    except Exception:
                         if report_error is None:
                             from calibre import prints
                             prints('Failed to set metadata for the', ftype.upper(), 'format of:', getattr(mi, 'title', ''), file=sys.stderr)
@@ -517,18 +566,18 @@ def can_set_metadata(ftype):
 
 # }}}
 
-# Add/remove plugins {{{
 
+# Add/remove plugins {{{
 
 def add_plugin(path_to_zip_file):
     make_config_dir()
     plugin = load_plugin(path_to_zip_file)
     if plugin.name in builtin_names:
         raise NameConflict(
-            'A builtin plugin with the name %r already exists' % plugin.name)
+            f'A builtin plugin with the name {plugin.name!r} already exists')
     if plugin.name in get_system_plugins():
         raise NameConflict(
-            'A system plugin with the name %r already exists' % plugin.name)
+            f'A system plugin with the name {plugin.name!r} already exists')
     plugin = initialize_plugin(plugin, path_to_zip_file, PluginInstallationType.EXTERNAL)
     plugins = config['plugins']
     zfp = os.path.join(plugin_dir, plugin.name+'.zip')
@@ -554,7 +603,7 @@ def remove_plugin(plugin_or_name):
             zfp = plugins[name]
             if os.path.exists(zfp):
                 os.remove(zfp)
-        except:
+        except Exception:
             pass
         plugins.pop(name)
     config['plugins'] = plugins
@@ -563,8 +612,8 @@ def remove_plugin(plugin_or_name):
 
 # }}}
 
-# Input/Output format plugins {{{
 
+# Input/Output format plugins {{{
 
 def input_format_plugins():
     for plugin in _initialized_plugins:
@@ -621,8 +670,8 @@ def available_output_formats():
 
 # }}}
 
-# Catalog plugins {{{
 
+# Catalog plugins {{{
 
 def catalog_plugins():
     for plugin in _initialized_plugins:
@@ -646,8 +695,8 @@ def plugin_for_catalog_format(fmt):
 
 # }}}
 
-# Device plugins {{{
 
+# Device plugins {{{
 
 def device_plugins(include_disabled=False):
     for plugin in _initialized_plugins:
@@ -660,6 +709,13 @@ def device_plugins(include_disabled=False):
                     yield plugin
 
 
+def usbms_plugins(include_disabled=True):
+    from calibre.devices.usbms.driver import USBMS
+    for plugin in device_plugins(include_disabled):
+        if isinstance(plugin, USBMS) and plugin.name not in ('Folder Device Interface', 'User Defined USB driver'):
+            yield plugin
+
+
 def disabled_device_plugins():
     for plugin in _initialized_plugins:
         if isinstance(plugin, DevicePlugin):
@@ -668,8 +724,8 @@ def disabled_device_plugins():
                     yield plugin
 # }}}
 
-# Metadata sources2 {{{
 
+# Metadata sources2 {{{
 
 def metadata_plugins(capabilities):
     capabilities = frozenset(capabilities)
@@ -693,15 +749,15 @@ def patch_metadata_plugins(possibly_updated_plugins):
             if pup is not None:
                 if pup.version > plugin.version and pup.minimum_calibre_version <= numeric_version:
                     patches[i] = pup(None)
-                    # Metadata source plugins dont use initialize() but that
+                    # Metadata source plugins don't use initialize() but that
                     # might change in the future, so be safe.
                     patches[i].initialize()
-    for i, pup in iteritems(patches):
+    for i, pup in patches.items():
         _initialized_plugins[i] = pup
 # }}}
 
-# Editor plugins {{{
 
+# Editor plugins {{{
 
 def all_edit_book_tool_plugins():
     for plugin in _initialized_plugins:
@@ -709,13 +765,13 @@ def all_edit_book_tool_plugins():
             yield plugin
 # }}}
 
-# Initialize plugins {{{
 
+# Initialize plugins {{{
 
 _initialized_plugins = []
 
 
-def initialize_plugin(plugin, path_to_zip_file, installation_type):
+def initialize_plugin(plugin, path_to_zip_file=None, installation_type=PluginInstallationType.BUILTIN):
     try:
         p = plugin(path_to_zip_file)
         p.installation_type = installation_type
@@ -764,6 +820,15 @@ def initialize_plugins(perf=False):
     for p in system_conflicts:
         system_plugins.pop(p, None)
     external_plugins = config['plugins'].copy()
+
+    if 'KoboTouchExtended' in external_plugins and is_disabled('KoboTouch') and not is_disabled('KoboTouchExtended'):
+        # We disable KoboTouchExtended and re-enable KoboTouch so that the Kobo
+        # device keeps working even though KoboTouchExtended is blacklisted.
+        try:
+            disable_plugin_by_name('KoboTouchExtended')
+            enable_plugin('KoboTouch')
+        except Exception:
+            traceback.print_exc()
     for name in BLACKLISTED_PLUGINS:
         external_plugins.pop(name, None)
         system_plugins.pop(name, None)
@@ -798,7 +863,7 @@ def initialize_plugins(perf=False):
             if perf:
                 times[plugin.name] = time.time() - st
             _initialized_plugins.append(plugin)
-        except:
+        except Exception:
             print('Failed to initialize plugin:', repr(zfp), file=sys.stderr)
             if DEBUG:
                 traceback.print_exc()
@@ -807,7 +872,7 @@ def initialize_plugins(perf=False):
     sys.stdout, sys.stderr = ostdout, ostderr
     if perf:
         for x in sorted(times, key=lambda x: times[x]):
-            print('%50s: %.3f'%(x, times[x]))
+            print(f'{x:50}: {times[x]:.3f}')
     _initialized_plugins.sort(key=lambda x: x.priority, reverse=True)
     reread_filetype_plugins()
     reread_metadata_plugins()
@@ -821,8 +886,8 @@ def initialized_plugins():
 
 # }}}
 
-# CLI {{{
 
+# CLI {{{
 
 def build_plugin(path):
     from calibre import prints
@@ -891,7 +956,7 @@ def main(args=sys.argv):
             name, custom = opts.customize_plugin, ''
         plugin = find_plugin(name.strip())
         if plugin is None:
-            print('No plugin with the name %s exists'%name)
+            print(f'No plugin with the name {name} exists')
             return 1
         customize_plugin(plugin, custom)
     if opts.enable_plugin is not None:

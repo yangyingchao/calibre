@@ -69,7 +69,7 @@ if iswindows and not isportable:
 
     def startup_shortcut_path():
         startup_path = winutil.special_folder_path(winutil.CSIDL_STARTUP)
-        return os.path.join(startup_path, "calibre.lnk")
+        return os.path.join(startup_path, 'calibre.lnk')
 
     def create_shortcut(shortcut_path, target, description, *args):
         quoted_args = None
@@ -108,7 +108,6 @@ else:
 
 
 # Advanced {{{
-
 
 def init_opt(widget, opt, layout):
     widget.name, widget.default_val = opt.name, opt.default
@@ -210,7 +209,7 @@ class Path(QWidget):
         self.b = b = QToolButton(self)
         l.addWidget(b)
         b.setIcon(QIcon.ic('document_open.png'))
-        b.setToolTip(_("Browse for the file"))
+        b.setToolTip(_('Browse for the file'))
         b.clicked.connect(self.choose)
         init_opt(self, opt, layout)
 
@@ -360,9 +359,8 @@ class MainTab(QWidget):  # {{{
             b = QPushButton(text)
             b.clicked.connect(getattr(self, name).emit)
             setattr(self, name + '_button', b)
-            if name == 'show_logs':
-                h.addStretch(10)
             h.addWidget(b)
+        h.addStretch(10)
         self.ip_info = QLabel(self)
         self.update_ip_info()
         from calibre.gui2.ui import get_gui
@@ -446,11 +444,10 @@ class MainTab(QWidget):  # {{{
     def settings(self):
         return {'auth': self.opt_auth.isChecked(), 'port': self.opt_port.value()}
 
-
 # }}}
 
-# Users {{{
 
+# Users {{{
 
 class NewUser(QDialog):
 
@@ -746,6 +743,12 @@ class User(QWidget):
         )
         rw.stateChanged.connect(self.readonly_changed)
         l.addWidget(rw)
+        self.cpw_text = _('Allow {} to change their password via the web')
+        self.cpw = cpw = QCheckBox(self)
+        cpw.setToolTip(_(
+            'If enabled, allows the user to change their own password via the web interface'))
+        cpw.stateChanged.connect(self.cpw_changed)
+        l.addWidget(cpw)
         self.access_label = la = QLabel(self)
         l.addWidget(la), la.setWordWrap(True)
         self.cpb = b = QPushButton(_('Change &password'))
@@ -765,6 +768,10 @@ class User(QWidget):
 
     def readonly_changed(self):
         self.user_data[self.username]['readonly'] = not self.rw.isChecked()
+        self.changed_signal.emit()
+
+    def cpw_changed(self):
+        self.user_data[self.username]['allow_change_password_via_http'] = bool(self.cpw.isChecked())
         self.changed_signal.emit()
 
     def update_restriction(self):
@@ -789,7 +796,7 @@ class User(QWidget):
         else:
             m = _('{} is currently allowed access to all libraries')
             b = _('Restrict the &libraries {} can access').format(self.username)
-        self.restrict_button.setText(b),
+        self.restrict_button.setText(b)
         self.access_label.setText(m.format(username))
 
     def show_user(self, username=None, user_data=None):
@@ -802,11 +809,17 @@ class User(QWidget):
             self.rw.blockSignals(True), self.rw.setChecked(
                 not user_data[username]['readonly']
             ), self.rw.blockSignals(False)
+            self.cpw.setText(self.cpw_text.format(username))
+            self.cpw.setVisible(True)
+            self.cpw.blockSignals(True), self.cpw.setChecked(
+                bool(user_data[username].get('allow_change_password_via_http')))
+            self.cpw.blockSignals(False)
             self.access_label.setVisible(True)
             self.restrict_button.setVisible(True)
             self.update_restriction()
         else:
             self.rw.setVisible(False)
+            self.cpw.setVisible(False)
             self.access_label.setVisible(False)
             self.restrict_button.setVisible(False)
 
@@ -899,7 +912,6 @@ class Users(QWidget):
 
     def display_user_data(self, username=None):
         self.user_display.show_user(username, self.user_data)
-
 
 # }}}
 

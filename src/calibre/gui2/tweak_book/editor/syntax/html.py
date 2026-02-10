@@ -28,18 +28,17 @@ from calibre.gui2.tweak_book.editor.syntax.css import state_map as css_state_map
 from calibre.spell.break_iterator import split_into_words_and_positions
 from calibre.spell.dictionary import parse_lang_code
 from calibre_extensions import html_syntax_highlighter as _speedup
-from polyglot.builtins import iteritems
 
 cdata_tags = frozenset(['title', 'textarea', 'style', 'script', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript'])
 normal_pat = re.compile(r'[^<>&]+')
 entity_pat = re.compile(r'&#{0,1}[a-zA-Z0-9]{1,8};')
 tag_name_pat = re.compile(r'/{0,1}[a-zA-Z0-9:-]+')
 space_chars = ' \t\r\n\u000c'
-attribute_name_pat = re.compile(r'''[^%s"'/><=]+''' % space_chars)
+attribute_name_pat = re.compile(rf'''[^{space_chars}"'/><=]+''')
 self_closing_pat = re.compile(r'/\s*>')
-unquoted_val_pat = re.compile(r'''[^%s'"=<>`]+''' % space_chars)
-cdata_close_pats = {x:re.compile(r'</%s' % x, flags=re.I) for x in cdata_tags}
-nbsp_pat = re.compile('[\xa0\u2000-\u200A\u202F\u205F\u3000\u2011-\u2015\uFE58\uFE63\uFF0D]+')  # special spaces and hyphens
+unquoted_val_pat = re.compile(rf'''[^{space_chars}'"=<>`]+''')
+cdata_close_pats = {x:re.compile(rf'</{x}', flags=re.I) for x in cdata_tags}
+nbsp_pat = re.compile(r'[\xa0\u2000-\u200A\u202F\u205F\u3000\u2011-\u2015\uFE58\uFE63\uFF0D]+')  # special spaces and hyphens
 
 NORMAL = 0
 IN_OPENING_TAG = 1
@@ -469,7 +468,7 @@ def create_formats(highlighter, add_css=True):
         'nbsp': t['SpecialCharacter'],
         'spell': t['SpellError'],
     }
-    for name, msg in iteritems({
+    for name, msg in {
             '<': _('An unescaped < is not allowed. Replace it with &lt;'),
             '&': _('An unescaped ampersand is not allowed. Replace it with &amp;'),
             '>': _('An unescaped > is not allowed. Replace it with &gt;'),
@@ -478,7 +477,7 @@ def create_formats(highlighter, add_css=True):
             'bad-closing': _('A closing tag must contain only the tag name and nothing else'),
             'no-attr-value': _('Expecting an attribute value'),
             'only-prefix': _('A tag name cannot end with a colon'),
-    }):
+    }.items():
         f = formats[name] = syntax_text_char_format(formats['error'])
         f.setToolTip(msg)
     f = formats['title'] = syntax_text_char_format()

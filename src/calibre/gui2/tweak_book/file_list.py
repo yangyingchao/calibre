@@ -61,7 +61,6 @@ from calibre.utils.icu import numeric_sort_key
 from calibre.utils.localization import ngettext, pgettext
 from calibre_extensions.progress_indicator import set_no_activate_on_click
 from polyglot.binary import as_hex_unicode
-from polyglot.builtins import iteritems
 
 FILE_COPY_MIME = 'application/calibre-edit-book-files'
 TOP_ICON_SIZE = 24
@@ -297,14 +296,14 @@ class FileList(QTreeWidget, OpenWithHandler):
         self.rendered_emblem_cache = {}
         self.font_name_cache = {}
         self.top_level_pixmap_cache = {
-            name : QIcon.ic(icon).pixmap(TOP_ICON_SIZE, TOP_ICON_SIZE)
-            for name, icon in iteritems({
+            name: QIcon.ic(icon).pixmap(TOP_ICON_SIZE, TOP_ICON_SIZE)
+            for name, icon in {
                 'text':'keyboard-prefs.png',
                 'styles':'lookfeel.png',
                 'fonts':'font.png',
                 'misc':'mimetypes/dir.png',
                 'images':'view-image.png',
-            })}
+            }.items()}
         self.itemActivated.connect(self.item_double_clicked)
 
     def possible_rename_requested(self, index, old, new):
@@ -420,12 +419,12 @@ class FileList(QTreeWidget, OpenWithHandler):
 
     def get_state(self):
         s = {'pos':self.verticalScrollBar().value()}
-        s['expanded'] = {c for c, item in iteritems(self.categories) if item.isExpanded()}
+        s['expanded'] = {c for c, item in self.categories.items() if item.isExpanded()}
         s['selected'] = {str(i.data(0, NAME_ROLE) or '') for i in self.selectedItems()}
         return s
 
     def set_state(self, state):
-        for category, item in iteritems(self.categories):
+        for category, item in self.categories.items():
             item.setExpanded(category in state['expanded'])
         self.verticalScrollBar().setValue(state['pos'])
         for parent in self.categories.values():
@@ -643,7 +642,7 @@ class FileList(QTreeWidget, OpenWithHandler):
                 continue
             processed[name] = create_item(name)
 
-        for name, c in iteritems(self.categories):
+        for name, c in self.categories.items():
             c.setExpanded(True)
             if name != 'text':
                 c.sortChildren(1, Qt.SortOrder.AscendingOrder)
@@ -779,11 +778,11 @@ class FileList(QTreeWidget, OpenWithHandler):
         self.open_file_with.emit(file_name, fmt, entry)
 
     def index_of_name(self, name):
-        for category, parent in iteritems(self.categories):
+        for category, parent in self.categories.items():
             for i in range(parent.childCount()):
                 item = parent.child(i)
                 if str(item.data(0, NAME_ROLE) or '') == name:
-                    return (category, i)
+                    return category, i
         return (None, -1)
 
     def merge_files(self):
@@ -831,7 +830,7 @@ class FileList(QTreeWidget, OpenWithHandler):
                 skip_dialog_name='edit-book-mark-as-titlepage-move-confirm',
                 skip_dialog_skip_precheck=False
             )
-        self.mark_requested.emit(name, 'titlepage:%r' % move_to_start)
+        self.mark_requested.emit(name, f'titlepage:{move_to_start!r}')
 
     def mark_as_nav(self, name):
         self.mark_requested.emit(name, 'nav')
@@ -865,7 +864,7 @@ class FileList(QTreeWidget, OpenWithHandler):
         bad = names & current_container().names_that_must_not_be_changed
         if bad:
             error_dialog(self, _('Cannot rename'),
-                         _('The file(s) %s cannot be renamed.') % ('<b>%s</b>' % ', '.join(bad)), show=True)
+                         _('The file(s) %s cannot be renamed.') % ('<b>{}</b>'.format(', '.join(bad))), show=True)
             return
         names = sorted(names, key=self.index_of_name)
         return names
@@ -962,7 +961,7 @@ class FileList(QTreeWidget, OpenWithHandler):
         bad = names & current_container().names_that_must_not_be_removed
         if bad:
             return error_dialog(self, _('Cannot delete'),
-                         _('The file(s) %s cannot be deleted.') % ('<b>%s</b>' % ', '.join(bad)), show=True)
+                         _('The file(s) %s cannot be deleted.') % ('<b>{}</b>'.format(', '.join(bad))), show=True)
 
         text = self.categories['text']
         children = (text.child(i) for i in range(text.childCount()))
@@ -976,7 +975,7 @@ class FileList(QTreeWidget, OpenWithHandler):
         for i, (name, remove) in enumerate(spine_removals):
             if remove:
                 removals.append(self.categories['text'].child(i))
-        for category, parent in iteritems(self.categories):
+        for category, parent in self.categories.items():
             if category != 'text':
                 for i in range(parent.childCount()):
                     child = parent.child(i)
@@ -994,7 +993,7 @@ class FileList(QTreeWidget, OpenWithHandler):
         b = self.verticalScrollBar()
         if b.value() == b.maximum():
             b.setValue(b.minimum())
-            QTimer.singleShot(0, lambda : b.setValue(b.maximum()))
+            QTimer.singleShot(0, lambda: b.setValue(b.maximum()))
 
     def __enter__(self):
         self.ordered_selected_indexes = True
@@ -1288,7 +1287,7 @@ class FileListWidget(QWidget):
         self.file_list = FileList(self)
         self.layout().addWidget(self.file_list)
         self.layout().setContentsMargins(0, 0, 0, 0)
-        self.forwarded_signals = {k for k, o in iteritems(vars(self.file_list.__class__)) if isinstance(o, pyqtSignal) and '_' in k and not hasattr(self, k)}
+        self.forwarded_signals = {k for k, o in vars(self.file_list.__class__).items() if isinstance(o, pyqtSignal) and '_' in k and not hasattr(self, k)}
         for x in ('delete_done', 'select_name', 'select_names', 'request_edit', 'mark_name_as_current', 'clear_currently_edited_name'):
             setattr(self, x, getattr(self.file_list, x))
         self.setFocusProxy(self.file_list)

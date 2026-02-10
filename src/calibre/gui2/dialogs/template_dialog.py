@@ -15,6 +15,7 @@ from functools import partial
 from qt.core import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QColor,
     QComboBox,
     QCursor,
@@ -24,6 +25,7 @@ from qt.core import (
     QFontDatabase,
     QFontInfo,
     QFontMetrics,
+    QHBoxLayout,
     QIcon,
     QLineEdit,
     QPalette,
@@ -34,25 +36,161 @@ from qt.core import (
     QTableWidgetItem,
     QTextCharFormat,
     QTextOption,
+    QTimer,
+    QToolButton,
     QVBoxLayout,
     pyqtSignal,
 )
 
 from calibre import sanitize_file_name
-from calibre.constants import config_dir
-from calibre.ebooks.metadata.book.base import Metadata
+from calibre.constants import config_dir, iswindows
+from calibre.ebooks.metadata.book.base import get_model_metadata_instance
 from calibre.ebooks.metadata.book.formatter import SafeFormat
-from calibre.gui2 import choose_files, choose_save_file, error_dialog, gprefs, pixmap_to_data, question_dialog
+from calibre.gui2 import choose_files, choose_save_file, error_dialog, gprefs, info_dialog, pixmap_to_data, question_dialog, safe_open_url
 from calibre.gui2.dialogs.template_dialog_ui import Ui_TemplateDialog
+from calibre.gui2.dialogs.template_general_info import GeneralInformationDialog
+from calibre.gui2.widgets2 import Dialog, HTMLDisplay
 from calibre.library.coloring import color_row_key, displayable_columns
 from calibre.utils.config_base import tweaks
-from calibre.utils.date import DEFAULT_DATE
+from calibre.utils.ffml_processor import MARKUP_ERROR, FFMLProcessor
 from calibre.utils.formatter import PythonTemplateContext, StopException
 from calibre.utils.formatter_functions import StoredObjectType, formatter_functions
 from calibre.utils.icu import lower as icu_lower
 from calibre.utils.icu import sort_key
-from calibre.utils.localization import localize_user_manual_link, ngettext
+from calibre.utils.localization import localize_user_manual_link
 from calibre.utils.resources import get_path as P
+
+
+class DocViewer(Dialog):
+
+    def __init__(self, ffml, builtins, function_type_string_method, parent=None):
+        self.ffml = ffml
+        self.builtins = builtins
+        self.function_type_string = function_type_string_method
+        self.last_operation = None
+        self.last_function = None
+        self.back_stack = []
+        super().__init__(title=_('Template function documentation'), name='template_editor_doc_viewer_dialog',
+                         default_buttons=QDialogButtonBox.StandardButton.Close, parent=parent)
+
+    def sizeHint(self):
+        return QSize(800, 600)
+
+    def set_html(self, html):
+        self.doc_viewer_widget.setHtml(html)
+
+    def setup_ui(self):
+        l = QVBoxLayout(self)
+        e = self.doc_viewer_widget = HTMLDisplay(self)
+        if iswindows:
+            e.setDefaultStyleSheet('pre { font-family: "Segoe UI Mono", "Consolas", monospace; }')
+        e.anchor_clicked.connect(self.url_clicked)
+        l.addWidget(e)
+        bl = QHBoxLayout()
+        l.addLayout(bl)
+        self.english_cb = cb = QCheckBox(_('Show documentation as original &English'))
+        cb.setChecked(gprefs.get('template_editor_docs_in_english', False))
+        cb.stateChanged.connect(self.english_cb_state_changed)
+        bl.addWidget(cb)
+        bl.addWidget(self.bb)
+
+        b = self.back_button = self.bb.addButton(_('&Back'), QDialogButtonBox.ButtonRole.ActionRole)
+        b.clicked.connect(self.back)
+        b.setToolTip(_('Displays the previously viewed function'))
+        b.setEnabled(False)
+
+        b = self.bb.addButton(_('Show &all functions'), QDialogButtonBox.ButtonRole.ActionRole)
+        b.clicked.connect(self.show_all_functions_button_clicked)
+        b.setToolTip(_('Shows a list of all built-in functions in alphabetic order'))
+
+    def back(self):
+        if not self.back_stack:
+            info_dialog(self, _('Go back'), _('No function to go back to'), show=True)
+        else:
+            place = self.back_stack.pop()
+            self.back_button.setEnabled(bool(self.back_stack))
+            if isinstance(place, int):
+                self.show_all_functions()
+                # For reasons known only to Qt, I can't set the scroll bar position
+                # until some time has passed.
+                QTimer.singleShot(10, lambda: self.doc_viewer_widget.verticalScrollBar().setValue(place))
+            else:
+                self._show_function(place)
+
+    def add_to_back_stack(self):
+        if self.last_function is not None:
+            self.back_stack.append(self.last_function)
+        elif self.last_operation is not None:
+            self.back_stack.append(self.doc_viewer_widget.verticalScrollBar().value())
+        self.back_button.setEnabled(bool(self.back_stack))
+
+    def url_clicked(self, qurl):
+        if qurl.scheme().startswith('http'):
+            safe_open_url(qurl)
+        else:
+            self.show_function(qurl.path())
+
+    def english_cb_state_changed(self):
+        if self.last_operation is not None:
+            self.last_operation()
+        gprefs['template_editor_docs_in_english'] = self.english_cb.isChecked()
+
+    def header_line(self, name):
+        return f'\n<h3>{name} ({self.function_type_string(name, longform=False)})</h3>\n'
+
+    def get_doc(self, func):
+        doc = func.doc if hasattr(func, 'doc') else ''
+        return getattr(doc, 'formatted_english', doc) if self.english_cb.isChecked() else doc
+
+    def no_doc_string(self):
+        if self.english_cb.isChecked():
+            return 'No documentation provided'
+        return _('No documentation provided')
+
+    def show_function(self, fname):
+        if fname in self.builtins and fname != self.last_function:
+            self.add_to_back_stack()
+            self._show_function(fname)
+
+    def _show_function(self, fname):
+        self.last_operation = partial(self._show_function, fname)
+        bif = self.builtins[fname]
+        if fname not in self.builtins or not bif.doc:
+            self.set_html(self.header_line(fname) + self.no_doc_string())
+        else:
+            self.last_function = fname
+            self.set_html(self.header_line(fname) +
+                          self.ffml.document_to_html(self.get_doc(bif), fname))
+
+    def show_all_functions_button_clicked(self):
+        self.add_to_back_stack()
+        self.show_all_functions()
+
+    def show_all_functions(self):
+        self.last_function = None
+        self.last_operation = self.show_all_functions
+        result = []
+        a = result.append
+        for name in sorted(self.builtins, key=sort_key):
+            a(self.header_line(name))
+            try:
+                doc = self.get_doc(self.builtins[name])
+                if not doc:
+                    a(self.no_doc_string())
+                else:
+                    html = self.ffml.document_to_html(doc, name)
+                    if MARKUP_ERROR not in html:
+                        name_pos = html.find(name + '(')
+                        if name_pos < 0:
+                            rest_of_doc = ' -- ' + html
+                        else:
+                            rest_of_doc = html[name_pos + len(name):]
+                        html = f'<a href="ffdoc:{name}">{name}</a>{rest_of_doc}'
+                    a(html)
+            except Exception:
+                print('Exception in', name)
+                raise
+        self.doc_viewer_widget.setHtml(''.join(result))
 
 
 class ParenPosition:
@@ -74,26 +212,26 @@ class TemplateHighlighter(QSyntaxHighlighter):
 
     KEYWORDS_GPM = ['if', 'then', 'else', 'elif', 'fi', 'for', 'rof',
                     'separator', 'break', 'continue', 'return', 'in', 'inlist',
-                    'def', 'fed', 'limit']
+                    'inlist_field', 'def', 'fed', 'limit', 'with', 'htiw']
 
-    KEYWORDS_PYTHON = ["and", "as", "assert", "break", "class", "continue", "def",
-                       "del", "elif", "else", "except", "exec", "finally", "for", "from",
-                       "global", "if", "import", "in", "is", "lambda", "not", "or",
-                       "pass", "print", "raise", "return", "try", "while", "with",
-                       "yield"]
+    KEYWORDS_PYTHON = ['and', 'as', 'assert', 'break', 'class', 'continue', 'def',
+                       'del', 'elif', 'else', 'except', 'exec', 'finally', 'for', 'from',
+                       'global', 'if', 'import', 'in', 'is', 'lambda', 'not', 'or',
+                       'pass', 'print', 'raise', 'return', 'try', 'while', 'with',
+                       'yield']
 
-    BUILTINS_PYTHON = ["abs", "all", "any", "basestring", "bool", "callable", "chr",
-                       "classmethod", "cmp", "compile", "complex", "delattr", "dict",
-                       "dir", "divmod", "enumerate", "eval", "execfile", "exit", "file",
-                       "filter", "float", "frozenset", "getattr", "globals", "hasattr",
-                       "hex", "id", "int", "isinstance", "issubclass", "iter", "len",
-                       "list", "locals", "long", "map", "max", "min", "object", "oct",
-                       "open", "ord", "pow", "property", "range", "reduce", "repr",
-                       "reversed", "round", "set", "setattr", "slice", "sorted",
-                       "staticmethod", "str", "sum", "super", "tuple", "type", "unichr",
-                       "unicode", "vars", "xrange", "zip"]
+    BUILTINS_PYTHON = ['abs', 'all', 'any', 'basestring', 'bool', 'callable', 'chr',
+                       'classmethod', 'cmp', 'compile', 'complex', 'delattr', 'dict',
+                       'dir', 'divmod', 'enumerate', 'eval', 'execfile', 'exit', 'file',
+                       'filter', 'float', 'frozenset', 'getattr', 'globals', 'hasattr',
+                       'hex', 'id', 'int', 'isinstance', 'issubclass', 'iter', 'len',
+                       'list', 'locals', 'long', 'map', 'max', 'min', 'object', 'oct',
+                       'open', 'ord', 'pow', 'property', 'range', 'reduce', 'repr',
+                       'reversed', 'round', 'set', 'setattr', 'slice', 'sorted',
+                       'staticmethod', 'str', 'sum', 'super', 'tuple', 'type', 'unichr',
+                       'unicode', 'vars', 'xrange', 'zip']
 
-    CONSTANTS_PYTHON = ["False", "True", "None", "NotImplemented", "Ellipsis"]
+    CONSTANTS_PYTHON = ['False', 'True', 'None', 'NotImplemented', 'Ellipsis']
 
     def __init__(self, parent=None, builtin_functions=None):
         super().__init__(parent)
@@ -110,38 +248,38 @@ class TemplateHighlighter(QSyntaxHighlighter):
             r.append((re.compile(a), b))
 
         if not for_python:
-            a(r"\b[a-zA-Z]\w*\b(?!\(|\s+\()"
-              r"|\$+#?[a-zA-Z]\w*",
-              "identifier")
-            a(r"^program:", "keymode")
-            a("|".join([r"\b%s\b" % keyword for keyword in self.KEYWORDS_GPM]), "keyword")
-            a("|".join([r"\b%s\b" % builtin for builtin in
+            a(r'\b[a-zA-Z]\w*\b(?!\(|\s+\()'
+              r'|\$+#?[a-zA-Z]\w*',
+              'identifier')
+            a(r'^program:', 'keymode')
+            a('|'.join([rf'\b{keyword}\b' for keyword in self.KEYWORDS_GPM]), 'keyword')
+            a('|'.join([rf'\b{builtin}\b' for builtin in
                             (builtin_functions if builtin_functions else
                                                 formatter_functions().get_builtins())]),
-                "builtin")
-            a(r"""(?<!:)'[^']*'|"[^"]*\"""", "string")
+                'builtin')
+            a(r'''(?<!:)'[^']*'|"[^"]*\"''', 'string')
         else:
-            a(r"^python:", "keymode")
-            a("|".join([r"\b%s\b" % keyword for keyword in self.KEYWORDS_PYTHON]), "keyword")
-            a("|".join([r"\b%s\b" % builtin for builtin in self.BUILTINS_PYTHON]), "builtin")
-            a("|".join([r"\b%s\b" % constant for constant in self.CONSTANTS_PYTHON]), "constant")
-            a(r"\bPyQt6\b|\bqt.core\b|\bQt?[A-Z][a-z]\w+\b", "pyqt")
-            a(r"@\w+(\.\w+)?\b", "decorator")
+            a(r'^python:', 'keymode')
+            a('|'.join([rf'\b{keyword}\b' for keyword in self.KEYWORDS_PYTHON]), 'keyword')
+            a('|'.join([rf'\b{builtin}\b' for builtin in self.BUILTINS_PYTHON]), 'builtin')
+            a('|'.join([rf'\b{constant}\b' for constant in self.CONSTANTS_PYTHON]), 'constant')
+            a(r'\bPyQt6\b|\bqt.core\b|\bQt?[A-Z][a-z]\w+\b', 'pyqt')
+            a(r'@\w+(\.\w+)?\b', 'decorator')
 
             stringRe = r'''(["'])(?:(?!\1)[^\\]|\\.)*\1'''
-            a(stringRe, "string")
+            a(stringRe, 'string')
             self.stringRe = re.compile(stringRe)
-            self.checkTripleInStringRe = re.compile(r"""((?:"|'){3}).*?\1""")
+            self.checkTripleInStringRe = re.compile(r'''((?:"|'){3}).*?\1''')
             self.tripleSingleRe = re.compile(r"""'''(?!")""")
             self.tripleDoubleRe = re.compile(r'''"""(?!')''')
         a(
-            r"\b[+-]?[0-9]+[lL]?\b"
-            r"|\b[+-]?0[xX][0-9A-Fa-f]+[lL]?\b"
-            r"|\b[+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\b",
-            "number")
+            r'\b[+-]?[0-9]+[lL]?\b'
+            r'|\b[+-]?0[xX][0-9A-Fa-f]+[lL]?\b'
+            r'|\b[+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\b',
+            'number')
 
-        a(r'\(', "lparen")
-        a(r'\)', "rparen")
+        a(r'\(', 'lparen')
+        a(r'\)', 'rparen')
         self.Rules = tuple(r)
 
     def initialize_formats(self):
@@ -153,42 +291,43 @@ class TemplateHighlighter(QSyntaxHighlighter):
             font.setPointSize(size)
             font_name = font.family()
         config = self.Config = {}
-        config["fontfamily"] = font_name
+        config['fontfamily'] = font_name
         app_palette = QApplication.instance().palette()
+        is_dark = QApplication.instance().is_dark_theme
 
         all_formats = (
             # name, color, bold, italic
-            ("normal", None, False, False),
-            ("keyword", app_palette.color(QPalette.ColorRole.Link).name(), True, False),
-            ("builtin", app_palette.color(QPalette.ColorRole.Link).name(), False, False),
-            ("constant", app_palette.color(QPalette.ColorRole.Link).name(), False, False),
-            ("identifier", None, False, True),
-            ("comment", "#007F00", False, True),
-            ("string", "#808000", False, False),
-            ("number", "#924900", False, False),
-            ("decorator", "#FF8000", False, True),
-            ("pyqt", None, False, False),
-            ("lparen", None, True, True),
-            ("rparen", None, True, True))
+            ('normal', None, False, False),
+            ('keyword', app_palette.color(QPalette.ColorRole.Link).name(), True, False),
+            ('builtin', app_palette.color(QPalette.ColorRole.Link).name(), False, False),
+            ('constant', app_palette.color(QPalette.ColorRole.Link).name(), False, False),
+            ('identifier', None, False, True),
+            ('comment', '#00c700' if is_dark else '#007F00', False, True),
+            ('string', '#b6b600' if is_dark else '#808000', False, False),
+            ('number', '#d96d00' if is_dark else '#924900', False, False),
+            ('decorator', '#FF8000', False, True),
+            ('pyqt', None, False, False),
+            ('lparen', None, True, True),
+            ('rparen', None, True, True))
 
         for name, color, bold, italic in all_formats:
-            config["%sfontcolor" % name] = color
-            config["%sfontbold" % name] = bold
-            config["%sfontitalic" % name] = italic
+            config[f'{name}fontcolor'] = color
+            config[f'{name}fontbold'] = bold
+            config[f'{name}fontitalic'] = italic
         base_format = QTextCharFormat()
-        base_format.setFontFamilies([config["fontfamily"]])
-        config["fontsize"] = size
-        base_format.setFontPointSize(config["fontsize"])
+        base_format.setFontFamilies([config['fontfamily']])
+        config['fontsize'] = size
+        base_format.setFontPointSize(config['fontsize'])
 
         self.Formats = {}
         for name, color, bold, italic in all_formats:
             format_ = QTextCharFormat(base_format)
-            color = config["%sfontcolor" % name]
+            color = config[f'{name}fontcolor']
             if color:
                 format_.setForeground(QColor(color))
-            if config["%sfontbold" % name]:
+            if config[f'{name}fontbold']:
                 format_.setFontWeight(QFont.Weight.Bold)
-            format_.setFontItalic(config["%sfontitalic" % name])
+            format_.setFontItalic(config[f'{name}fontitalic'])
             self.Formats[name] = format_
 
     def find_paren(self, bn, pos):
@@ -205,12 +344,14 @@ class TemplateHighlighter(QSyntaxHighlighter):
         bn = self.currentBlock().blockNumber()
         textLength = len(text)
 
-        self.setFormat(0, textLength, self.Formats["normal"])
+        self.setFormat(0, textLength, self.Formats['normal'])
 
         if not text:
             pass
-        elif text[0] == "#":
-            self.setFormat(0, textLength, self.Formats["comment"])
+        elif re.match(r'[ \t]*#', text):
+            # Line with only a comment possibly preceded with spaces or tabs
+            # This works in both GPM and python
+            self.setFormat(0, textLength, self.Formats['comment'])
             return
 
         for regex, format_ in self.Rules:
@@ -234,7 +375,7 @@ class TemplateHighlighter(QSyntaxHighlighter):
             t = re.sub(self.stringRe, self.replace_strings_with_dash, text)
             sharp_pos = t.find('#')
             if sharp_pos >= 0:  # Do we still have a #?
-                self.setFormat(sharp_pos, len(text), self.Formats["comment"])
+                self.setFormat(sharp_pos, len(text), self.Formats['comment'])
 
         self.setCurrentBlockState(NORMAL)
 
@@ -249,10 +390,10 @@ class TemplateHighlighter(QSyntaxHighlighter):
                     if i == -1:
                         i = len(text)
                         self.setCurrentBlockState(state)
-                    self.setFormat(0, i + 3, self.Formats["string"])
+                    self.setFormat(0, i + 3, self.Formats['string'])
                 elif i > -1:
                     self.setCurrentBlockState(state)
-                    self.setFormat(i, len(text), self.Formats["string"])
+                    self.setFormat(i, len(text), self.Formats['string'])
 
         if self.generate_paren_positions:
             t = str(text)
@@ -348,11 +489,16 @@ class TemplateDialog(QDialog, Ui_TemplateDialog):
                  icon_field_key=None, icon_rule_kind=None, doing_emblem=False,
                  text_is_placeholder=False, dialog_is_st_editor=False,
                  global_vars=None, all_functions=None, builtin_functions=None,
-                 python_context_object=None, dialog_number=None):
+                 python_context_object=None, dialog_number=None, kwargs=None,
+                 formatter=SafeFormat, icon_dir='cc_icons'):
         # If dialog_number isn't None then we want separate non-modal windows
         # that don't stay on top of the main dialog. This lets Alt-Tab work to
         # switch between them. dialog_number must be set only by the template
         # tester, not the rules dialogs etc that depend on modality.
+
+        # doing_emblem is also used for tag browser value icon rules in order to
+        # show the icon selection widgets.
+
         if dialog_number is None:
             QDialog.__init__(self, parent, flags=Qt.WindowType.Dialog)
         else:
@@ -362,13 +508,18 @@ class TemplateDialog(QDialog, Ui_TemplateDialog):
         self.setupUi(self)
         self.setWindowIcon(self.windowIcon())
 
+        self.formatter = formatter
+        self.icon_dir = icon_dir
+        self.ffml = FFMLProcessor()
         self.dialog_number = dialog_number
         self.coloring = color_field is not None
         self.iconing = icon_field_key is not None
         self.embleming = doing_emblem
+        self.required_txt = self.coloring or self.iconing or self.embleming
         self.dialog_is_st_editor = dialog_is_st_editor
         self.global_vars = global_vars or {}
         self.python_context_object = python_context_object or PythonTemplateContext()
+        self.kwargs = kwargs
 
         cols = []
         self.fm = fm
@@ -403,7 +554,7 @@ class TemplateDialog(QDialog, Ui_TemplateDialog):
             for n1, k1 in cols:
                 self.icon_field.addItem(f'{n1} ({k1})', k1)
             self.icon_file_names = []
-            d = os.path.join(config_dir, 'cc_icons')
+            d = os.path.join(config_dir, icon_dir)
             if os.path.exists(d):
                 for icon_file in os.listdir(d):
                     icon_file = icu_lower(icon_file)
@@ -431,8 +582,11 @@ class TemplateDialog(QDialog, Ui_TemplateDialog):
                          formatter_functions().get_builtins_and_aliases())
 
         # Set up the breakpoint bar
-        s = gprefs.get('template_editor_break_on_print', False)
-        self.go_button.setEnabled(s)
+        run_as_you_type = gprefs.get('template_editor_run_as_you_type')
+        self.run_as_you_type_box.setChecked(run_as_you_type)
+        self.go_button.setEnabled(not run_as_you_type)
+        self.break_box.setEnabled(not run_as_you_type)
+        s = gprefs.get('template_editor_enable_breakpoints', False)
         self.remove_all_button.setEnabled(s)
         self.set_all_button.setEnabled(s)
         self.toggle_button.setEnabled(s)
@@ -441,12 +595,16 @@ class TemplateDialog(QDialog, Ui_TemplateDialog):
         self.break_box.setChecked(s)
         self.break_box.stateChanged.connect(self.break_box_changed)
         self.go_button.clicked.connect(self.go_button_pressed)
+        self.show_all_selected_books.clicked.connect(self.show_all_selected_books_changed)
+        self.run_as_you_type_box.stateChanged.connect(self.run_as_you_type_box_changed)
+        self.show_all_selected_books.setChecked(gprefs.get('template_editor_show_all_selected_books'))
+        self.show_all_selected_books.clicked.connect(self.show_all_selected_books_changed)
 
         # Set up the display table
         self.table_column_widths = None
         try:
             self.table_column_widths = gprefs.get(self.geometry_string('template_editor_table_widths'), None)
-        except:
+        except Exception:
             pass
         self.set_mi(mi, fm)
 
@@ -457,8 +615,16 @@ class TemplateDialog(QDialog, Ui_TemplateDialog):
         self.textbox.textChanged.connect(self.textbox_changed)
         self.set_editor_font()
 
+        self.doc_viewer = None
+        self.current_function_name = None
         self.documentation.setReadOnly(True)
+        self.documentation.setOpenLinks(False)
+        self.documentation.anchorClicked.connect(self.url_clicked)
         self.source_code.setReadOnly(True)
+        self.source_code.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.source_code.customContextMenuRequested.connect(self.show_code_context_menu)
+        self.doc_button.clicked.connect(self.open_documentation_viewer)
+        self.general_info_button.clicked.connect(self.open_general_info_dialog)
 
         if text is not None:
             if text_is_placeholder:
@@ -481,15 +647,14 @@ class TemplateDialog(QDialog, Ui_TemplateDialog):
         try:
             with open(P('template-functions.json'), 'rb') as f:
                 self.builtin_source_dict = json.load(f, encoding='utf-8')
-        except:
+        except Exception:
             self.builtin_source_dict = {}
 
-        func_names = sorted(self.all_functions)
+        self.function_names = func_names = sorted(self.all_functions)
         self.function.clear()
         self.function.addItem('')
         for f in func_names:
-            self.function.addItem('{}  --  {}'.format(f,
-                               self.function_type_string(f, longform=False)), f)
+            self.function.addItem(f'{f}  --  {self.function_type_string(f, longform=False)}', f)
         self.function.setCurrentIndex(0)
         self.function.currentIndexChanged.connect(self.function_changed)
         self.rule = (None, '')
@@ -499,7 +664,7 @@ class TemplateDialog(QDialog, Ui_TemplateDialog):
             '<a href="{}">{}</a>'.format(
                 localize_user_manual_link('https://manual.calibre-ebook.com/template_lang.html'), tt))
         tt = _('Template function reference')
-        self.template_func_reference.setText(
+        self.tf_ref.setText(
             '<a href="{}">{}</a>'.format(
                 localize_user_manual_link('https://manual.calibre-ebook.com/generated/en/template_ref.html'), tt))
 
@@ -517,6 +682,32 @@ class TemplateDialog(QDialog, Ui_TemplateDialog):
         self.textbox.customContextMenuRequested.connect(self.show_context_menu)
         # Now geometry
         self.restore_geometry(gprefs, self.geometry_string('template_editor_dialog_geometry'))
+
+    def url_clicked(self, qurl):
+        if qurl.scheme().startswith('http'):
+            safe_open_url(qurl)
+        elif qurl.scheme() == 'ffdoc':
+            name = qurl.path()
+            if name in self.function_names:
+                dex = self.function_names.index(name)
+                self.function.setCurrentIndex(dex+1)
+
+    def open_documentation_viewer(self):
+        if self.doc_viewer is None:
+            dv = self.doc_viewer = DocViewer(self.ffml, self.all_functions,
+                                             self.function_type_string, parent=self)
+            dv.finished.connect(self.doc_viewer_finished)
+            dv.show()
+        if self.current_function_name is not None:
+            self.doc_viewer.show_function(self.current_function_name)
+        else:
+            self.doc_viewer.show_all_functions()
+
+    def doc_viewer_finished(self):
+        self.doc_viewer = None
+
+    def open_general_info_dialog(self):
+        GeneralInformationDialog(include_general_doc=True, include_ffml_doc=True).exec()
 
     def geometry_string(self, txt):
         if self.dialog_number is None or self.dialog_number == 0:
@@ -540,45 +731,22 @@ class TemplateDialog(QDialog, Ui_TemplateDialog):
             if not isinstance(mi, (tuple, list)):
                 mi = (mi, )
         else:
-            mi = Metadata(_('Title'), [_('Author')])
-            mi.author_sort = _('Author Sort')
-            mi.series = ngettext('Series', 'Series', 1)
-            mi.series_index = 3
-            mi.rating = 4.0
-            mi.tags = [_('Tag 1'), _('Tag 2')]
-            mi.languages = ['eng']
-            mi.id = 1
-            if self.fm is not None:
-                mi.set_all_user_metadata(self.fm.custom_field_metadata())
-            else:
-                # No field metadata. Grab a copy from the current library so
-                # that we can validate any custom column names. The values for
-                # the columns will all be empty, which in some very unusual
-                # cases might cause formatter errors. We can live with that.
-                from calibre.gui2.ui import get_gui
-                fm = get_gui().current_db.new_api.field_metadata
-                mi.set_all_user_metadata(fm.custom_field_metadata())
-            for col in mi.get_all_user_metadata(False):
-                if fm[col]['datatype'] == 'datetime':
-                    mi.set(col, DEFAULT_DATE)
-                elif fm[col]['datatype'] in ('int', 'float', 'rating'):
-                    mi.set(col, 2)
-                elif fm[col]['datatype'] == 'bool':
-                    mi.set(col, False)
-                elif fm[col]['is_multiple']:
-                    mi.set(col, [col])
-                else:
-                    mi.set(col, col, 1)
-            mi = (mi, )
+            mi = (get_model_metadata_instance(), )
         self.mi = mi
+        self.setup_result_display_table()
+
+    def setup_result_display_table(self):
         tv = self.template_value
-        tv.setColumnCount(2)
-        tv.setHorizontalHeaderLabels((_('Book title'), _('Template value')))
+        mi = self.mi
+        row_count = len(mi) if gprefs.get('template_editor_show_all_selected_books') else 1
+        tv.clear()
+        tv.setColumnCount(3)
+        tv.setHorizontalHeaderLabels((_('Book title'), '', _('Template value')))
         tv.horizontalHeader().setStretchLastSection(True)
         tv.horizontalHeader().sectionResized.connect(self.table_column_resized)
         tv.setRowCount(len(mi))
         # Set the height of the table
-        h = tv.rowHeight(0) * min(len(mi), 5)
+        h = tv.rowHeight(0) * min(row_count, 5)
         h += 2 * tv.frameWidth() + tv.horizontalHeader().height()
         tv.setMinimumHeight(h)
         tv.setMaximumHeight(h)
@@ -588,24 +756,77 @@ class TemplateDialog(QDialog, Ui_TemplateDialog):
         else:
             tv.setColumnWidth(0, tv.fontMetrics().averageCharWidth() * 10)
         tv.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        tv.setRowCount(len(mi))
+        tv.setRowCount(row_count)
         # Use our own widget to get rid of elision. setTextElideMode() doesn't work
-        for r in range(0, len(mi)):
+        for r in range(row_count):
             w = QLineEdit(tv)
             w.setReadOnly(True)
-            w.setText(mi[r].title)
+            w.setText(mi[r].get('title', _('No title provided')))
             tv.setCellWidget(r, 0, w)
+            tb = QToolButton()
+            tb.setContentsMargins(0, 0, 0, 0)
+            tb.setIcon(QIcon.ic('edit_input.png'))
+            tb.setToolTip(_('Open Edit metadata on this book'))
+            tb.clicked.connect(partial(self.metadata_button_clicked, r))
+            tb.setEnabled(int(mi[r].get('id', -1)) >= 0)
+            tv.setCellWidget(r, 1, tb)
             w = QLineEdit(tv)
             w.setReadOnly(True)
-            tv.setCellWidget(r, 1, w)
+            tv.setCellWidget(r, 2, w)
+        tv.resizeColumnToContents(1)
         self.set_waiting_message()
 
+    def metadata_button_clicked(self, row):
+        # Get the booklist row number for the book
+        mi = self.mi[row]
+        id_ = mi.get('id', -1)
+        if id_ > 0:
+            from calibre.gui2.ui import get_gui
+            db = get_gui().current_db
+            try:
+                idx = db.data.id_to_index(id_)
+                em = get_gui().iactions['Edit Metadata']
+                from calibre.gui2.library.views import PreserveViewState
+                with PreserveViewState(get_gui().current_view(), require_selected_ids=False):
+                    with em.different_parent(self):
+                        em.edit_metadata_for([idx], [id_], bulk=False)
+            except Exception:
+                pass
+            new_mi = []
+            for mi in self.mi:
+                try:
+                    pmi = db.new_api.get_proxy_metadata(mi.get('id'))
+                except Exception:
+                    pmi = None
+                new_mi.append(pmi)
+            self.set_mi(new_mi, self.fm)
+            if not self.run_as_you_type_box.isChecked():
+                self.display_values(str(self.textbox.toPlainText()))
+
     def set_waiting_message(self):
-        if self.break_box.isChecked():
-            for i in range(len(self.mi)):
-                self.template_value.cellWidget(i, 1).setText('')
-            self.template_value.cellWidget(0, 1).setText(
-                _("*** Breakpoints are enabled. Waiting for the 'Go' button to be pressed"))
+        if not self.run_as_you_type_box.isChecked():
+            for i in range(self.template_value.rowCount()):
+                self.template_value.cellWidget(i, 2).setText('')
+            self.template_value.cellWidget(0, 2).setText(
+                _("*** Waiting for the 'Go' button to be pressed"))
+
+    def show_code_context_menu(self, point):
+        m = self.source_code.createStandardContextMenu()
+        name = self.current_function_name
+        if (name and self.all_functions[name].object_type in
+                (StoredObjectType.StoredPythonTemplate, StoredObjectType.StoredGPMTemplate)):
+            m.addSeparator()
+            ca = m.addAction(_('Copy stored template source to editor'))
+            ca.triggered.connect(self.copy_source_code_to_editor)
+        m.exec(self.source_code.mapToGlobal(point))
+
+    def copy_source_code_to_editor(self):
+        if self.textbox.toPlainText():
+            r = question_dialog(self, _('Discard existing text?'),
+                  _('The editor contains text. Do you want to overwrite that text?'))
+            if not r:
+                return
+        self.textbox.setPlainText(self.source_code.toPlainText())
 
     def show_context_menu(self, point):
         m = self.textbox.createStandardContextMenu()
@@ -723,15 +944,40 @@ def evaluate(book, context):
         gprefs['gpm_template_editor_font_size'] = toWhat
         self.set_editor_font()
 
+    def run_as_you_type_box_changed(self, new_state):
+        gprefs['template_editor_run_as_you_type'] = new_state != 0
+        self.go_button.setEnabled(new_state == 0)
+        if new_state == 0:
+            self.set_waiting_message()
+            self.break_box.setEnabled(True)
+            enable_break_boxes = self.break_box.isChecked()
+        else:
+            self.break_box.setEnabled(False)
+            enable_break_boxes = False
+            self.display_values(str(self.textbox.toPlainText()))
+
+        self.remove_all_button.setEnabled(enable_break_boxes)
+        self.set_all_button.setEnabled(enable_break_boxes)
+        self.toggle_button.setEnabled(enable_break_boxes)
+        self.breakpoint_line_box.setEnabled(enable_break_boxes)
+        self.breakpoint_line_box_label.setEnabled(enable_break_boxes)
+
     def break_box_changed(self, new_state):
-        gprefs['template_editor_break_on_print'] = new_state != 0
-        self.go_button.setEnabled(new_state != 0)
+        gprefs['template_editor_enable_breakpoints'] = new_state != 0
         self.remove_all_button.setEnabled(new_state != 0)
         self.set_all_button.setEnabled(new_state != 0)
         self.toggle_button.setEnabled(new_state != 0)
         self.breakpoint_line_box.setEnabled(new_state != 0)
         self.breakpoint_line_box_label.setEnabled(new_state != 0)
-        if new_state == 0:
+        if gprefs['template_editor_run_as_you_type']:
+            self.display_values(str(self.textbox.toPlainText()))
+        else:
+            self.set_waiting_message()
+
+    def show_all_selected_books_changed(self, new_state):
+        gprefs['template_editor_show_all_selected_books'] = new_state != 0
+        self.setup_result_display_table()
+        if gprefs['template_editor_run_as_you_type']:
             self.display_values(str(self.textbox.toPlainText()))
         else:
             self.set_waiting_message()
@@ -743,7 +989,7 @@ def evaluate(book, context):
         self.textbox.set_clicked_line_numbers(set())
 
     def set_all_button_pressed(self):
-        self.textbox.set_clicked_line_numbers({i for i in range(1, self.textbox.blockCount()+1)})
+        self.textbox.set_clicked_line_numbers(set(range(1, self.textbox.blockCount()+1)))
 
     def toggle_button_pressed(self):
         ln = self.breakpoint_line_box.value()
@@ -784,19 +1030,18 @@ def evaluate(book, context):
                     self.update_filename_box()
                     try:
                         p = QIcon(icon_path).pixmap(QSize(128, 128))
-                        d = os.path.join(config_dir, 'cc_icons')
+                        d = os.path.join(config_dir, self.icon_dir)
                         if not os.path.exists(os.path.join(d, icon_name)):
                             if not os.path.exists(d):
                                 os.makedirs(d)
                             with open(os.path.join(d, icon_name), 'wb') as f:
                                 f.write(pixmap_to_data(p, format='PNG'))
-                    except:
+                    except Exception:
                         traceback.print_exc()
                 self.icon_files.setCurrentIndex(self.icon_files.findText(icon_name))
                 self.icon_files.adjustSize()
-        except:
+        except Exception:
             traceback.print_exc()
-        return
 
     def update_filename_box(self):
         self.icon_files.clear()
@@ -804,7 +1049,7 @@ def evaluate(book, context):
         self.icon_files.addItem('')
         self.icon_files.addItems(self.icon_file_names)
         for i,filename in enumerate(self.icon_file_names):
-            icon = QIcon(os.path.join(config_dir, 'cc_icons', filename))
+            icon = QIcon(os.path.join(config_dir, self.icon_dir, filename))
             self.icon_files.setItemIcon(i+1, icon)
 
     def color_to_clipboard(self):
@@ -836,7 +1081,7 @@ def evaluate(book, context):
             self.last_text = cur_text
             self.highlighter.regenerate_paren_positions()
             self.text_cursor_changed()
-            if not self.break_box.isChecked():
+            if self.run_as_you_type_box.isChecked():
                 self.display_values(cur_text)
             else:
                 self.set_waiting_message()
@@ -868,25 +1113,29 @@ def evaluate(book, context):
         tv = self.template_value
         l = self.template_value.selectionModel().selectedRows()
         break_on_mi = 0 if len(l) == 0 else l[0].row()
+        from calibre.gui2.ui import get_gui
+        db = get_gui().current_db
         for r,mi in enumerate(self.mi):
             w = tv.cellWidget(r, 0)
-            w.setText(mi.title)
+            w.setText(mi.get('title', _('No title provided')))
             w.setCursorPosition(0)
             if self.break_box.isChecked() and r == break_on_mi and self.is_python:
                 sys.settrace(self.trace_calls)
             else:
                 sys.settrace(None)
             try:
-                v = SafeFormat().safe_format(txt, mi, _('EXCEPTION:'),
-                                 mi, global_vars=self.global_vars,
+                v = self.formatter().safe_format(txt, self.kwargs[r] if self.kwargs is not None else mi,
+                                  _('EXCEPTION:'), mi, global_vars=self.global_vars,
                                  template_functions=self.all_functions,
                                  break_reporter=self.break_reporter if r == break_on_mi else None,
-                                 python_context_object=self.python_context_object)
-                w = tv.cellWidget(r, 1)
+                                 python_context_object=self.python_context_object, database=db)
+                w = tv.cellWidget(r, 2)
                 w.setText(v.translate(translate_table))
                 w.setCursorPosition(0)
             finally:
                 sys.settrace(None)
+            if not gprefs.get('template_editor_show_all_selected_books', True):
+                break
 
     def text_cursor_changed(self):
         cursor = self.textbox.textCursor()
@@ -910,12 +1159,15 @@ def evaluate(book, context):
         return (_('Stored user defined GPM template') if longform else _('Stored template'))
 
     def function_changed(self, toWhat):
-        name = str(self.function.itemData(toWhat))
+        self.current_function_name = name = str(self.function.itemData(toWhat))
         self.source_code.clear()
         self.documentation.clear()
         self.func_type.clear()
         if name in self.all_functions:
-            self.documentation.setPlainText(self.all_functions[name].doc)
+            doc = self.all_functions[name].doc
+            self.documentation.setHtml(self.ffml.document_to_html(doc, name))
+            if self.doc_viewer is not None:
+                self.doc_viewer.show_function(name)
             if name in self.builtins and name in self.builtin_source_dict:
                 self.source_code.setPlainText(self.builtin_source_dict[name])
             else:
@@ -924,7 +1176,7 @@ def evaluate(book, context):
 
     def table_column_resized(self, col, old, new):
         self.table_column_widths = []
-        for c in range(0, self.template_value.columnCount()):
+        for c in range(self.template_value.columnCount()):
             self.table_column_widths.append(self.template_value.columnWidth(c))
 
     def save_geometry(self):
@@ -943,7 +1195,7 @@ def evaluate(book, context):
 
     def accept(self):
         txt = str(self.textbox.toPlainText()).rstrip()
-        if (self.coloring or self.iconing or self.embleming) and not txt:
+        if (self.required_txt) and not txt:
             error_dialog(self, _('No template provided'),
                 _('The template box cannot be empty'), show=True)
             return
@@ -972,6 +1224,8 @@ def evaluate(book, context):
         QDialog.accept(self)
         if self.dialog_number is not None:
             self.tester_closed.emit(txt, self.dialog_number)
+        if self.doc_viewer is not None:
+            self.doc_viewer.close()
 
     def reject(self):
         self.save_geometry()
@@ -987,6 +1241,8 @@ def evaluate(book, context):
                     break
         if self.dialog_number is not None:
             self.tester_closed.emit(None, self.dialog_number)
+        if self.doc_viewer is not None:
+            self.doc_viewer.close()
 
 
 class BreakReporterItem(QTableWidgetItem):
@@ -1015,7 +1271,7 @@ class BreakReporterBase(QDialog):
             self.table_column_widths = \
                         gprefs.get('template_editor_break_table_widths', None)
             t.setColumnWidth(0, self.table_column_widths[0])
-        except:
+        except Exception:
             t.setColumnWidth(0, t.fontMetrics().averageCharWidth() * 20)
         t.horizontalHeader().sectionResized.connect(self.table_column_resized)
         t.horizontalHeader().setStretchLastSection(True)
@@ -1064,7 +1320,7 @@ class BreakReporterBase(QDialog):
 
     def table_column_resized(self, col, old, new):
         self.table_column_widths = []
-        for c in range(0, self.table.columnCount()):
+        for c in range(self.table.columnCount()):
             self.table_column_widths.append(self.table.columnWidth(c))
 
     def get_field_keys(self):

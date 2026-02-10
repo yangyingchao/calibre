@@ -7,11 +7,9 @@ from collections import defaultdict, deque
 
 from qt.core import QTextBlock, QTextBlockUserData, QTextCursor, QTextFormat, QTextLayout, QTimer
 
+from calibre.gui2.tweak_book.editor.themes import highlight_to_char_format
 from calibre.gui2.widgets import BusyCursor
 from calibre.utils.icu import utf16_length
-from polyglot.builtins import iteritems
-
-from ..themes import highlight_to_char_format
 
 
 def run_loop(user_data, state_map, formats, text):
@@ -83,7 +81,7 @@ class SyntaxHighlighter:
         return bool(self.requests)
 
     def apply_theme(self, theme):
-        self.theme = {k:highlight_to_char_format(v) for k, v in iteritems(theme)}
+        self.theme = {k:highlight_to_char_format(v) for k, v in theme.items()}
         self.create_formats()
         self.rehighlight()
 

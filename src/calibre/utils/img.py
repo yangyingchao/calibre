@@ -8,7 +8,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from contextlib import suppress
 from io import BytesIO
 from threading import Thread
 
@@ -22,7 +21,6 @@ from calibre.utils.filenames import atomic_rename
 from calibre.utils.imghdr import what
 from calibre.utils.resources import get_image_path as I
 from calibre_extensions import imageops
-from polyglot.builtins import string_or_bytes
 
 
 # Utilities {{{
@@ -63,8 +61,8 @@ def load_jxr_data(data):
 
 # }}}
 
-# png <-> gif {{{
 
+# png <-> gif {{{
 
 def png_data_to_gif_data(data):
     from PIL import Image
@@ -103,13 +101,12 @@ def gif_data_to_png_data(data, discard_animation=False):
 
 # }}}
 
+
 # Loading images {{{
 
-
 def set_image_allocation_limit(size_in_mb=1024):
-    with suppress(ImportError):  # for people running form source
-        from calibre_extensions.progress_indicator import set_image_allocation_limit as impl
-        impl(size_in_mb)
+    from calibre_extensions.progress_indicator import set_image_allocation_limit as impl
+    impl(size_in_mb)
 
 
 def null_image():
@@ -123,11 +120,18 @@ def image_from_data(data):
         return data
     set_image_allocation_limit()
     i = QImage()
-    if not i.loadFromData(data):
+    if not imageops.load_from_data_without_gil(i, data):
         q = what(None, data)
         if q == 'jxr':
             return load_jxr_data(data)
-        raise NotImage(f'Not a valid image (detected type: {q})')
+        ba = QByteArray(data)
+        buf = QBuffer(ba)
+        buf.open(QIODevice.OpenModeFlag.ReadOnly)
+        r = QImageReader(buf)
+        i = r.read()
+        buf.close()
+        if i.isNull():
+            raise NotImage(f'Not a valid image (detected type: {q}). Error: {r.errorString()}')
     return i
 
 
@@ -149,7 +153,7 @@ def image_from_x(x):
         return image_from_data(bytes(x))
     if isinstance(x, QPixmap):
         return x.toImage()
-    raise TypeError('Unknown image src type: %s' % type(x))
+    raise TypeError(f'Unknown image src type: {type(x)}')
 
 
 def image_and_format_from_data(data):
@@ -159,11 +163,14 @@ def image_and_format_from_data(data):
     buf.open(QIODevice.OpenModeFlag.ReadOnly)
     r = QImageReader(buf)
     fmt = bytes(r.format()).decode('utf-8')
-    return r.read(), fmt
+    ans = r.read()
+    buf.close()
+    del r
+    return ans, fmt
 # }}}
 
-# Saving images {{{
 
+# Saving images {{{
 
 def image_to_data(img, compression_quality=95, fmt='JPEG', png_compression_level=9, jpeg_optimized=True, jpeg_progressive=False):
     '''
@@ -302,8 +309,8 @@ def save_cover_data_to(
         f.write(image_to_data(img, compression_quality, fmt, compression_quality // 10) if changed else data)
 # }}}
 
-# Overlaying images {{{
 
+# Overlaying images {{{
 
 def blend_on_canvas(img, width, height, bgcolor='#ffffff'):
     ' Blend the `img` onto a canvas with the specified background color and size '
@@ -370,8 +377,8 @@ def blend_image(img, bgcolor='#ffffff'):
     return canvas
 # }}}
 
-# Image borders {{{
 
+# Image borders {{{
 
 def add_borders_to_image(img, left=0, top=0, right=0, bottom=0, border_color='#ffffff'):
     img = image_from_data(img)
@@ -394,8 +401,8 @@ def remove_borders_from_image(img, fuzz=None):
     return ans if ans.size() != img.size() else img
 # }}}
 
-# Cropping/scaling of images {{{
 
+# Cropping/scaling of images {{{
 
 def resize_image(img, width, height):
     return img.scaled(int(width), int(height), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
@@ -426,9 +433,8 @@ def scale_image(data, width=60, height=80, compression_quality=70, as_png=False,
         scaled, nwidth, nheight = fit_image(img.width(), img.height(), width, height)
         if scaled:
             img = img.scaled(int(nwidth), int(nheight), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-    else:
-        if img.width() != width or img.height() != height:
-            img = img.scaled(int(width), int(height), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    elif img.width() != width or img.height() != height:
+        img = img.scaled(int(width), int(height), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
     fmt = 'PNG' if as_png else 'JPEG'
     w, h = img.width(), img.height()
     return w, h, image_to_data(img, compression_quality=compression_quality, fmt=fmt)
@@ -450,8 +456,8 @@ def crop_image(img, x, y, width, height):
 
 # }}}
 
-# Image transformations {{{
 
+# Image transformations {{{
 
 def grayscale_image(img):
     return imageops.grayscale(image_from_data(img))
@@ -516,7 +522,7 @@ def quantize_image(img, max_colors=256, dither=True, palette=''):
     img = image_from_data(img)
     if img.hasAlphaChannel():
         img = blend_image(img)
-    if palette and isinstance(palette, string_or_bytes):
+    if palette and isinstance(palette, (str, bytes)):
         palette = palette.split()
     return imageops.quantize(img, int(max_colors), dither, tuple(QColor(x).rgb() for x in palette))
 
@@ -536,8 +542,8 @@ def eink_dither_image(img):
 
 # }}}
 
-# Optimization of images {{{
 
+# Optimization of images {{{
 
 def run_optimizer(file_path, cmd, as_filter=False, input_data=None):
     file_path = os.path.abspath(file_path)
@@ -595,7 +601,7 @@ def run_optimizer(file_path, cmd, as_filter=False, input_data=None):
             except OSError:
                 sz = 0
             if sz < 1:
-                return '%s returned a zero size image' % cmd[0]
+                return f'{cmd[0]} returned a zero size image'
             if sz < input_size:
                 shutil.copystat(file_path, outfile)
                 atomic_rename(outfile, file_path)
@@ -647,7 +653,7 @@ def encode_jpeg(file_path, quality=80):
     cmd = [exe] + '-optimize -progressive -maxmemory 100M -quality'.split() + [str(quality)]
     img = QImage()
     if not img.load(file_path):
-        raise ValueError('%s is not a valid image file' % file_path)
+        raise ValueError(f'{file_path} is not a valid image file')
     ba = QByteArray()
     buf = QBuffer(ba)
     buf.open(QIODevice.OpenModeFlag.WriteOnly)
@@ -660,15 +666,17 @@ def encode_jpeg(file_path, quality=80):
 
 def encode_webp(file_path, quality=75, m=6, metadata='all'):
     return run_cwebp(file_path, False, quality, m, metadata)
+
 # }}}
+
 
 # PIL images {{{
 def align8to32(bytes, width, mode):
-    """
+    '''
     converts each scanline of data from 8 bit to 32 bit aligned
-    """
+    '''
 
-    bits_per_pixel = {"1": 1, "L": 8, "P": 8, "I;16": 16}[mode]
+    bits_per_pixel = {'1': 1, 'L': 8, 'P': 8, 'I;16': 16}[mode]
 
     # calculate bytes per line and the extra padding if needed
     bits_per_line = bits_per_pixel * width
@@ -682,34 +690,34 @@ def align8to32(bytes, width, mode):
         return bytes
 
     new_data = [
-        bytes[i * bytes_per_line : (i + 1) * bytes_per_line] + b"\x00" * extra_padding
+        bytes[i * bytes_per_line : (i + 1) * bytes_per_line] + b'\x00' * extra_padding
         for i in range(len(bytes) // bytes_per_line)
     ]
 
-    return b"".join(new_data)
+    return b''.join(new_data)
 
 
 def convert_PIL_image_to_pixmap(im, device_pixel_ratio=1.0):
     data = None
     colortable = None
-    if im.mode == "RGBA":
+    if im.mode == 'RGBA':
         fmt = QImage.Format.Format_RGBA8888
-        data = im.tobytes("raw", "RGBA")
-    elif im.mode == "1":
+        data = im.tobytes('raw', 'RGBA')
+    elif im.mode == '1':
         fmt = QImage.Format.Format_Mono
-    elif im.mode == "L":
+    elif im.mode == 'L':
         fmt = QImage.Format.Format_Indexed8
         colortable = [qRgba(i, i, i, 255) & 0xFFFFFFFF for i in range(256)]
-    elif im.mode == "P":
+    elif im.mode == 'P':
         fmt = QImage.Format.Format_Indexed8
         palette = im.getpalette()
         colortable = [qRgba(*palette[i : i + 3], 255) & 0xFFFFFFFF for i in range(0, len(palette), 3)]
-    elif im.mode == "I;16":
+    elif im.mode == 'I;16':
         im = im.point(lambda i: i * 256)
         fmt = QImage.Format.Format_Grayscale16
     else:
         fmt = QImage.Format.Format_RGBX8888
-        data = im.convert("RGBA").tobytes("raw", "RGBA")
+        data = im.convert('RGBA').tobytes('raw', 'RGBA')
 
     size = im.size
     data = data or align8to32(im.tobytes(), size[0], im.mode)
@@ -719,7 +727,83 @@ def convert_PIL_image_to_pixmap(im, device_pixel_ratio=1.0):
     if colortable:
         qimg.setColorTable(colortable)
     return QPixmap.fromImage(qimg)
+
+
+def read_xmp_from_pil_image(im) -> str:
+    fmt = im.format.lower()
+    xml = ''
+    if fmt == 'jpeg':
+        for segment, content in im.applist:
+            if segment == 'APP1':
+                marker, xmp_tags = content.split(b'\x00')[:2]
+                if marker == b'http://ns.adobe.com/xap/1.0/':
+                    xml = xmp_tags
+                    break
+    elif fmt == 'png':
+        xml = im.info.get('XML:com.adobe.xmp', '')
+    elif fmt == 'webp':
+        xml = im.info.get('xmp', '')
+    elif fmt == 'tiff':
+        xml = im.tag_v2.get(700, '')
+    return xml
+
+
+def read_text_from_container(container, target_lang=''):
+    lang_map = {}
+    for li in container.xpath('descendant::*[local-name()="li"]'):
+        if li.text:
+            lang = li.attrib.get('{http://www.w3.org/XML/1998/namespace}lang', 'x-default')
+            lang_map[lang] = li.text
+    if not target_lang and 'x-default' in lang_map:
+        return lang_map['x-default']
+    if target_lang in lang_map:
+        return lang_map[target_lang]
+    from calibre.utils.localization import canonicalize_lang
+    target_lang = canonicalize_lang(target_lang)
+    if target_lang:
+        for lang, ans in lang_map.items():
+            if canonicalize_lang(lang) == target_lang:
+                return ans
+    return lang_map.get('x-default', '')
+
+
+def read_alt_text_from_xmp(xmp, target_lang='') -> str:
+    from lxml import etree
+
+    from calibre.utils.xml_parse import safe_xml_fromstring
+    try:
+        root = safe_xml_fromstring(xmp)
+    except Exception:
+        return ''
+    # print(etree.tostring(root, encoding='utf-8', pretty_print=True).decode())
+    for a in root.xpath('//*[local-name()="AltTextAccessibility"]'):
+        if ans := read_text_from_container(a, target_lang):
+            return ans
+
+    for d in etree.XPath('//dc:description', namespaces={'dc': 'http://purl.org/dc/elements/1.1/'})(root):
+        if ans := read_text_from_container(d, target_lang):
+            return ans
+    return ''
+
+
+def read_alt_text(pil_im_or_path, target_lang='') -> str:
+    if isinstance(pil_im_or_path, str):
+        from PIL import Image
+        im = Image.open(pil_im_or_path)
+    else:
+        im = pil_im_or_path
+    xmp = read_xmp_from_pil_image(im)
+    if xmp:
+        if alt := read_alt_text_from_xmp(xmp, target_lang).strip():
+            return alt
+    exif = im.getexif()
+    if exif:
+        if desc := exif.get(270):
+            return desc.strip()
+    return ''
+
 # }}}
+
 
 def test():  # {{{
     from glob import glob
@@ -731,20 +815,20 @@ def test():  # {{{
         save_image(img, 'test.jpg')
         ret = optimize_jpeg('test.jpg')
         if ret is not None:
-            raise SystemExit('optimize_jpeg failed: %s' % ret)
+            raise SystemExit(f'optimize_jpeg failed: {ret}')
         ret = encode_jpeg('test.jpg')
         if ret is not None:
-            raise SystemExit('encode_jpeg failed: %s' % ret)
+            raise SystemExit(f'encode_jpeg failed: {ret}')
         shutil.copyfile(I('lt.png'), 'test.png')
         ret = optimize_png('test.png')
         if ret is not None:
-            raise SystemExit('optimize_png failed: %s' % ret)
+            raise SystemExit(f'optimize_png failed: {ret}')
         if glob('*.bak'):
             raise SystemExit('Spurious .bak files left behind')
-        save_image(img, 'test.webp',  compression_quality=100)
+        save_image(img, 'test.webp', compression_quality=100)
         ret = optimize_webp('test.webp')
         if ret is not None:
-            raise SystemExit('optimize_webp failed: %s' % ret)
+            raise SystemExit(f'optimize_webp failed: {ret}')
     quantize_image(img)
     oil_paint_image(img)
     gaussian_sharpen_image(img)

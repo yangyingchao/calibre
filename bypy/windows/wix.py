@@ -9,7 +9,7 @@ from itertools import count
 from bypy.constants import is64bit
 from bypy.utils import run
 
-WIX = os.path.expanduser('~/.dotnet/tools/wix.exe')
+WIX = os.path.join(os.environ['USERPROFILE'], r'.dotnet\tools\wix.exe')
 if is64bit:
     UPGRADE_CODE = '5DD881FF-756B-4097-9D82-8C0F11D521EA'
 else:
@@ -37,6 +37,12 @@ def create_installer(env, compression_level='9'):
     with open(j(d(__file__), 'wix-template.xml'), 'rb') as f:
         template = f.read().decode('utf-8')
 
+    cmd = [WIX, '--version']
+    WIXVERSION = run(*cmd, get_output=True).decode('utf-8').split('.')[0]
+    if int(WIXVERSION) >= 5:
+        # Virtual Symbol "WixUISupportPerUser" needs to be overridden in WIX V5 https://wixtoolset.org/docs/fivefour/
+        template = template.replace('WixUISupportPerUser', 'override WixUISupportPerUser')
+
     components, smap = get_components_from_files(env)
     wxs = template.format(
         app=calibre_constants['appname'],
@@ -45,6 +51,9 @@ def create_installer(env, compression_level='9'):
         x64=' 64bit' if is64bit else '',
         compression='high',
         app_components=components,
+        main_app_uid=calibre_constants['MAIN_APP_UID'],
+        viewer_app_uid=calibre_constants['VIEWER_APP_UID'],
+        editor_app_uid=calibre_constants['EDITOR_APP_UID'],
         exe_map=smap,
         main_icon=j(env.src_root, 'icons', 'library.ico'),
         viewer_icon=j(env.src_root, 'icons', 'viewer.ico'),

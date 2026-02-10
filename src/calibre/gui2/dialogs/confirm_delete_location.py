@@ -2,8 +2,8 @@
 
 
 __license__   = 'GPL v3'
-__copyright__ = '2008, Kovid Goyal kovid@kovidgoyal.net' \
-                '2010, John Schember <john@nachtimwald.com>'
+__copyright__ = ('2008, Kovid Goyal kovid@kovidgoyal.net'
+                 '2010, John Schember <john@nachtimwald.com>')
 __docformat__ = 'restructuredtext en'
 
 from qt.core import QDialog, QHBoxLayout, QIcon, QLabel, QPushButton, QSizePolicy, Qt, QVBoxLayout
@@ -63,7 +63,7 @@ class Dialog(QDialog):
             b = getattr(self, 'button_'+x)
             try:
                 b.clicked.disconnect()
-            except:
+            except Exception:
                 pass
 
 

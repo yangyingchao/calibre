@@ -5,11 +5,11 @@ import atexit
 import errno
 import os
 import stat
-import tempfile
 import time
 from functools import partial
 
 from calibre.constants import __appname__, filesystem_encoding, islinux, ismacos, iswindows
+from calibre.ptempfile import base_dir, get_default_tempdir
 from calibre.utils.monotonic import monotonic
 from calibre_extensions import speedup
 
@@ -145,7 +145,6 @@ elif islinux:
         name = '{}-singleinstance-{}-{}'.format(
             __appname__, (os.geteuid() if per_user else ''), name
         )
-        name = name
         address = '\0' + name.replace(' ', '_')
         sock = socket.socket(family=socket.AF_UNIX)
         try:
@@ -167,7 +166,8 @@ else:
             __appname__, (os.geteuid() if per_user else ''), name
         )
         home = os.path.expanduser('~')
-        locs = ['/var/lock', home, tempfile.gettempdir()]
+        base_dir()  # initialize get_default_tempdir()
+        locs = ['/var/lock', home, get_default_tempdir()]
         if ismacos:
             locs.insert(0, '/Library/Caches')
         for loc in locs:

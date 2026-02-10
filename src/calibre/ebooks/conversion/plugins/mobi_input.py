@@ -30,14 +30,14 @@ class MOBIInput(InputFormatPlugin):
             if mr.kf8_type is None:
                 mr.extract_content('.', parse_cache)
 
-        except:
+        except Exception:
             mr = MobiReader(stream, log, options.input_encoding,
                         options.debug_pipeline, try_extra_data_fix=True)
             if mr.kf8_type is None:
                 mr.extract_content('.', parse_cache)
 
         if mr.kf8_type is not None:
-            log('Found KF8 MOBI of type %r'%mr.kf8_type)
+            log(f'Found KF8 MOBI of type {mr.kf8_type!r}')
             if mr.kf8_type == 'joint':
                 self.mobi_is_joint = True
             from calibre.ebooks.mobi.reader.mobi8 import Mobi8Reader

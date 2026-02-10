@@ -46,7 +46,7 @@ class MultiDeleter(QObject):  # {{{
             self.cleanup()
             return
         id_ = self.ids.pop()
-        title = 'id:%d'%id_
+        title = f'id:{id_}'
         try:
             title_ = self.model.db.title(id_, index_is_id=True)
             if title_:
@@ -54,7 +54,7 @@ class MultiDeleter(QObject):  # {{{
             self.model.db.delete_book(id_, notify=False, commit=False,
                     permanent=False)
             self.deleted_ids.append(id_)
-        except:
+        except Exception:
             import traceback
             self.failures.append((id_, title, traceback.format_exc()))
         single_shot(self.delete_one)
@@ -121,15 +121,17 @@ class DeleteAction(InterfaceActionWithLibraryDrop):
         for action in list(self.delete_menu.actions())[1:]:
             action.setEnabled(enabled)
 
-    def _get_selected_formats(self, msg, ids, exclude=False, single=False):
+    def _get_selected_formats(self, msg, ids, exclude=False, single=False, add_cover=False):
         from calibre.gui2.dialogs.select_formats import SelectFormats
         c = Counter()
         db = self.gui.library_view.model().db
-        for x in ids:
-            fmts_ = db.formats(x, index_is_id=True, verify_formats=False)
+        for book_id in ids:
+            fmts_ = db.formats(book_id, index_is_id=True, verify_formats=False)
             if fmts_:
                 for x in frozenset(x.lower() for x in fmts_.split(',')):
                     c[x] += 1
+            if add_cover and db.new_api.field_for('cover', book_id, default_value=False):
+                c['..cover..'] += 1
         d = SelectFormats(c, msg, parent=self.gui, exclude=exclude,
                 single=single)
         if d.exec() != QDialog.DialogCode.Accepted:
@@ -149,6 +151,7 @@ class DeleteAction(InterfaceActionWithLibraryDrop):
         self.gui.library_view.model().refresh_ids(ids)
         self.gui.library_view.model().current_changed(self.gui.library_view.currentIndex(),
                 self.gui.library_view.currentIndex())
+        self.gui.tags_view.recount()
 
     def remove_format_by_id(self, book_id, fmt):
         title = self.gui.current_db.title(book_id, index_is_id=True)
@@ -293,9 +296,9 @@ class DeleteAction(InterfaceActionWithLibraryDrop):
             cv, row = self.gui.current_view(), -1
             if cv is not self.gui.library_view:
                 row = cv.currentIndex().row()
-            for model in paths:
-                job = self.gui.remove_paths(paths[model])
-                self.delete_memory[job] = (paths[model], model)
+            for model, entrys in paths.items():
+                job = self.gui.remove_paths(entrys)
+                self.delete_memory[job] = (entrys, model)
 
                 model.mark_for_deletion(job, ids[model], rows_are_ids=True)
             self.gui.status_bar.show_message(_('Deleting books from device.'), 1000)
@@ -435,7 +438,7 @@ class DeleteAction(InterfaceActionWithLibraryDrop):
             try:
                 view.model().delete_books_by_id(to_delete_ids)
             except OSError as err:
-                err.locking_violation_msg = _('Could not change on-disk location of this book\'s files.')
+                err.locking_violation_msg = _("Could not change on-disk location of this book's files.")
                 raise
             self.library_ids_deleted2(to_delete_ids, next_id=next_id, can_undo=True)
         else:

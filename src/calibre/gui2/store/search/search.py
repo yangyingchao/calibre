@@ -95,6 +95,9 @@ class SearchDialog(QDialog, Ui_Dialog):
 
         self.adv_search_button.clicked.connect(self.build_adv_search)
         self.search.clicked.connect(self.toggle_search)
+        self.search_title.returnPressed.connect(self.toggle_search)
+        self.search_author.returnPressed.connect(self.toggle_search)
+        self.search_edit.returnPressed.connect(self.toggle_search)
         self.checker.timeout.connect(self.get_results)
         self.progress_checker.timeout.connect(self.check_progress)
         self.results_view.activated.connect(self.result_item_activated)
@@ -155,9 +158,9 @@ class SearchDialog(QDialog, Ui_Dialog):
         self.results_view.setColumnWidth(0, 85)
         total = total - 85
         # Title / Author
-        self.results_view.setColumnWidth(1,int(total*.40))
+        self.results_view.setColumnWidth(1, int(total*.40))
         # Price
-        self.results_view.setColumnWidth(2,int(total*.12))
+        self.results_view.setColumnWidth(2, int(total*.12))
         # DRM
         self.results_view.setColumnWidth(3, int(total*.15))
         # Store / Formats
@@ -181,7 +184,7 @@ class SearchDialog(QDialog, Ui_Dialog):
         # Prevent hitting the enter key twice in quick succession causing
         # the search to start and stop
         self.search.setEnabled(False)
-        QTimer.singleShot(1000, lambda :self.search.setEnabled(True))
+        QTimer.singleShot(1000, lambda: self.search.setEnabled(True))
 
     def do_search(self):
         # Stop all running threads.
@@ -193,12 +196,12 @@ class SearchDialog(QDialog, Ui_Dialog):
         # Don't start a search if there is nothing to search for.
         query = []
         if self.search_title.text():
-            query.append('title2:"~%s"' % str(self.search_title.text()).replace('"', ' '))
+            query.append('title2:"~{}"'.format(str(self.search_title.text()).replace('"', ' ')))
         if self.search_author.text():
-            query.append('author2:"%s"' % str(self.search_author.text()).replace('"', ' '))
+            query.append('author2:"{}"'.format(str(self.search_author.text()).replace('"', ' ')))
         if self.search_edit.text():
             query.append(str(self.search_edit.text()))
-        query = " ".join(query)
+        query = ' '.join(query)
         if not query.strip():
             error_dialog(self, _('No query'),
                         _('You must enter a title, author or keyword to'
@@ -241,14 +244,14 @@ class SearchDialog(QDialog, Ui_Dialog):
         query = query.replace('<', '')
         # Remove the prefix.
         for loc in ('all', 'author', 'author2', 'authors', 'title', 'title2'):
-            query = re.sub(r'%s:"(?P<a>[^\s"]+)"' % loc, r'\g<a>', query)
-            query = query.replace('%s:' % loc, '')
+            query = re.sub(rf'{loc}:"(?P<a>[^\s"]+)"', r'\g<a>', query)
+            query = query.replace(f'{loc}:', '')
         # Remove the prefix and search text.
         for loc in ('cover', 'download', 'downloads', 'drm', 'format', 'formats', 'price', 'store'):
-            query = re.sub(r'%s:"[^"]"' % loc, '', query)
-            query = re.sub(r'%s:[^\s]*' % loc, '', query)
+            query = re.sub(rf'{loc}:"[^"]"', '', query)
+            query = re.sub(rf'{loc}:[^\s]*', '', query)
         # Remove logic.
-        query = re.sub(r'(^|\s|")(and|not|or|a|the|is|of)(\s|$|")', r' ', query)
+        query = re.sub(r'(^|\s|")(and|not|or|a|the|is|of)(\s|$|")', ' ', query)
         # Remove "
         query = query.replace('"', '')
         # Remove excess whitespace.
@@ -339,7 +342,7 @@ class SearchDialog(QDialog, Ui_Dialog):
         tab_widget.addTab(search_config_widget, _('Configure s&earch'))
 
         # Restore dialog state.
-        self.restore_geometry(self.config, 'config_dialog_geometry')
+        d.restore_geometry(self.config, 'config_dialog_geometry')
         tab_index = self.config.get('config_dialog_tab_index', 0)
         tab_index = min(tab_index, tab_widget.count() - 1)
         tab_widget.setCurrentIndex(tab_index)
@@ -347,7 +350,7 @@ class SearchDialog(QDialog, Ui_Dialog):
         d.exec()
 
         # Save dialog state.
-        self.save_geometry(self.config, 'config_dialog_geometry')
+        d.save_geometry(self.config, 'config_dialog_geometry')
         self.config['config_dialog_tab_index'] = tab_widget.currentIndex()
 
         search_config_widget.save_settings()
@@ -374,10 +377,9 @@ class SearchDialog(QDialog, Ui_Dialog):
         if self.hang_check >= self.hang_time:
             self.search_pool.abort()
             self.checker.stop()
-        else:
-            # Stop the checker if not threads are running.
-            if not self.search_pool.threads_running() and not self.search_pool.has_tasks():
-                self.checker.stop()
+        # Stop the checker if not threads are running.
+        elif not self.search_pool.threads_running() and not self.search_pool.has_tasks():
+            self.checker.stop()
 
         while self.search_pool.has_results():
             res, store_plugin = self.search_pool.get_result()
@@ -385,10 +387,10 @@ class SearchDialog(QDialog, Ui_Dialog):
                 self.results_view.model().add_result(res, store_plugin)
 
         if not self.search_pool.threads_running() and not self.results_view.model().has_results():
-            info_dialog(self, _('No matches'), _('Couldn\'t find any books matching your query.'), show=True, show_copy_button=False)
+            info_dialog(self, _('No matches'), _("Couldn't find any books matching your query."), show=True, show_copy_button=False)
 
     def update_book_total(self, total):
-        self.total.setText('%s' % total)
+        self.total.setText(f'{total}')
 
     def result_item_activated(self, index):
         result = self.results_view.model().get_result(index)

@@ -34,7 +34,6 @@ from qt.core import (
     QLineEdit,
     QMenu,
     QPalette,
-    QPlainTextEdit,
     QPointF,
     QPushButton,
     QSize,
@@ -78,6 +77,7 @@ from calibre.gui2 import (
 from calibre.gui2.book_details import resolved_css
 from calibre.gui2.dialogs.progress import ProgressDialog
 from calibre.gui2.flow_toolbar import create_flow_toolbar
+from calibre.gui2.tweak_book.widgets import PlainTextEdit
 from calibre.gui2.widgets import LineEditECM
 from calibre.gui2.widgets2 import to_plain_text
 from calibre.startup import connect_lambda
@@ -85,7 +85,6 @@ from calibre.utils.cleantext import clean_xml_chars
 from calibre.utils.config import tweaks
 from calibre.utils.filenames import make_long_path_useable
 from calibre.utils.imghdr import what
-from polyglot.builtins import iteritems, itervalues
 
 # Cleanup Qt markup {{{
 
@@ -121,7 +120,7 @@ def lift_styles(tag, style_map):
         if common_props is None:
             common_props = style.copy()
         else:
-            for k, v in tuple(iteritems(common_props)):
+            for k, v in tuple(common_props.items()):
                 if style.get(k) != v:
                     del common_props[k]
     if not has_text and common_props:
@@ -271,14 +270,14 @@ def cleanup_qt_markup(root):
                 s['margin-right'] = '0.5em'
             elif s == {'float': 'right'}:
                 s['margin-left'] = '0.5em'
-    for style in itervalues(style_map):
+    for style in style_map.values():
         filter_qt_styles(style)
         fw = style.get('font-weight')
         if fw in ('600', '700'):
             style['font-weight'] = 'bold'
-    for tag, style in iteritems(style_map):
+    for tag, style in style_map.items():
         if style:
-            tag.set('style', '; '.join(f'{k}: {v}' for k, v in iteritems(style)))
+            tag.set('style', '; '.join(f'{k}: {v}' for k, v in style.items()))
         else:
             tag.attrib.pop('style', None)
     for span in root.xpath('//span[not(@style)]'):
@@ -320,12 +319,13 @@ def fix_html(original_html, original_txt, remove_comments=True, callback=None):
             x.tag not in ('script', 'style')]
 
     if len(elems) > 1:
-        ans = '<div>%s</div>'%(''.join(elems))
+        ans = '<div>{}</div>'.format(''.join(elems))
     else:
         ans = ''.join(elems)
         if not ans.startswith('<'):
-            ans = '<p>%s</p>'%ans
+            ans = f'<p>{ans}</p>'
     return xml_replace_entities(ans)
+
 
 class EditorWidget(QTextEdit, LineEditECM):  # {{{
 
@@ -367,14 +367,17 @@ class EditorWidget(QTextEdit, LineEditECM):  # {{{
         self._parent = weakref.ref(parent)
         self.shortcut_map = {}
 
-        def r(name, icon, text, checkable=False, shortcut=None):
-            ac = QAction(QIcon.ic(icon + '.png'), text, self)
+        def r(name, icon, text, checkable=False, shortcut=None, callback=None):
+            ac = QAction(QIcon.ic(icon + '.png'), text, self) if icon else QAction(text, self)
             ac.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             if checkable:
                 ac.setCheckable(checkable)
             setattr(self, 'action_'+name, ac)
-            ac.triggered.connect(getattr(self, 'do_' + name))
+            callback = callback or getattr(self, 'do_' + name)
+            ac.triggered.connect(callback)
             if shortcut is not None:
+                if isinstance(shortcut, str):
+                    shortcut = QKeySequence(shortcut, QKeySequence.SequenceFormat.PortableText)
                 self.shortcut_map[shortcut] = ac
                 sc = shortcut if isinstance(shortcut, QKeySequence) else QKeySequence(shortcut)
                 ac.setShortcut(sc)
@@ -399,7 +402,7 @@ class EditorWidget(QTextEdit, LineEditECM):  # {{{
         r('remove_format', 'edit-clear', _('Remove formatting'))
         r('copy', 'edit-copy', _('Copy'), shortcut=QKeySequence.StandardKey.Copy)
         r('paste', 'edit-paste', _('Paste'), shortcut=QKeySequence.StandardKey.Paste)
-        r('paste_and_match_style', 'edit-paste', _('Paste and match style'), shortcut=QKeySequence('ctrl+shift+v', QKeySequence.SequenceFormat.PortableText))
+        r('paste_and_match_style', 'edit-paste', _('Paste and match style'), shortcut='ctrl+shift+v')
         r('cut', 'edit-cut', _('Cut'), shortcut=QKeySequence.StandardKey.Cut)
         r('indent', 'format-indent-more', _('Increase indentation'))
         r('outdent', 'format-indent-less', _('Decrease indentation'))
@@ -408,10 +411,15 @@ class EditorWidget(QTextEdit, LineEditECM):  # {{{
         r('color', 'format-text-color', _('Foreground color'))
         r('background', 'format-fill-color', _('Background color'))
         r('insert_link', 'insert-link', _('Insert link') if self.insert_images_separately else _('Insert link or image'),
-          shortcut=QKeySequence('Ctrl+l', QKeySequence.SequenceFormat.PortableText))
-        r('insert_image', 'view-image', _('Insert image'), shortcut=QKeySequence('Ctrl+p', QKeySequence.SequenceFormat.PortableText))
+          shortcut='Ctrl+l')
+        r('insert_image', 'view-image', _('Insert image'), shortcut='Ctrl+p')
         r('insert_hr', 'format-text-hr', _('Insert separator'),)
         r('clear', 'trash', _('Clear'))
+        r('upper_case', '', _('Upper case'), shortcut='Ctrl+alt+u', callback=self.upper_case)
+        r('lower_case', '', _('Lower case'), shortcut='Ctrl+alt+l', callback=self.lower_case)
+        r('capitalize', '', _('Capitalize'), shortcut='Ctrl+alt+c', callback=self.capitalize)
+        r('swap_case', '', _('Swap case'), shortcut='Ctrl+alt+s', callback=self.swap_case)
+        r('title_case', '', _('Title case'), shortcut='Ctrl+alt+t', callback=self.title_case)
 
         self.action_block_style = QAction(QIcon.ic('format-text-heading.png'),
                 _('Style text block'), self)
@@ -1177,7 +1185,13 @@ class EditorWidget(QTextEdit, LineEditECM):  # {{{
         menu.addMenu(m)
 
         if st and st.strip():
-            self.create_change_case_menu(menu)
+            m = QMenu(_('Change case'), menu)
+            m.addAction(self.action_upper_case)
+            m.addAction(self.action_lower_case)
+            m.addAction(self.action_swap_case)
+            m.addAction(self.action_title_case)
+            m.addAction(self.action_capitalize)
+            menu.addMenu(m)
         parent = self._parent()
         if hasattr(parent, 'toolbars_visible'):
             vis = parent.toolbars_visible
@@ -1194,11 +1208,121 @@ class EditorWidget(QTextEdit, LineEditECM):  # {{{
         menu.addAction(_('Smarten punctuation'), parent.smarten_punctuation)
         menu.exec(ev.globalPos())
 
+    def modify_case_operation(self, func):
+        cursor: QTextCursor = self.textCursor()
+        if not cursor.hasSelection():
+            cursor.select(QTextCursor.SelectionType.Document)
+        start = cursor.selectionStart()
+        end = cursor.selectionEnd()
+        doc = self.document()
+
+        # Helper: collect blocks intersecting the selection
+        blocks = []
+
+        # Create a cursor at start to find the first block
+        sc = QTextCursor(doc)
+        sc.setPosition(start)
+        first_block = sc.block()
+
+        block = first_block
+        while block.isValid() and block.position() < end:
+            block_start = block.position()
+            block_len = block.length()  # includes block separator
+            block_end = block_start + block_len
+            seg_start = max(start, block_start)
+            seg_end = min(end, block_end)
+            if seg_start >= seg_end:
+                block = block.next()
+                continue
+
+            # record block-level formatting (block format and list format if any)
+            bf = QTextBlockFormat(block.blockFormat())
+            list_format = None
+            blist = block.textList()
+            if blist is not None:
+                list_format = QTextListFormat(blist.format())
+
+            # iterate fragments in the block and extract only the overlapped text pieces
+            fragments = []
+            fragment_text = ''
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                if frag.isValid():
+                    fpos = frag.position()
+                    flen = frag.length()
+                    fend = fpos + flen
+                    ov_start = max(seg_start, fpos)
+                    ov_end = min(seg_end, fend)
+                    if ov_start < ov_end:
+                        rel_start = ov_start - fpos
+                        rel_len = ov_end - ov_start
+                        text = frag.text()[rel_start:rel_start + rel_len]
+                        fmt = QTextCharFormat(frag.charFormat())
+                        fragments.append((len(fragment_text), len(text), fmt))
+                        fragment_text += text
+                it += 1
+
+            blocks.append({
+                'blockFormat': bf,
+                'listFormat': list_format,
+                'blockStart': block_start,
+                'fragments': fragments,
+                'fragment_text': fragment_text,
+            })
+
+            block = block.next()
+
+        if not blocks:
+            return
+
+        # Replace the selection preserving inline and block formats.
+        editcur = QTextCursor(doc)
+        editcur.setPosition(start)
+        editcur.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+
+        editcur.beginEditBlock()
+        editcur.removeSelectedText()
+        # after removal the cursor is at `start`
+        editcur.setPosition(start)
+
+        # Insert blocks and fragments. Handle first block specially to avoid unwanted new block
+        for idx, blk in enumerate(blocks):
+            blk_fmt = blk['blockFormat']
+            list_fmt = blk['listFormat']
+
+            # Determine if original first block was partial (selection started mid-block).
+            if idx == 0:
+                # keep and reuse the current block — apply its block format/list
+                editcur.setBlockFormat(blk_fmt)
+            else:
+                # subsequent blocks -> always insert a new block with the original format
+                editcur.insertBlock(blk_fmt)
+            if list_fmt is not None:
+                editcur.createList(list_fmt)
+
+            fragment_text = func(blk['fragment_text'])
+            # insert the fragments for this block, preserving char formats
+            for start_pos, length, ch_fmt in blk['fragments']:
+                if start_pos >= len(fragment_text):
+                    break
+                # Convert selected fragment text
+                # (paragraph separators are not part of per-fragment text here)
+                editcur.insertText(fragment_text[start_pos:start_pos+length], ch_fmt)
+
+        editcur.endEditBlock()
+
+        # Reselect the replaced text so selection remains
+        new_end = editcur.position()
+        new_cursor = self.textCursor()
+        new_cursor.setPosition(start)
+        new_cursor.setPosition(new_end, QTextCursor.MoveMode.KeepAnchor)
+        self.setTextCursor(new_cursor)
+
 # }}}
 
 
 # Highlighter {{{
-
 
 State_Text = -1
 State_DocType = 0
@@ -1219,16 +1343,16 @@ class Highlighter(QSyntaxHighlighter):
         self.colors = {}
         self.colors['doctype']        = QColor(192, 192, 192)
         self.colors['entity']         = QColor(128, 128, 128)
-        self.colors['comment']        = QColor(35, 110,  37)
+        self.colors['comment']        = QColor(35,  110,  37)
         if is_dark_theme():
             from calibre.gui2.palette import dark_link_color
             self.colors['tag']            = QColor(186,  78, 188)
-            self.colors['attrname']       = QColor(193,  119, 60)
+            self.colors['attrname']       = QColor(193, 119,  60)
             self.colors['attrval']        = dark_link_color
         else:
             self.colors['tag']            = QColor(136,  18, 128)
             self.colors['attrname']       = QColor(153,  69,   0)
-            self.colors['attrval']        = QColor(36,  36, 170)
+            self.colors['attrval']        = QColor(36,   36, 170)
 
     def highlightBlock(self, text):
         state = self.previousBlockState()
@@ -1241,7 +1365,7 @@ class Highlighter(QSyntaxHighlighter):
             if state == State_Comment:
                 start = pos
                 while pos < len_:
-                    if text[pos:pos+3] == "-->":
+                    if text[pos:pos+3] == '-->':
                         pos += 3
                         state = State_Text
                         break
@@ -1398,13 +1522,12 @@ class Highlighter(QSyntaxHighlighter):
                 while pos < len_:
                     ch = text[pos]
                     if ch == '<':
-                        if text[pos:pos+4] == "<!--":
+                        if text[pos:pos+4] == '<!--':
                             state = State_Comment
+                        elif text[pos:pos+9].upper() == '<!DOCTYPE':
+                            state = State_DocType
                         else:
-                            if text[pos:pos+9].upper() == "<!DOCTYPE":
-                                state = State_DocType
-                            else:
-                                state = State_TagStart
+                            state = State_TagStart
                         break
                     elif ch == '&':
                         start = pos
@@ -1438,7 +1561,7 @@ class Editor(QWidget):  # {{{
         self.tabs = QTabWidget(self)
         self.tabs.setTabPosition(QTabWidget.TabPosition.South)
         self.wyswyg = QWidget(self.tabs)
-        self.code_edit = QPlainTextEdit(self.tabs)
+        self.code_edit = PlainTextEdit(self.tabs)
         self.code_edit.setTabChangesFocus(True)
         self.source_dirty = False
         self.wyswyg_dirty = True
@@ -1478,7 +1601,7 @@ class Editor(QWidget):  # {{{
         self.toolbar.add_separator()
 
         for x in ('', 'un'):
-            ac = getattr(self.editor, 'action_%sordered_list'%x)
+            ac = getattr(self.editor, f'action_{x}ordered_list')
             self.toolbar.add_action(ac)
         self.toolbar.add_separator()
         for x in ('superscript', 'subscript', 'indent', 'outdent'):
@@ -1521,8 +1644,7 @@ class Editor(QWidget):  # {{{
         self.editor.html = v
 
     def change_tab(self, index):
-        # print 'reloading:', (index and self.wyswyg_dirty) or (not index and
-        #        self.source_dirty)
+        # print('reloading:', (index and self.wyswyg_dirty) or (not index and self.source_dirty))
         if index == 1:  # changing to code view
             if self.wyswyg_dirty:
                 self.code_edit.setPlainText(self.editor.html)
@@ -1594,8 +1716,8 @@ if __name__ == '__main__':
     w.html = '''<h1>Test Heading</h1><blockquote>Test blockquote</blockquote><p><span style="background-color: rgb(0, 255, 255); ">He hadn't
     set <u>out</u> to have an <em>affair</em>, <span style="font-style:italic; background-color:red">
     much</span> less a <s>long-term</s>, <b>devoted</b> one.</span><p>hello'''
-    w.html = '<div><p id="moo" align="justify">Testing <em>a</em> link.</p><p align="justify">\xa0</p><p align="justify">ss</p></div>'
     i = 'file:///home/kovid/work/calibre/resources/images/'
     w.html = f'<p>Testing <img src="{i}/donate.png"> img and another <img src="{i}/lt.png">file</p>'
+    w.html = '<div><p id="moo" align="justify">Testing&nbsp;<em>a</em> link.</p><p align="justify">&nbsp;</p><p align="justify">ss</p></div>'
     app.exec()
-    # print w.html
+    print(repr(w.html))

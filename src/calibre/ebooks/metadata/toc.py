@@ -9,6 +9,7 @@ import glob
 import os
 import re
 from collections import Counter
+from urllib.parse import urlparse
 
 from lxml import etree
 from lxml.builder import ElementMaker
@@ -17,10 +18,10 @@ from calibre.constants import __appname__, __version__
 from calibre.ebooks.chardet import xml_to_unicode
 from calibre.utils.cleantext import clean_xml_chars
 from calibre.utils.xml_parse import safe_xml_fromstring
-from polyglot.urllib import unquote, urlparse
+from polyglot.urllib import unquote
 
-NCX_NS = "http://www.daisy.org/z3986/2005/ncx/"
-CALIBRE_NS = "http://calibre.kovidgoyal.net/2009/metadata"
+NCX_NS = 'http://www.daisy.org/z3986/2005/ncx/'
+CALIBRE_NS = 'http://calibre.kovidgoyal.net/2009/metadata'
 NSMAP = {None: NCX_NS, 'calibre':CALIBRE_NS}
 E = ElementMaker(namespace=NCX_NS, nsmap=NSMAP)
 C = ElementMaker(namespace=CALIBRE_NS, nsmap=NSMAP)
@@ -66,7 +67,7 @@ class TOC(list):
         self.toc_thumbnail = toc_thumbnail
 
     def __str__(self):
-        lines = ['TOC: %s#%s %s'%(self.href, self.fragment, self.text)]
+        lines = [f'TOC: {self.href}#{self.fragment} {self.text}']
         for child in self:
             c = str(child).splitlines()
             for l in c:
@@ -138,7 +139,7 @@ class TOC(list):
         if toc is None:
             try:
                 toc = opfreader.soup.find('guide').find('reference', attrs={'type':'toc'})['href']
-            except:
+            except Exception:
                 for item in opfreader.manifest:
                     if 'toc' in item.href().lower():
                         toc = item.href()
@@ -157,7 +158,7 @@ class TOC(list):
                         toc = os.path.join(os.path.dirname(toc), bn)
 
                     self.read_html_toc(toc)
-                except:
+                except Exception:
                     print('WARNING: Could not read Table of Contents. Continuing anyway.')
             else:
                 path = opfreader.manifest.item(toc.lower())
@@ -198,7 +199,7 @@ class TOC(list):
         def process_navpoint(np, dest):
             try:
                 play_order = int(get_attr(np, 1))
-            except:
+            except Exception:
                 play_order = 1
             href = fragment = text = None
             nd = dest
@@ -247,8 +248,7 @@ class TOC(list):
                 E.head(
                     E.meta(name='dtb:uid', content=str(uid)),
                     E.meta(name='dtb:depth', content=str(self.depth())),
-                    E.meta(name='dtb:generator', content='%s (%s)'%(__appname__,
-                        __version__)),
+                    E.meta(name='dtb:generator', content=f'{__appname__} ({__version__})'),
                     E.meta(name='dtb:totalPageCount', content='0'),
                     E.meta(name='dtb:maxPageNumber', content='0'),
                 ),
@@ -264,7 +264,7 @@ class TOC(list):
             if not text:
                 text = ''
             c[1] += 1
-            item_id = 'num_%d'%c[1]
+            item_id = f'num_{c[1]}'
             text = clean_xml_chars(text)
             elem = E.navPoint(
                     E.navLabel(E.text(re.sub(r'\s+', ' ', text))),

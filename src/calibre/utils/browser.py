@@ -3,13 +3,12 @@
 
 
 import copy
+import http.client
 import ssl
+from http.cookiejar import CookieJar
 
 from mechanize import Browser as B
 from mechanize import HTTPSHandler
-
-from polyglot import http_client
-from polyglot.http_cookie import CookieJar
 
 
 class ModernHTTPSHandler(HTTPSHandler):
@@ -25,13 +24,13 @@ class ModernHTTPSHandler(HTTPSHandler):
 
         def conn_factory(hostport, **kw):
             kw['context'] = self.ssl_context
-            return http_client.HTTPSConnection(hostport, **kw)
+            return http.client.HTTPSConnection(hostport, **kw)
         return self.do_open(conn_factory, req)
 
 
 class Browser(B):
     '''
-    A cloneable mechanize browser. Useful for multithreading. The idea is that
+    A clonable mechanize browser. Useful for multithreading. The idea is that
     each thread has a browser clone. Every clone uses the same thread safe
     cookie jar. All clones share the same browser configuration.
 

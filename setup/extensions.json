@@ -17,6 +17,14 @@
 		"needs_c": "99"
     },
     {
+        "name": "ffmpeg",
+        "sources": "calibre/utils/ffmpeg.c",
+		"libraries": "swresample avcodec avformat avutil",
+        "inc_dirs": "!ffmpeg_inc_dirs",
+        "lib_dirs": "!ffmpeg_lib_dirs",
+		"needs_c": "99"
+    },
+    {
         "name": "uchardet",
         "sources": "calibre/ebooks/uchardet.c",
         "libraries": "!uchardet_libs",
@@ -82,7 +90,7 @@
         "name": "sqlite_extension",
         "headers": "calibre/utils/cpp_binding.h",
         "sources": "calibre/db/sqlite_extension.cpp",
-		"needs_c++": "14",
+		"needs_c++": "17",
         "libraries": "icudata icui18n icuuc icuio stemmer",
         "windows_libraries": "icudt icuin icuuc icuio libstemmer",
         "lib_dirs": "!icu_lib_dirs",
@@ -127,16 +135,29 @@
 		"needs_c++": "17"
     },
     {
+        "name": "piper",
+        "sources": "calibre/utils/tts/piper.cpp",
+		"needs_c++": "17",
+        "libraries": "!piper_libs",
+        "lib_dirs": "!piper_lib_dirs",
+        "inc_dirs": "!piper_inc_dirs"
+    },
+    {
         "name": "html_as_json",
         "sources": "calibre/srv/html_as_json.cpp",
 		"needs_c++": "11"
     },
     {
         "name": "fast_css_transform",
-        "headers": "calibre/utils/cpp_binding.h calibre/utils/stb_sprintf.h",
+        "headers": "calibre/utils/cpp_binding.h",
         "sources": "calibre/srv/fast_css_transform.cpp",
 		"inc_dirs": "perfect-hashing",
-		"needs_c++": "14"
+		"needs_c++": "17"
+    },
+    {
+        "name": "fast_html_entities",
+        "headers": "calibre/ebooks/html_entities.h",
+        "sources": "calibre/ebooks/html_entities.c"
     },
     {
         "name": "rcc_backend",
@@ -155,10 +176,17 @@
     },
     {
         "name": "progress_indicator",
-        "sources": "calibre/gui2/progress_indicator/QProgressIndicator.cpp calibre/gui2/progress_indicator/CalibreStyle.cpp",
+        "sources": "calibre/gui2/progress_indicator/QProgressIndicator.cpp calibre/gui2/progress_indicator/CalibreStyle.cpp calibre/gui2/progress_indicator/CalibreIconEngine.cpp",
         "headers": "calibre/gui2/progress_indicator/QProgressIndicator.h",
         "sip_files": "calibre/gui2/progress_indicator/QProgressIndicator.sip",
         "inc_dirs": "calibre/gui2/progress_indicator"
+    },
+    {
+        "name": "translator",
+        "sources": "calibre/utils/translator/mo_parser.cpp calibre/utils/translator/plural_expression_parser.cpp calibre/utils/translator/main.cpp",
+        "headers": "calibre/utils/translator/mo_translator.h calibre/utils/translator/plural_expression_parser.h",
+        "inc_dirs": "calibre/utils/translator",
+		"needs_c++": "20"
     },
     {
         "name": "imageops",
@@ -177,23 +205,6 @@
         "cflags": "/X"
     },
     {
-        "name": "winsapi",
-        "only": "windows",
-        "headers": "calibre/utils/cpp_binding.h calibre/utils/windows/common.h",
-        "sources": "calibre/utils/windows/winsapi.cpp",
-        "libraries": "SAPI Ole32",
-        "cflags": "/X"
-    },
-    {
-        "name": "winspeech",
-        "only": "windows",
-        "headers": "calibre/utils/cpp_binding.h calibre/utils/windows/common.h",
-        "sources": "calibre/utils/windows/winspeech.cpp",
-        "libraries": "WindowsApp",
-		"needs_c++": "20",
-        "cflags": "/X /Zc:__cplusplus /bigobj /permissive- /WX /Zc:twoPhase-"
-    },
-    {
         "name": "wpd",
         "only": "windows",
         "sources": "calibre/devices/mtp/windows/device_enumeration.cpp calibre/devices/mtp/windows/content_enumeration.cpp calibre/devices/mtp/windows/device.cpp calibre/devices/mtp/windows/wpd.cpp",
@@ -208,6 +219,16 @@
         "libraries": "Gdi32 User32",
         "cflags": "/X"
     },
+
+    {
+        "name": "wintoast",
+        "only": "windows",
+        "headers": "calibre/utils/cpp_binding.h calibre/utils/windows/common.h calibre/utils/windows/wintoastlib.h",
+        "sources": "calibre/utils/windows/wintoastlib.cpp calibre/utils/windows/wintoast.cpp",
+        "libraries": "shell32",
+        "cflags": "/X"
+    },
+
     {
         "name": "usbobserver",
         "only": "macos",
@@ -217,7 +238,7 @@
     {
         "name": "cocoa",
         "only": "macos",
-        "sources": "calibre/utils/cocoa.m calibre/gui2/tts/nsss.m",
+        "sources": "calibre/utils/cocoa.m",
         "ldflags": "-framework Cocoa -framework UserNotifications"
     },
     {

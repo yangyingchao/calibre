@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 
-from setup import Command, is_ci, ismacos
+from setup import Command, is_ci, ismacos, iswindows
 
 TEST_MODULES = frozenset('srv db polish opf css docx cfi matcher icu smartypants build misc dbcli ebooks'.split())
 
@@ -37,14 +37,14 @@ class Test(BaseTest):
         super().add_options(parser)
         parser.add_option('--test-verbosity', type=int, default=4, help='Test verbosity (0-4)')
         parser.add_option('--test-module', '--test-group', default=[], action='append', type='choice', choices=sorted(map(str, TEST_MODULES)),
-                          help='The test module to run (can be specified more than once for multiple modules). Choices: %s' % ', '.join(sorted(TEST_MODULES)))
+                    help='The test module to run (can be specified more than once for multiple modules). Choices: {}'.format(', '.join(sorted(TEST_MODULES))))
         parser.add_option('--test-name', '-n', default=[], action='append',
                           help='The name of an individual test to run. Can be specified more than once for multiple tests. The name of the'
                           ' test is the name of the test function without the leading test_. For example, the function test_something()'
                           ' can be run by specifying the name "something".')
         parser.add_option('--exclude-test-module', default=[], action='append', type='choice', choices=sorted(map(str, TEST_MODULES)),
                           help='A test module to be excluded from the test run (can be specified more than once for multiple modules).'
-                          ' Choices: %s' % ', '.join(sorted(TEST_MODULES)))
+                          ' Choices: {}'.format(', '.join(sorted(TEST_MODULES))))
         parser.add_option('--exclude-test-name', default=[], action='append',
                           help='The name of an individual test to be excluded from the test run. Can be specified more than once for multiple tests.')
 
@@ -54,12 +54,17 @@ class Test(BaseTest):
         import warnings
         warnings.filterwarnings('ignore', message="'cgi' is deprecated and slated for removal in Python 3.13")
 
-        if is_ci and ismacos:
-            import ctypes
-            sys.libxml2_dylib = ctypes.CDLL(os.path.join(os.environ['SW'], 'lib', 'libxml2.dylib'))
-            sys.libxslt_dylib = ctypes.CDLL(os.path.join(os.environ['SW'], 'lib', 'libxslt.dylib'))
-            sys.libexslt_dylib = ctypes.CDLL(os.path.join(os.environ['SW'], 'lib', 'libexslt.dylib'))
-            print(sys.libxml2_dylib, sys.libxslt_dylib, sys.libexslt_dylib, file=sys.stderr, flush=True)
+        if is_ci and (SW := os.environ.get('SW')):
+            if ismacos:
+                import ctypes
+                sys.libxml2_dylib = ctypes.CDLL(os.path.join(SW, 'lib', 'libxml2.dylib'))
+                sys.libxslt_dylib = ctypes.CDLL(os.path.join(SW, 'lib', 'libxslt.dylib'))
+                sys.libexslt_dylib = ctypes.CDLL(os.path.join(SW, 'lib', 'libexslt.dylib'))
+                print(sys.libxml2_dylib, sys.libxslt_dylib, sys.libexslt_dylib, file=sys.stderr, flush=True)
+            elif iswindows:
+                ffmpeg_dll_dir = os.path.join(SW, 'ffmpeg', 'bin')
+                os.add_dll_directory(ffmpeg_dll_dir)
+
         from calibre.utils.run_tests import filter_tests_by_name, find_tests, remove_tests_by_name, run_cli
         tests = find_tests(which_tests=frozenset(opts.test_module), exclude_tests=frozenset(opts.exclude_test_module))
         if opts.test_name:

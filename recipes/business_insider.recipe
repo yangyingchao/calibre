@@ -22,10 +22,10 @@ class Business_insider(BasicNewsRecipe):
     remove_empty_feeds = True
     publication_type = 'newsportal'
     masthead_url = 'http://static.businessinsider.com/assets/images/logos/tbi_print.jpg'
-    extra_css             = """
+    extra_css             = '''
                                body{font-family: Arial,Helvetica,sans-serif }
                                img{margin-bottom: 0.4em; display:block}
-                            """
+                            '''
 
     conversion_options = {
         'comment': description, 'tags': category, 'publisher': publisher, 'language': language
@@ -55,10 +55,9 @@ class Business_insider(BasicNewsRecipe):
         for item in soup.findAll('a'):
             if item['href'].startswith('http://feedads'):
                 item.extract()
-            else:
-                if item.string is not None:
-                    tstr = item.string
-                    item.replaceWith(tstr)
+            elif item.string is not None:
+                tstr = item.string
+                item.replaceWith(tstr)
         for item in soup.findAll('img', alt=False):
             item['alt'] = 'image'
         return soup

@@ -17,7 +17,6 @@ from calibre.gui2.dialogs.search import SearchDialog
 from calibre.gui2.widgets import stylesheet_for_lineedit
 from calibre.utils.icu import primary_sort_key
 from calibre.utils.localization import pgettext
-from polyglot.builtins import native_string_type, string_or_bytes
 
 
 class AsYouType(str):
@@ -66,7 +65,7 @@ class SearchLineEdit(QLineEdit):  # {{{
         if self.as_url is not None:
             url = self.as_url(self.text())
             if url:
-                menu.addAction(_('Copy search as URL'), lambda : QApplication.clipboard().setText(url))
+                menu.addAction(_('Copy search as URL'), lambda: QApplication.clipboard().setText(url))
         menu.addAction(_('&Clear search history')).triggered.connect(self.clear_history)
         menu.exec(ev.globalPos())
 
@@ -142,7 +141,7 @@ class SearchBox2(QComboBox):  # {{{
 
         c = self.line_edit.completer()
         c.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
-        c.highlighted[native_string_type].connect(self.completer_used)
+        c.highlighted[str].connect(self.completer_used)
 
         self.line_edit.key_pressed.connect(self.key_pressed, type=Qt.ConnectionType.DirectConnection)
         # QueuedConnection as workaround for https://bugreports.qt-project.org/browse/QTBUG-40807
@@ -185,7 +184,7 @@ class SearchBox2(QComboBox):  # {{{
     def hide_completer_popup(self):
         try:
             self.lineEdit().completer().popup().setVisible(False)
-        except:
+        except Exception:
             pass
 
     def normalize_state(self):
@@ -215,7 +214,7 @@ class SearchBox2(QComboBox):  # {{{
             self.parse_error_action.setToolTip(tooltip)
 
     def search_done(self, ok):
-        if isinstance(ok, string_or_bytes):
+        if isinstance(ok, (str, bytes)):
             self.setToolTip(ok)
             self.show_parse_error_action(True, tooltip=ok)
             ok = False
@@ -363,9 +362,7 @@ class SearchBoxMixin:  # {{{
         self.search.clear()
         self.search.setMaximumWidth(self.width()-150)
         self.action_focus_search = QAction(self)
-        shortcuts = list(
-                map(lambda x:str(x.toString(QKeySequence.SequenceFormat.PortableText)),
-                QKeySequence.keyBindings(QKeySequence.StandardKey.Find)))
+        shortcuts = [str(x.toString(QKeySequence.SequenceFormat.PortableText)) for x in QKeySequence.keyBindings(QKeySequence.StandardKey.Find)]
         shortcuts += ['/', 'Alt+S']
         self.keyboard.register_shortcut('start search', _('Start search'),
                 default_keys=shortcuts, action=self.action_focus_search)
@@ -445,7 +442,7 @@ class SearchBoxMixin:  # {{{
         self.focus_to_library()
 
     def focus_to_library(self):
-        self.current_view().setFocus(Qt.FocusReason.OtherFocusReason)
+        self.focus_current_view()
 
     # }}}
 
@@ -539,7 +536,7 @@ class SavedSearchBoxMixin:  # {{{
             if not current_search:
                 raise ValueError()
             self.search.set_search_string(current_search)
-        except:
+        except Exception:
             from calibre.gui2.ui import get_gui
             get_gui().status_bar.show_message(_('Current search is not a saved search'), 3000)
     # }}}

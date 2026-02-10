@@ -12,7 +12,6 @@ from calibre.devices.usbms.device import Device
 from calibre.gui2 import error_dialog
 from calibre.gui2.actions import InterfaceAction
 from calibre.gui2.dialogs.progress import ProgressDialog
-from polyglot.builtins import iteritems
 
 
 class Updater(QThread):  # {{{
@@ -50,7 +49,7 @@ class Updater(QThread):  # {{{
                     self.annotation_map[id_][1])
             try:
                 self.device.add_annotation_to_library(self.db, id_, bm)
-            except:
+            except Exception:
                 import traceback
                 self.errors[id_] = traceback.format_exc()
             self.update_progress.emit(i)
@@ -102,7 +101,7 @@ class FetchAnnotationsAction(InterfaceAction):
                 path = get_device_path_from_id(id)
                 mi = db.get_metadata(id, index_is_id=True)
                 a_path = device.create_annotations_path(mi, device_path=path)
-                path_map[id] = dict(path=a_path, fmts=get_formats(id))
+                path_map[id] = {'path': a_path, 'fmts': get_formats(id)}
             return path_map
 
         device = self.gui.device_manager.device
@@ -152,7 +151,7 @@ class FetchAnnotationsAction(InterfaceAction):
         if errors:
             db = self.gui.library_view.model().db
             entries = []
-            for id_, tb in iteritems(errors):
+            for id_, tb in errors.items():
                 title = id_
                 if isinstance(id_, int):
                     title = db.title(id_, index_is_id=True)

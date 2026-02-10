@@ -12,14 +12,13 @@ from calibre.ebooks.oeb.stylizer import Stylizer
 from calibre.utils.icu import lower as icu_lower
 from calibre.utils.icu import title_case as icu_title
 from calibre.utils.icu import upper as icu_upper
-from polyglot.builtins import string_or_bytes
 
-CASE_MANGLER_CSS = """
+CASE_MANGLER_CSS = '''
 .calibre_lowercase {
     font-variant: normal;
     font-size: 0.65em;
 }
-"""
+'''
 
 TEXT_TRANSFORMS = {'capitalize', 'uppercase', 'lowercase'}
 
@@ -97,7 +96,7 @@ class CaseMangler:
                 last = child
 
     def mangle_elem(self, elem, stylizer):
-        if not isinstance(elem.tag, string_or_bytes) or \
+        if not isinstance(elem.tag, (str, bytes)) or \
            namespace(elem.tag) != XHTML_NS:
             return
         children = list(elem)

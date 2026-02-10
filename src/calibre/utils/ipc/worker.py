@@ -8,6 +8,7 @@ __docformat__ = 'restructuredtext en'
 import importlib
 import os
 import sys
+from queue import Queue
 from threading import Thread
 from zipimport import ZipImportError
 
@@ -16,7 +17,6 @@ from calibre.constants import ismacos, iswindows
 from calibre.utils.ipc import eintr_retry_call
 from calibre.utils.serialize import pickle_dumps
 from polyglot.binary import from_hex_unicode
-from polyglot.queue import Queue
 
 if iswindows:
     from multiprocessing.connection import PipeConnection as Connection
@@ -24,46 +24,46 @@ else:
     from multiprocessing.connection import Connection
 
 PARALLEL_FUNCS = {
-    'lrfviewer'    :
+    'lrfviewer':
     ('calibre.gui2.lrf_renderer.main', 'main', None),
 
-    'ebook-viewer'    :
+    'ebook-viewer':
     ('calibre.gui_launch', 'ebook_viewer', None),
 
-    'ebook-edit' :
+    'ebook-edit':
     ('calibre.gui_launch', 'gui_ebook_edit', None),
 
-    'store-dialog' :
+    'store-dialog':
     ('calibre.gui_launch', 'store_dialog', None),
 
-    'toc-dialog' :
+    'toc-dialog':
     ('calibre.gui_launch', 'toc_dialog', None),
 
-    'webengine-dialog' :
+    'webengine-dialog':
     ('calibre.gui_launch', 'webengine_dialog', None),
 
-    'render_pages' :
+    'render_pages':
     ('calibre.ebooks.comic.input', 'render_pages', 'notification'),
 
-    'gui_convert'     :
+    'gui_convert':
     ('calibre.gui2.convert.gui_conversion', 'gui_convert', 'notification'),
 
-    'gui_convert_recipe'     :
+    'gui_convert_recipe':
     ('calibre.gui2.convert.gui_conversion', 'gui_convert_recipe', 'notification'),
 
-    'gui_polish'     :
+    'gui_polish':
     ('calibre.ebooks.oeb.polish.main', 'gui_polish', None),
 
-    'gui_convert_override'     :
+    'gui_convert_override':
     ('calibre.gui2.convert.gui_conversion', 'gui_convert_override', 'notification'),
 
-    'gui_catalog'     :
+    'gui_catalog':
     ('calibre.gui2.convert.gui_conversion', 'gui_catalog', 'notification'),
 
-    'arbitrary' :
+    'arbitrary':
     ('calibre.utils.ipc.worker', 'arbitrary', None),
 
-    'arbitrary_n' :
+    'arbitrary_n':
     ('calibre.utils.ipc.worker', 'arbitrary_n', 'notification'),
 }
 
@@ -86,7 +86,7 @@ class Progress(Thread):
                 break
             try:
                 eintr_retry_call(self.conn.send, x)
-            except:
+            except Exception:
                 break
 
 
@@ -165,13 +165,11 @@ def get_func(name):
 
 
 def main():
-    if iswindows:
-        if '--multiprocessing-fork' in sys.argv:
-            # We are using the multiprocessing module on windows to launch a
-            # worker process
-            from multiprocessing import freeze_support
-            freeze_support()
-            return 0
+    if '__multiprocessing__' in sys.argv:
+        payload = sys.argv[-1]
+        sys.argv = [sys.argv[0], '--multiprocessing-fork']
+        exec(payload)
+        return 0
     if ismacos and 'CALIBRE_WORKER_FD' not in os.environ and 'CALIBRE_SIMPLE_WORKER' not in os.environ and '--pipe-worker' not in sys.argv:
         # On some OS X computers launchd apparently tries to
         # launch the last run process from the bundle

@@ -104,7 +104,7 @@ class FilesystemTest(BaseTest):
                 expected_contents.add(fname + '.' + fmt.lower())
             ae(expected_contents, bookdir_contents)
             fs_path = bookdir.split(os.sep)[-2:]
-            db_path = cache.field_for('path', book_id).split('/')
+            db_path = cache.get_book_path(book_id, sep='/').split('/')
             ae(db_path, fs_path)
             ae(initial_side_data, side_data(book_id))
 
@@ -159,7 +159,6 @@ class FilesystemTest(BaseTest):
         self.assertEqual(relpaths(), {'data/c', 'B'})
         self.assertEqual(cache.rename_extra_files(1, {'B': 'data/c'}), set())
         self.assertEqual(cache.rename_extra_files(1, {'B': 'data/c'}, replace=True), {'B'})
-
 
     @unittest.skipUnless(iswindows, 'Windows only')
     def test_windows_atomic_move(self):
@@ -280,7 +279,7 @@ class FilesystemTest(BaseTest):
                 self.assertFalse(importer.corrupted_files)
                 self.assertEqual(cache.all_book_ids(), ic.all_book_ids())
                 for book_id in cache.all_book_ids():
-                    self.assertEqual(cache.cover(book_id), ic.cover(book_id), 'Covers not identical for book: %d' % book_id)
+                    self.assertEqual(cache.cover(book_id), ic.cover(book_id), f'Covers not identical for book: {book_id}')
                     for fmt in cache.formats(book_id):
                         self.assertEqual(cache.format(book_id, fmt), ic.format(book_id, fmt))
                         self.assertEqual(cache.format_metadata(book_id, fmt)['mtime'], cache.format_metadata(book_id, fmt)['mtime'])

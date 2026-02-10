@@ -39,7 +39,6 @@ from calibre.gui2 import error_dialog
 from calibre.gui2.tweak_book import tprefs
 from calibre.gui2.tweak_book.editor import syntax_text_char_format
 from calibre.gui2.tweak_book.widgets import Dialog
-from polyglot.builtins import iteritems
 
 underline_styles = {'single', 'dash', 'dot', 'dash_dot', 'dash_dot_dot', 'wave', 'spell'}
 
@@ -55,12 +54,12 @@ def default_theme():
 
 
 # The solarized themes {{{
-SLDX = {'base03':'1c1c1c', 'base02':'262626', 'base01':'585858', 'base00':'626262', 'base0':'808080', 'base1':'8a8a8a', 'base2':'e4e4e4', 'base3':'ffffd7', 'yellow':'af8700', 'orange':'d75f00', 'red':'d70000', 'magenta':'af005f', 'violet':'5f5faf', 'blue':'0087ff', 'cyan':'00afaf', 'green':'5f8700'}  # noqa
-SLD  = {'base03':'002b36', 'base02':'073642', 'base01':'586e75', 'base00':'657b83', 'base0':'839496', 'base1':'93a1a1', 'base2':'eee8d5', 'base3':'fdf6e3', 'yellow':'b58900', 'orange':'cb4b16', 'red':'dc322f', 'magenta':'d33682', 'violet':'6c71c4', 'blue':'268bd2', 'cyan':'2aa198', 'green':'859900'}  # noqa
-m = {'base%d'%n:'base%02d'%n for n in range(1, 4)}
-m.update({'base%02d'%n:'base%d'%n for n in range(1, 4)})
-SLL = {m.get(k, k) : v for k, v in iteritems(SLD)}
-SLLX = {m.get(k, k) : v for k, v in iteritems(SLDX)}
+SLDX = {'base03':'1c1c1c', 'base02':'262626', 'base01':'585858', 'base00':'626262', 'base0':'808080', 'base1':'8a8a8a', 'base2':'e4e4e4', 'base3':'ffffd7', 'yellow':'af8700', 'orange':'d75f00', 'red':'d70000', 'magenta':'af005f', 'violet':'5f5faf', 'blue':'0087ff', 'cyan':'00afaf', 'green':'5f8700'}  # noqa: E501
+SLD  = {'base03':'002b36', 'base02':'073642', 'base01':'586e75', 'base00':'657b83', 'base0':'839496', 'base1':'93a1a1', 'base2':'eee8d5', 'base3':'fdf6e3', 'yellow':'b58900', 'orange':'cb4b16', 'red':'dc322f', 'magenta':'d33682', 'violet':'6c71c4', 'blue':'268bd2', 'cyan':'2aa198', 'green':'859900'}  # noqa: E501
+m = {f'base{n}':f'base{n:02}' for n in range(1, 4)}
+m.update({f'base{n:02}':f'base{n}' for n in range(1, 4)})
+SLL =  {m.get(k, k): v for k, v in SLD.items()}
+SLLX = {m.get(k, k): v for k, v in SLDX.items()}
 SOLARIZED = \
     '''
     CursorLine   bg={base02}
@@ -240,27 +239,26 @@ def read_theme(raw):
         for i, token in enumerate(line.split()):
             if i == 0:
                 name = token
-            else:
-                if token == 'bold':
-                    bold = True
-                elif token == 'italic':
-                    italic = True
-                elif '=' in token:
-                    prefix, val = token.partition('=')[0::2]
-                    if prefix == 'us':
-                        underline = val if val in underline_styles else None
-                    elif prefix == 'uc':
-                        underline_color = read_color(val)
-                    elif prefix == 'fg':
-                        fg = read_color(val)
-                    elif prefix == 'bg':
-                        bg = read_color(val)
+            elif token == 'bold':
+                bold = True
+            elif token == 'italic':
+                italic = True
+            elif '=' in token:
+                prefix, val = token.partition('=')[0::2]
+                if prefix == 'us':
+                    underline = val if val in underline_styles else None
+                elif prefix == 'uc':
+                    underline_color = read_color(val)
+                elif prefix == 'fg':
+                    fg = read_color(val)
+                elif prefix == 'bg':
+                    bg = read_color(val)
         if name is not None:
             ans[name] = Highlight(fg, bg, bold, italic, underline, underline_color)
     return ans
 
 
-THEMES = {k:read_theme(raw) for k, raw in iteritems(THEMES)}
+THEMES = {k:read_theme(raw) for k, raw in THEMES.items()}
 
 
 def u(x):
@@ -282,7 +280,7 @@ def to_highlight(data):
 
 def read_custom_theme(data):
     dt = THEMES[default_theme()].copy()
-    dt.update({k:to_highlight(v) for k, v in iteritems(data)})
+    dt.update({k:to_highlight(v) for k, v in data.items()})
     return dt
 
 
@@ -341,8 +339,8 @@ def builtin_theme_names():
 def all_theme_names():
     return builtin_theme_names() + custom_theme_names()
 
-# Custom theme creation/editing {{{
 
+# Custom theme creation/editing {{{
 
 class CreateNewTheme(Dialog):
 
@@ -381,7 +379,7 @@ class CreateNewTheme(Dialog):
 
 
 def col_to_string(color):
-    return '%02X%02X%02X' % color.getRgb()[:3]
+    return '{:02X}{:02X}{:02X}'.format(*color.getRgb()[:3])
 
 
 class ColorButton(QPushButton):
@@ -500,8 +498,8 @@ class Property(QWidget):
         self.data['underline'] = str(self.underline.currentText()) or None
         self.changed.emit()
 
-# Help text {{{
 
+# Help text {{{
 
 HELP_TEXT = _('''\
 <h2>Creating a custom theme</h2>
@@ -640,7 +638,7 @@ class ThemeEditor(Dialog):
             data.pop(k)
         for k in missing:
             data[k] = dict(THEMES[default_theme()][k]._asdict())
-            for nk, nv in iteritems(data[k]):
+            for nk, nv in data[k].items():
                 if isinstance(nv, QBrush):
                     data[k][nk] = str(nv.color().name())
         if extra or missing:
@@ -686,8 +684,8 @@ class ThemeEditor(Dialog):
             name = '*' + d.theme_name
             base = str(d.base.currentText())
             theme = {}
-            for key, val in iteritems(THEMES[base]):
-                theme[key] = {k:col_to_string(v.color()) if isinstance(v, QBrush) else v for k, v in iteritems(val._asdict())}
+            for key, val in THEMES[base].items():
+                theme[key] = {k:col_to_string(v.color()) if isinstance(v, QBrush) else v for k, v in val._asdict().items()}
             tprefs['custom_themes'][name] = theme
             tprefs['custom_themes'] = tprefs['custom_themes']
             t = self.theme

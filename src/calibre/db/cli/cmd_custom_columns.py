@@ -5,7 +5,6 @@
 from pprint import pformat
 
 from calibre import prints
-from polyglot.builtins import iteritems
 
 readonly = True
 version = 0  # change this if you change signature of implementation()
@@ -36,12 +35,12 @@ List available custom columns. Shows column labels and ids.
 
 
 def main(opts, args, dbctx):
-    for col, data in iteritems(dbctx.run('custom_columns')):
+    for col, data in dbctx.run('custom_columns').items():
         if opts.details:
             prints(col)
             print()
             prints(pformat(data))
             print('\n')
         else:
-            prints(col, '(%d)'%data['num'])
+            prints(col, f"({data['num']})")
     return 0

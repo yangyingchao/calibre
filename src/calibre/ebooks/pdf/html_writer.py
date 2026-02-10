@@ -10,6 +10,7 @@ import sys
 from collections import namedtuple
 from functools import lru_cache
 from itertools import count, repeat
+from urllib.parse import urlparse
 
 from html5_parser import parse
 from qt.core import QApplication, QByteArray, QMarginsF, QObject, QPageLayout, Qt, QTimer, QUrl, pyqtSignal, sip
@@ -42,12 +43,12 @@ from calibre.utils.podofo import add_image_page, dedup_type3_fonts, get_podofo, 
 from calibre.utils.resources import get_path as P
 from calibre.utils.short_uuid import uuid4
 from calibre.utils.webengine import secure_webengine, send_reply, setup_profile
-from polyglot.builtins import as_bytes, iteritems
-from polyglot.urllib import urlparse
+from polyglot.builtins import as_bytes
 
-OK, KILL_SIGNAL = range(0, 2)
-HANG_TIME = 60  # seconds
 # }}}
+
+OK, KILL_SIGNAL = range(2)
+HANG_TIME = 60  # seconds
 
 
 # Utils {{{
@@ -123,7 +124,7 @@ def fix_fullscreen_images(container):
             svg = None
             for elem in body.iterdescendants('*'):
                 name = local_name(elem.tag)
-                if name != 'style' and name != 'script':
+                if name not in {'style', 'script'}:
                     names.append(name)
                     if name == 'svg':
                         svg = elem
@@ -131,6 +132,7 @@ def fix_fullscreen_images(container):
                 svg.set('width', '100vw')
                 svg.set('height', '100vh')
                 container.dirty(file_name)
+
 # }}}
 
 
@@ -187,7 +189,7 @@ class UrlSchemeHandler(QWebEngineUrlSchemeHandler):
                 return self.fail_request(rq, QWebEngineUrlRequestJob.Error.RequestFailed)
         elif path.startswith('/mathjax/'):
             try:
-                ignore, ignore, base, rest = path.split('/', 3)
+                _ign, _ign, base, rest = path.split('/', 3)
             except ValueError:
                 print(f'Could not find file {path} in mathjax', file=sys.stderr)
                 rq.fail(QWebEngineUrlRequestJob.Error.UrlNotFound)
@@ -220,7 +222,7 @@ class UrlSchemeHandler(QWebEngineUrlSchemeHandler):
         if fail_code is None:
             fail_code = QWebEngineUrlRequestJob.Error.UrlNotFound
         rq.fail(fail_code)
-        print(f"Blocking FAKE_PROTOCOL request: {rq.requestUrl().toString()} with code: {fail_code}", file=sys.stderr)
+        print(f'Blocking FAKE_PROTOCOL request: {rq.requestUrl().toString()} with code: {fail_code}', file=sys.stderr)
 
 # }}}
 
@@ -480,6 +482,7 @@ def job_for_name(container, name, margins, page_layout):
         new_margins = QMarginsF(*resolve_margins(margins, page_layout))
         page_layout.setMargins(new_margins)
     return index_file, page_layout, name
+
 # }}}
 
 
@@ -515,10 +518,11 @@ def create_margin_files(container):
         if margins:
             margins = dict_to_margins(json.loads(margins))
         yield MarginFile(name, margins)
+
 # }}}
 
 
-# Link handling  {{{
+# Link handling {{{
 def add_anchors_markup(root, uuid, anchors):
     body = last_tag(root)
     div = body.makeelement(
@@ -624,7 +628,7 @@ def make_anchors_unique(container, log):
 
 class AnchorLocation:
 
-    __slots__ = ('pagenum', 'left', 'top', 'zoom')
+    __slots__ = ('left', 'pagenum', 'top', 'zoom')
 
     def __init__(self, pagenum=1, left=0, top=0, zoom=0):
         self.pagenum, self.left, self.top, self.zoom = pagenum, left, top, zoom
@@ -649,7 +653,7 @@ def get_anchor_locations(name, pdf_doc, first_page_num, toc_uuid, log):
         toc_pagenum = 0
     if toc_pagenum > 1:
         pdf_doc.delete_pages(toc_pagenum, pdf_doc.page_count() - toc_pagenum + 1)
-    for anchor, loc in iteritems(anchors):
+    for anchor, loc in anchors.items():
         loc = list(loc)
         loc[0] += first_page_num - 1
         ans[anchor] = AnchorLocation(*loc)
@@ -680,6 +684,7 @@ def fix_links(pdf_doc, anchor_locations, name_anchor_map, mark_links, log):
         return loc.as_tuple
 
     pdf_doc.alter_links(replace_link, mark_links)
+
 # }}}
 
 
@@ -745,9 +750,9 @@ def get_page_number_display_map(render_manager, opts, num_pages, log):
             if not isinstance(result, dict):
                 raise ValueError('Not a dict')
         except Exception:
-            log.warn(f'Could not do page number mapping, got unexpected result: {repr(result)}')
+            log.warn(f'Could not do page number mapping, got unexpected result: {result!r}')
         else:
-            default_map = {int(k): int(v) for k, v in iteritems(result)}
+            default_map = {int(k): int(v) for k, v in result.items()}
     return default_map
 
 
@@ -772,7 +777,7 @@ def add_pagenum_toc(root, toc, opts, page_number_display_map):
     .calibre-pdf-toc .level-%d td:first-of-type { padding-left: %.1gem }
     .calibre-pdf-toc .level-%d td:first-of-type { padding-left: %.1gem }
     .calibre-pdf-toc .level-%d td:first-of-type { padding-left: %.1gem }
-    ''' % tuple(indents) + (opts.extra_css or '')
+    ''' % tuple(indents) + (opts.extra_css or '')  # noqa: UP031
     style = body.makeelement(XHTML('style'), type='text/css')
     style.text = css
     body.append(style)
@@ -790,7 +795,7 @@ def add_pagenum_toc(root, toc, opts, page_number_display_map):
     E('h2', text=(opts.toc_title or _('Table of Contents')), parent=body)
     table = E('table', parent=body)
     for level, node in toc.iterdescendants(level=0):
-        tr = E('tr', cls='level-%d' % level, parent=table)
+        tr = E('tr', cls=f'level-{level}', parent=table)
         E('td', text=node.title or _('Unknown'), parent=tr)
         num = node.pdf_loc.pagenum
         num = page_number_display_map.get(num, num)
@@ -800,7 +805,6 @@ def add_pagenum_toc(root, toc, opts, page_number_display_map):
 
 
 # Fonts {{{
-
 
 def all_glyph_ids_in_w_arrays(arrays, as_set=False):
     ans = set()
@@ -832,7 +836,7 @@ def fonts_are_identical(fonts):
 
 def merge_font_files(fonts, log):
     # As of Qt 5.15.1 Chromium has switched to harfbuzz and dropped sfntly. It
-    # now produces font descriptors whose W arrays dont match the glyph width
+    # now produces font descriptors whose W arrays don't match the glyph width
     # information from the hhea table, in contravention of the PDF spec. So
     # we can no longer merge font descriptors, all we can do is merge the
     # actual sfnt data streams into a single stream and subset it to contain
@@ -843,14 +847,18 @@ def merge_font_files(fonts, log):
     descendant_fonts = [f for f in fonts if f['Subtype'] != 'Type0']
     total_size = sum(len(f['Data']) for f in descendant_fonts)
     merged_sfnt = merge_truetype_fonts_for_pdf(tuple(f['sfnt'] for f in descendant_fonts), log)
-    w_arrays = tuple(filter(None, (f['W'] for f in descendant_fonts)))
-    glyph_ids = all_glyph_ids_in_w_arrays(w_arrays, as_set=True)
-    h_arrays = tuple(filter(None, (f['W2'] for f in descendant_fonts)))
-    glyph_ids |= all_glyph_ids_in_w_arrays(h_arrays, as_set=True)
-    try:
-        pdf_subset(merged_sfnt, glyph_ids)
-    except NoGlyphs:
-        log.warn(f'Subsetting of {fonts[0]["BaseFont"]} failed with no glyphs found, ignoring')
+    if False:
+        # As of Qt 6.7.2 webengine produces W arrays that do not contain all
+        # used glyph ids, so we cannot subset. Can be tested by
+        # echo 'this is a test boulder sentence' > test.txt; ebook-convert test.txt .pdf
+        w_arrays = tuple(filter(None, (f['W'] for f in descendant_fonts)))
+        glyph_ids = all_glyph_ids_in_w_arrays(w_arrays, as_set=True)
+        h_arrays = tuple(filter(None, (f['W2'] for f in descendant_fonts)))
+        glyph_ids |= all_glyph_ids_in_w_arrays(h_arrays, as_set=True)
+        try:
+            pdf_subset(merged_sfnt, glyph_ids)
+        except NoGlyphs:
+            log.warn(f'Subsetting of {fonts[0]["BaseFont"]} failed with no glyphs found, ignoring')
     font_data = merged_sfnt()[0]
     log(f'Merged {len(fonts)} instances of {fonts[0]["BaseFont"]} reducing size from {human_readable(total_size)} to {human_readable(len(font_data))}')
     return font_data, tuple(f['Reference'] for f in descendant_fonts)
@@ -881,7 +889,7 @@ def merge_fonts(pdf_doc, log):
 
     for f in all_fonts:
         base_font_map.setdefault(f['BaseFont'], []).append(f)
-    for name, fonts in iteritems(base_font_map):
+    for name, fonts in base_font_map.items():
         if mergeable(fonts):
             font_data, references = merge_font_files(fonts, log)
             pdf_doc.merge_fonts(font_data, references)
@@ -920,13 +928,14 @@ def add_header_footer(manager, opts, pdf_doc, container, page_number_display_map
     body.attrib.pop('id', None)
     body.set('style', reset_css)
     job = job_for_name(container, name, Margins(0, 0, 0, 0), page_layout)
+    page_layout = job[1]
 
     def m(tag_name, text=None, style=None, **attrs):
         ans = root.makeelement(XHTML(tag_name), **attrs)
         if text is not None:
             ans.text = text
         if style is not None:
-            style = '; '.join(f'{k}: {v}' for k, v in iteritems(style))
+            style = '; '.join(f'{k}: {v}' for k, v in style.items())
             ans.set('style', style)
         return ans
 
@@ -1004,6 +1013,9 @@ def add_header_footer(manager, opts, pdf_doc, container, page_number_display_map
         toplevel_toc_map = stack_to_map(create_toc_stack(tc()))
         toplevel_pagenum_map, toplevel_pages_map = page_counts_map(tc())
 
+    dpi = 96  # don't know how to query Qt for this, seems to be the same on all platforms
+    def pt_to_px(pt): return int(pt * dpi / 72)
+
     def create_container(page_num, margins):
         style = {
             'page-break-inside': 'avoid',
@@ -1021,11 +1033,11 @@ def add_header_footer(manager, opts, pdf_doc, container, page_number_display_map
             'overflow': 'hidden',
             'background-color': 'unset',
         }
-
         ans = m('div', style=style, id=f'p{page_num}')
         return ans
 
-    def format_template(template, page_num, height):
+    def format_template(template, page_num, height, margins):
+        div_width_px = pt_to_px(page_layout.paintRectPoints().width() - margins.left - margins.right)
         template = template.replace('_TOP_LEVEL_SECTION_PAGES_', str(toplevel_pagenum_map[page_num - 1]))
         template = template.replace('_TOP_LEVEL_SECTION_PAGENUM_', str(toplevel_pages_map[page_num - 1]))
         template = template.replace('_TOTAL_PAGES_', str(pages_in_doc))
@@ -1034,12 +1046,14 @@ def add_header_footer(manager, opts, pdf_doc, container, page_number_display_map
         template = template.replace('_AUTHOR_', prepare_string_for_xml(pdf_metadata.author, True))
         template = template.replace('_TOP_LEVEL_SECTION_', prepare_string_for_xml(toplevel_toc_map[page_num - 1]))
         template = template.replace('_SECTION_', prepare_string_for_xml(page_toc_map[page_num - 1]))
+        template = template.replace('_WIDTH_PIXELS_', str(div_width_px))
+        template = template.replace('_HEIGHT_PIXELS_', str(pt_to_px(height)))
         troot = parse(template, namespace_elements=True)
         ans = last_tag(troot)[0]
         style = ans.get('style') or ''
         style = (
-            'margin: 0; padding: 0; height: {height}pt; border-width: 0;'
-            'display: flex; align-items: center; overflow: hidden; background-color: unset;').format(height=height) + style
+            f'margin: 0; padding: 0; height: {height}pt; border-width: 0;'
+            'display: flex; align-items: center; overflow: hidden; background-color: unset;') + style
         ans.set('style', style)
         for child in ans.xpath('descendant-or-self::*[@class]'):
             cls = frozenset(child.get('class').split())
@@ -1056,9 +1070,9 @@ def add_header_footer(manager, opts, pdf_doc, container, page_number_display_map
         div = create_container(page_num, margins)
         body.append(div)
         if header_template:
-            div.append(format_template(header_template, page_num, margins.top))
+            div.append(format_template(header_template, page_num, margins.top, margins))
         if footer_template:
-            div.append(format_template(footer_template, page_num, margins.bottom))
+            div.append(format_template(footer_template, page_num, margins.bottom, margins))
 
     container.commit()
     # print(container.raw_data(name))
@@ -1093,7 +1107,7 @@ def add_maths_script(container):
         has_maths[name] = hm = check_for_maths(root)
         if not hm:
             continue
-        script = root.makeelement(XHTML('script'), type="text/javascript", src=f'{FAKE_PROTOCOL}://{FAKE_HOST}/mathjax/loader/pdf-mathjax-loader.js')
+        script = root.makeelement(XHTML('script'), type='text/javascript', src=f'{FAKE_PROTOCOL}://{FAKE_HOST}/mathjax/loader/pdf-mathjax-loader.js')
         script.set('async', 'async')
         script.set('data-mathjax-path', f'{FAKE_PROTOCOL}://{FAKE_HOST}/mathjax/data/')
         last_tag(root).append(script)
@@ -1197,14 +1211,14 @@ def convert(opf_path, opts, metadata=None, output_path=None, log=default_log, co
         log('Removed', num_removed, 'duplicate images')
 
     if opts.pdf_odd_even_offset:
-        for i in range(1, pdf_doc.page_count()):
-            margins = page_margins_map[i]
-            mult = -1 if i % 2 else 1
+        for page_num in range(1, pdf_doc.page_count() + 1):
+            margins = page_margins_map[page_num - 1]
+            mult = -1 if page_num % 2 else 1
             val = opts.pdf_odd_even_offset
             if abs(val) < min(margins.left, margins.right):
-                box = list(pdf_doc.get_page_box("CropBox", i))
+                box = list(pdf_doc.get_page_box('CropBox', page_num))
                 box[0] += val * mult
-                pdf_doc.set_page_box("CropBox", i, *box)
+                pdf_doc.set_page_box('CropBox', page_num, *box)
 
     if cover_data:
         add_cover(pdf_doc, cover_data, page_layout, opts)

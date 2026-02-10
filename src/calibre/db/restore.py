@@ -11,7 +11,7 @@ import shutil
 import sys
 import time
 import traceback
-from contextlib import suppress
+from contextlib import closing, suppress
 from operator import itemgetter
 from threading import Thread
 
@@ -107,17 +107,13 @@ class Restore(Thread):
 
         if self.conflicting_custom_cols:
             ans += '\n\n'
-            ans += 'The following custom columns have conflicting definitions ' \
-                    'and were not fully restored:\n'
+            ans += ('The following custom columns have conflicting definitions '
+                    'and were not fully restored:\n')
             for x in self.conflicting_custom_cols:
                 ans += '\t#'+x+'\n'
-                ans += '\tused:\t%s, %s, %s, %s\n'%(self.custom_columns[x][1],
-                                                    self.custom_columns[x][2],
-                                                    self.custom_columns[x][3],
-                                                    self.custom_columns[x][5])
+                ans += f'\tused:\t{self.custom_columns[x][1]}, {self.custom_columns[x][2]}, {self.custom_columns[x][3]}, {self.custom_columns[x][5]}\n'
                 for coldef in self.conflicting_custom_cols[x]:
-                    ans += '\tother:\t%s, %s, %s, %s\n'%(coldef[1], coldef[2],
-                                                         coldef[3], coldef[5])
+                    ans += f'\tother:\t{coldef[1]}, {coldef[2]}, {coldef[3]}, {coldef[5]}\n'
 
         if self.mismatched_dirs:
             ans += '\n\n'
@@ -139,7 +135,7 @@ class Restore(Thread):
                 tdir = TemporaryDirectory('_rlib', dir=basedir)
                 tdir.__enter__()
             except OSError:
-                # In case we dont have permissions to create directories in the
+                # In case we don't have permissions to create directories in the
                 # parent folder of the src library
                 tdir = TemporaryDirectory('_rlib')
 
@@ -158,14 +154,14 @@ class Restore(Thread):
                 if self.successes == 0 and len(self.dirs) > 0:
                     raise Exception('Something bad happened')
                 self.replace_db()
-        except:
+        except Exception:
             self.tb = traceback.format_exc()
             if self.failed_dirs:
                 for x in self.failed_dirs:
-                    for (dirpath, tb) in self.failed_dirs:
+                    for dirpath, tb in self.failed_dirs:
                         self.tb += f'\n\n-------------\nFailed to restore: {dirpath}\n{tb}'
             if self.failed_restores:
-                for (book, tb) in self.failed_restores:
+                for book, tb in self.failed_restores:
                     self.tb += f'\n\n-------------\nFailed to restore: {book["path"]}\n{tb}'
 
     def load_preferences(self):
@@ -187,7 +183,7 @@ class Restore(Thread):
                 return True
             self.progress_callback(_('Finished restoring preferences'), 1)
             return False
-        except:
+        except Exception:
             traceback.print_exc()
             self.progress_callback(None, 1)
             self.progress_callback(_('Restoring preferences and column metadata failed'), 0)
@@ -253,7 +249,7 @@ class Restore(Thread):
             dest = self.link_maps.setdefault(field, {})
             for item, link in lmap.items():
                 existing_link, timestamp = dest.get(item, (None, None))
-                if existing_link is None or existing_link != link and timestamp < mi.timestamp:
+                if existing_link is None or (existing_link != link and timestamp < mi.timestamp):
                     dest[item] = link, mi.timestamp
 
     def create_cc_metadata(self):
@@ -300,21 +296,22 @@ class Restore(Thread):
         with suppress(FileNotFoundError):
             os.remove(os.path.join(notes_dest, NOTES_DB_NAME))
         db = Restorer(self.library_path)
+        with closing(db), db.new_api.write_lock:
+            with db.new_api:
+                for i, book in enumerate(self.books):
+                    try:
+                        db.restore_book(book['id'], book['mi'], utcfromtimestamp(book['timestamp']), book['path'], book['formats'], book['annotations'])
+                        self.successes += 1
+                    except Exception:
+                        self.failed_restores.append((book, traceback.format_exc()))
+                        traceback.print_exc()
+                    self.progress_callback(book['mi'].title, i+1)
 
-        for i, book in enumerate(self.books):
-            try:
-                db.restore_book(book['id'], book['mi'], utcfromtimestamp(book['timestamp']), book['path'], book['formats'], book['annotations'])
-                self.successes += 1
-            except:
-                self.failed_restores.append((book, traceback.format_exc()))
-                traceback.print_exc()
-            self.progress_callback(book['mi'].title, i+1)
-
-        for field, lmap in self.link_maps.items():
-            with suppress(Exception):
-                db.set_link_map(field, {k:v[0] for k, v in lmap.items()})
-        self.notes_errors = db.backend.restore_notes(self.progress_callback)
-        db.close()
+            with db.new_api:
+                for field, lmap in self.link_maps.items():
+                    with suppress(Exception):
+                        db.set_link_map(field, {k:v[0] for k, v in lmap.items()})
+            self.notes_errors = db.backend.restore_notes(self.progress_callback)
 
     def replace_db(self):
         dbpath = os.path.join(self.src_library_path, 'metadata.db')
@@ -337,6 +334,8 @@ class Restore(Thread):
         old_notes_path = os.path.join(self.src_library_path, NOTES_DIR_NAME)
         new_notes_path = os.path.join(self.library_path, NOTES_DIR_NAME)
         temp = old_notes_path + '-staging'
+        with suppress(OSError):
+            shutil.rmtree(temp)
         try:
             shutil.move(new_notes_path, temp)
         except OSError:

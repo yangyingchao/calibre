@@ -14,7 +14,6 @@ try:
 except ImportError:
     from urllib import quote
 
-from lxml import html
 from qt.core import QUrl
 
 from calibre import browser, url_slash_cleaner
@@ -23,6 +22,11 @@ from calibre.gui2.store import StorePlugin
 from calibre.gui2.store.basic_config import BasicStoreConfig
 from calibre.gui2.store.search_result import SearchResult
 from calibre.gui2.store.web_store_dialog import WebStoreDialog
+
+try:
+    from calibre.utils.xml_parse import safe_html_fromstring
+except ImportError:
+    from lxml.html import fromstring as safe_html_fromstring
 
 
 class MillsBoonUKStore(BasicStoreConfig, StorePlugin):
@@ -51,7 +55,7 @@ class MillsBoonUKStore(BasicStoreConfig, StorePlugin):
 
         counter = max_results
         with closing(br.open(url, timeout=timeout)) as f:
-            doc = html.fromstring(f.read())
+            doc = safe_html_fromstring(f.read())
             for data in doc.xpath('//article[contains(@class, "group")]'):
                 if counter <= 0:
                     break
@@ -60,7 +64,7 @@ class MillsBoonUKStore(BasicStoreConfig, StorePlugin):
                     continue
 
                 cover_url = ''.join(data.xpath('.//div[@class="img-wrapper"]/a/img/@src'))
-                title =  ''.join(data.xpath('.//div[@class="img-wrapper"]/a/img/@alt')).strip()
+                title = ''.join(data.xpath('.//div[@class="img-wrapper"]/a/img/@alt')).strip()
                 author = ''.join(data.xpath('.//a[@class="author"]/text()'))
                 price = ''.join(data.xpath('.//div[@class="type-wrapper"]/ul/li[child::span[text()="eBook"]]/a/text()'))
                 format_ = ''.join(data.xpath('.//p[@class="doc-meta-format"]/span[last()]/text()'))

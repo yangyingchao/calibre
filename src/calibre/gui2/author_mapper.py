@@ -67,8 +67,7 @@ class RuleEdit(RuleEditBase):
         def sc(name):
             c = getattr(self, name)
             idx = c.findData(str(rule.get(name, '')))
-            if idx < 0:
-                idx = 0
+            idx = max(idx, 0)
             c.setCurrentIndex(idx)
         sc('match_type'), sc('action')
         self.query.setText(str(rule.get('query', '')).strip())
@@ -90,7 +89,7 @@ class RuleItem(RuleItemBase):
             '<b>{action}</b> the author name, if it <i>{match_type}</i>: <b>{query}</b>').format(
                 action=RuleEdit.ACTION_MAP[rule['action']], match_type=RuleEdit.MATCH_TYPE_MAP[rule['match_type']], query=query)
         if rule['action'] == 'replace':
-            text += '<br>' + _('to the name') + ' <b>%s</b>' % rule['replace']
+            text += '<br>' + _('to the name') + ' <b>{}</b>'.format(rule['replace'])
         return '<div style="white-space: nowrap">' + text + '</div>'
 
 

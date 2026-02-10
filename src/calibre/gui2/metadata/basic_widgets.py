@@ -75,7 +75,6 @@ from calibre.utils.date import (
 from calibre.utils.filenames import make_long_path_useable
 from calibre.utils.icu import sort_key, strcmp
 from calibre.utils.localization import ngettext
-from polyglot.builtins import iteritems
 
 
 def save_dialog(parent, title, msg, det_msg=''):
@@ -196,9 +195,9 @@ def make_undoable(spinbox):
             m = QMenu(self)
             if hasattr(self, 'setDateTime'):
                 m.addAction(_('Set date to undefined') + '\t' + QKeySequence(Qt.Key.Key_Minus).toString(QKeySequence.SequenceFormat.NativeText),
-                            lambda : self.setDateTime(self.minimumDateTime()))
+                            lambda: self.setDateTime(self.minimumDateTime()))
                 m.addAction(_('Set date to today') + '\t' + QKeySequence(Qt.Key.Key_Equal).toString(QKeySequence.SequenceFormat.NativeText),
-                            lambda : self.setDateTime(QDateTime.currentDateTime()))
+                            lambda: self.setDateTime(QDateTime.currentDateTime()))
             m.addAction(_('&Undo') + access_key(QKeySequence.StandardKey.Undo), self.undo).setEnabled(self.undo_stack.canUndo())
             m.addAction(_('&Redo') + access_key(QKeySequence.StandardKey.Redo), self.redo).setEnabled(self.undo_stack.canRedo())
             m.addSeparator()
@@ -222,8 +221,8 @@ def make_undoable(spinbox):
 
     return UndoableSpinbox
 
-# Title {{{
 
+# Title {{{
 
 class TitleEdit(EnLineEdit, ToMetadataMixin):
 
@@ -318,7 +317,7 @@ class TitleSortEdit(TitleEdit, ToMetadataMixin, LineEditIndicators):
     def book_lang(self):
         try:
             book_lang = self.languages_edit.lang_codes[0]
-        except:
+        except Exception:
             book_lang = None
         return book_lang
 
@@ -344,21 +343,21 @@ class TitleSortEdit(TitleEdit, ToMetadataMixin, LineEditIndicators):
     def break_cycles(self):
         try:
             self.title_edit.textChanged.disconnect()
-        except:
+        except Exception:
             pass
         try:
             self.textChanged.disconnect()
-        except:
+        except Exception:
             pass
         try:
             self.autogen_button.clicked.disconnect()
-        except:
+        except Exception:
             pass
 
 # }}}
 
-# Authors {{{
 
+# Authors {{{
 
 class AuthorsEdit(EditWithComplete, ToMetadataMixin):
 
@@ -407,7 +406,7 @@ class AuthorsEdit(EditWithComplete, ToMetadataMixin):
                 try:
                     self.commit(self.db, self.id_)
                 except OSError as e:
-                    e.locking_violation_msg = _('Could not change on-disk location of this book\'s files.')
+                    e.locking_violation_msg = _("Could not change on-disk location of this book's files.")
                     raise
                 self.db.commit()
                 self.original_val = self.current_val
@@ -470,7 +469,7 @@ class AuthorsEdit(EditWithComplete, ToMetadataMixin):
         self.db = self.dialog = None
         try:
             self.manage_authors_signal.triggered.disconnect()
-        except:
+        except Exception:
             pass
 
 
@@ -479,7 +478,7 @@ class AuthorSortEdit(EnLineEdit, ToMetadataMixin, LineEditIndicators):
     TOOLTIP = _('Specify how the author(s) of this book should be sorted. '
             'For example Charles Dickens should be sorted as Dickens, '
             'Charles.\nIf the box is colored green, then text matches '
-            'the individual author\'s sort strings. If it is colored '
+            "the individual author's sort strings. If it is colored "
             'red, then the authors and this text do not match.')
     LABEL = _('Author s&ort:')
     FIELD_NAME = 'author_sort'
@@ -600,30 +599,30 @@ class AuthorSortEdit(EnLineEdit, ToMetadataMixin, LineEditIndicators):
         self.db = None
         try:
             self.authors_edit.editTextChanged.disconnect()
-        except:
+        except Exception:
             pass
         try:
             self.textChanged.disconnect()
-        except:
+        except Exception:
             pass
         try:
             self.autogen_button.clicked.disconnect()
-        except:
+        except Exception:
             pass
         try:
             self.copy_a_to_as_action.triggered.disconnect()
-        except:
+        except Exception:
             pass
         try:
             self.copy_as_to_a_action.triggered.disconnect()
-        except:
+        except Exception:
             pass
         self.authors_edit = None
 
 # }}}
 
-# Series {{{
 
+# Series {{{
 
 class SeriesEdit(EditWithComplete, ToMetadataMixin):
 
@@ -660,6 +659,8 @@ class SeriesEdit(EditWithComplete, ToMetadataMixin):
 
     def initialize(self, db, id_):
         self.books_to_refresh = set()
+        if 'series' in db.new_api.pref('categories_using_hierarchy', default=()):
+            self.set_hierarchy_separator('.')
         self.update_items_cache(db.new_api.all_field_names('series'))
         series = db.new_api.field_for('series', id_)
         self.current_val = self.original_val = series or ''
@@ -761,7 +762,7 @@ class SeriesIndexEdit(make_undoable(QDoubleSpinBox), ToMetadataMixin):
                         ns = self.db.get_next_series_num_for(series)
                     self.current_val = ns
                     self.original_series_name = series
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
 
@@ -771,15 +772,15 @@ class SeriesIndexEdit(make_undoable(QDoubleSpinBox), ToMetadataMixin):
     def break_cycles(self):
         try:
             self.series_edit.currentIndexChanged.disconnect()
-        except:
+        except Exception:
             pass
         try:
             self.series_edit.editTextChanged.disconnect()
-        except:
+        except Exception:
             pass
         try:
             self.series_edit.lineEdit().editingFinished.disconnect()
-        except:
+        except Exception:
             pass
         self.db = self.series_edit = self.dialog = None
 
@@ -794,8 +795,8 @@ class BuddyLabel(QLabel):  # {{{
         self.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter)
 # }}}
 
-# Formats {{{
 
+# Formats {{{
 
 class Format(QListWidgetItem):
 
@@ -803,7 +804,7 @@ class Format(QListWidgetItem):
         self.path = path
         self.ext = ext
         self.size = float(size)/(1024*1024)
-        text = '%s (%.2f MB)'%(self.ext.upper(), self.size)
+        text = f'{self.ext.upper()} ({self.size:.2f} MB)'
         QListWidgetItem.__init__(self, file_icon_provider().icon_from_ext(ext),
                                  text, parent, QListWidgetItem.ItemType.UserType.value)
         if timestamp is not None:
@@ -821,6 +822,7 @@ class OrigAction(QAction):
     def __init__(self, fmt, parent):
         self.fmt = fmt.replace('ORIGINAL_', '')
         QAction.__init__(self, _('Restore %s from the original')%self.fmt, parent)
+        self.setIcon(QIcon.ic('edit-undo.png'))
         self.triggered.connect(self._triggered)
 
     def _triggered(self):
@@ -834,6 +836,7 @@ class ViewAction(QAction):
     def __init__(self, item, parent):
         self.item = item
         QAction.__init__(self, _('&View {} format').format(item.ext.upper()), parent)
+        self.setIcon(QIcon.ic('view.png'))
         self.triggered.connect(self._triggered)
 
     def _triggered(self):
@@ -847,6 +850,7 @@ class EditAction(QAction):
     def __init__(self, item, parent):
         self.item = item
         QAction.__init__(self, _('&Edit')+' '+item.ext.upper(), parent)
+        self.setIcon(QIcon.ic('edit_book.png'))
         self.triggered.connect(self._triggered)
 
     def _triggered(self):
@@ -858,6 +862,7 @@ class FormatList(_FormatList):
     restore_fmt = pyqtSignal(object)
     view_fmt = pyqtSignal(object)
     edit_fmt = pyqtSignal(object)
+    open_book_folder = pyqtSignal()
 
     def __init__(self, parent):
         _FormatList.__init__(self, parent)
@@ -873,28 +878,36 @@ class FormatList(_FormatList):
         originals = [self.item(x).ext.upper() for x in range(self.count())]
         originals = [x for x in originals if x.startswith('ORIGINAL_')]
 
-        if item or originals:
-            self.cm = cm = QMenu(self)
+        self.cm = cm = QMenu(self)
 
-            if item:
-                action = ViewAction(item, cm)
-                action.view_fmt.connect(self.view_fmt, type=Qt.ConnectionType.QueuedConnection)
+        if item:
+            action = ViewAction(item, cm)
+            action.view_fmt.connect(self.view_fmt, type=Qt.ConnectionType.QueuedConnection)
+            cm.addAction(action)
+
+            if item.ext.upper() in EDIT_SUPPORTED:
+                action = EditAction(item, cm)
+                action.edit_fmt.connect(self.edit_fmt, type=Qt.ConnectionType.QueuedConnection)
                 cm.addAction(action)
+            ac = cm.addAction(QIcon.ic('trash.png'), _('&Remove {} format').format(item.ext.upper()))
+            ac.setObjectName(item.ext)
+            ac.triggered.connect(self.remove_cm_fmt)
 
-                if item.ext.upper() in EDIT_SUPPORTED:
-                    action = EditAction(item, cm)
-                    action.edit_fmt.connect(self.edit_fmt, type=Qt.ConnectionType.QueuedConnection)
-                    cm.addAction(action)
+        if item and originals:
+            cm.addSeparator()
 
-            if item and originals:
-                cm.addSeparator()
+        for fmt in originals:
+            action = OrigAction(fmt, cm)
+            action.restore_fmt.connect(self.restore_fmt)
+            cm.addAction(action)
+        ac = QAction(QIcon.ic('document_open.png'), _('Open book folder'), cm)
+        ac.triggered.connect(self.open_book_folder)
+        cm.addAction(ac)
+        cm.popup(event.globalPos())
+        event.accept()
 
-            for fmt in originals:
-                action = OrigAction(fmt, cm)
-                action.restore_fmt.connect(self.restore_fmt)
-                cm.addAction(action)
-            cm.popup(event.globalPos())
-            event.accept()
+    def remove_cm_fmt(self):
+        self.remove_format(self.sender().objectName())
 
     def remove_format(self, fmt):
         for i in range(self.count()):
@@ -959,6 +972,7 @@ class FormatsManager(QWidget):
         self.formats.formats_dropped.connect(self.formats_dropped)
         self.formats.restore_fmt.connect(self.restore_fmt)
         self.formats.view_fmt.connect(self.show_format)
+        self.formats.open_book_folder.connect(self.open_book_folder)
         self.formats.edit_fmt.connect(self.edit_format)
         self.formats.delete_format.connect(self.remove_format)
         self.formats.itemDoubleClicked.connect(self.show_format)
@@ -1015,19 +1029,17 @@ class FormatsManager(QWidget):
                 db.add_format(id_, ext, spool, notify=False,
                         index_is_id=True)
         dbfmts = db.formats(id_, index_is_id=True)
-        db_extensions = {fl.lower() for fl in (dbfmts.split(',') if dbfmts
-            else [])}
+        db_extensions = {fl.lower() for fl in (dbfmts.split(',') if dbfmts else [])}
         extensions = new_extensions.union(old_extensions)
         for ext in db_extensions:
             if ext not in extensions and ext in self.original_val:
                 db.remove_format(id_, ext, notify=False, index_is_id=True)
 
         self.changed = False
-        return
 
     def add_format(self, *args):
         files = choose_files_and_remember_all_files(
-                self, 'add formats dialog', _("Choose formats for ") + self.dialog.title.current_val,
+                self, 'add formats dialog', _('Choose formats for ') + self.dialog.title.current_val,
                 [(_('Books'), BOOK_EXTENSIONS)])
         self._add_formats(files)
 
@@ -1093,6 +1105,9 @@ class FormatsManager(QWidget):
     def show_format(self, item, *args):
         self.dialog.do_view_format(item.path, item.ext)
 
+    def open_book_folder(self, *a):
+        self.dialog.do_open_book_folder()
+
     def edit_format(self, item, *args):
         from calibre.gui2.widgets import BusyCursor
         with BusyCursor():
@@ -1142,7 +1157,7 @@ class FormatsManager(QWidget):
                 with stream:
                     mi = get_metadata(stream, ext)
                 return mi, ext
-            except:
+            except Exception:
                 import traceback
                 error_dialog(self, _('Could not read metadata'),
                             _('Could not read metadata from %s format')%ext.upper(),
@@ -1158,7 +1173,7 @@ class FormatsManager(QWidget):
         for name in self.temp_files:
             try:
                 os.remove(name)
-            except:
+            except Exception:
                 pass
         self.temp_files = []
 # }}}
@@ -1192,7 +1207,7 @@ class Cover(ImageView):  # {{{
         self.select_cover_button = CB(_('&Browse'), 'document_open.png', self.select_cover)
         self.trim_cover_button = b = CB(_('Trim bord&ers'), 'trim.png')
         b.setToolTip(_(
-            'Automatically detect and remove extra space at the cover\'s edges.\n'
+            "Automatically detect and remove extra space at the cover's edges.\n"
             'Pressing it repeatedly can sometimes remove stubborn borders.'))
         b.m = m = QMenu(b)
         b.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -1217,6 +1232,55 @@ class Cover(ImageView):  # {{{
         self.frame_size = (300, 400)
         self.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Preferred))
+
+    def build_context_menu(self):
+        m = super().build_context_menu()
+        m.addSeparator()
+        m.addAction(QIcon.ic('view-image'), _('View image in popup window'), self.view_image)
+        from calibre.gui2.book_details import create_open_cover_with_menu
+        create_open_cover_with_menu(self, m, _('Edit cover with...'))
+        return m
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            event.accept()
+            self.view_image()
+        else:
+            super().mouseDoubleClickEvent(event)
+
+    def view_image(self):
+        from calibre.gui2.image_popup import ImageView
+        d = ImageView(self, self.pixmap(), 'cover.jpg')
+        d(use_exec=True)
+        if d.transformed:
+            from calibre.utils.img import image_to_data
+            self.current_val = image_to_data(d.current_img.toImage(), fmt='png')
+
+    def open_with(self, entry):
+        from calibre.gui2 import info_dialog
+        from calibre.gui2.open_with import run_program
+        from calibre.utils.img import image_from_data, save_image
+        cdata = self.current_val
+        img = image_from_data(cdata)
+        pt = PersistentTemporaryFile(suffix='.png')
+        pt.close()
+        try:
+            save_image(img, pt.name)
+            run_program(entry, pt.name, self)
+            info_dialog(self, _('Cover opened in {}').format(entry.get('name') or _('external editor')), _(
+                'Close this popup when you are done making changes to the cover.'), show=True, show_copy_button=False)
+        finally:
+            with open(pt.name, 'rb') as f:
+                ncdata = f.read()
+            os.remove(pt.name)
+            if ncdata and ncdata != cdata:
+                self.current_val = ncdata
+
+    def choose_open_with(self):
+        from calibre.gui2.open_with import choose_program
+        entry = choose_program('cover_image', self)
+        if entry is not None:
+            self.open_with(entry)
 
     def undo_trim(self):
         if self.cdata_before_trim:
@@ -1251,12 +1315,12 @@ class Cover(ImageView):  # {{{
                 return
             cover = None
             try:
-                with open(_file, "rb") as f:
+                with open(_file, 'rb') as f:
                     cover = f.read()
             except OSError as e:
                 d = error_dialog(
                         self, _('Error reading file'),
-                        _("<p>There was an error reading from file: <br /><b>") + _file + "</b></p><br />"+str(e))
+                        _('<p>There was an error reading from file: <br /><b>') + _file + '</b></p><br />'+str(e))
                 d.exec()
             if cover:
                 orig = self.current_val
@@ -1264,8 +1328,8 @@ class Cover(ImageView):  # {{{
                 if self.current_val is None:
                     self.current_val = orig
                     error_dialog(self,
-                        _("Not a valid picture"),
-                            _file + _(" is not a valid picture"), show=True)
+                        _('Not a valid picture'),
+                            _file + _(' is not a valid picture'), show=True)
 
     def remove_cover(self, *args):
         self.current_val = None
@@ -1359,7 +1423,7 @@ class Cover(ImageView):  # {{{
     def break_cycles(self):
         try:
             self.cover_changed.disconnect()
-        except:
+        except Exception:
             pass
         self.dialog = self._cdata = self.current_val = self.original_val = None
 
@@ -1473,6 +1537,8 @@ class TagsEdit(EditWithComplete, ToMetadataMixin):  # {{{
 
     def initialize(self, db, id_):
         self.books_to_refresh = set()
+        if 'tags' in db.new_api.pref('categories_using_hierarchy', default=()):
+            self.set_hierarchy_separator('.')
         tags = db.tags(id_, index_is_id=True)
         tags = tags.split(',') if tags else []
         self.current_val = tags
@@ -1572,8 +1638,8 @@ class LanguagesEdit(LE, ToMetadataMixin):  # {{{
         self.update_recently_used()
 # }}}
 
-# Identifiers {{{
 
+# Identifiers {{{
 
 class Identifiers(Dialog):
 
@@ -1585,7 +1651,7 @@ class Identifiers(Dialog):
         self.l = l = QVBoxLayout(self)
 
         self.la = la = QLabel(_(
-            'Edit the book\'s identifiers. Every identifier must be on a separate line, and have the form type:value'))
+            "Edit the book's identifiers. Every identifier must be on a separate line, and have the form type:value"))
         la.setWordWrap(True)
         self.text = t = QPlainTextEdit(self)
         l.addWidget(la), l.addWidget(t)
@@ -1681,8 +1747,8 @@ class IdentifiersEdit(QLineEdit, ToMetadataMixin, LineEditIndicators):
                 v = check_isbn(k)
                 if v is not None:
                     val[k] = v
-        ids = sorted(iteritems(val), key=keygen)
-        txt = ', '.join(['%s:%s'%(k.lower(), vl) for k, vl in ids])
+        ids = sorted(val.items(), key=keygen)
+        txt = ', '.join([f'{k.lower()}:{vl}' for k, vl in ids])
         if self.allow_undo:
             self.selectAll(), self.insert(txt.strip())
         else:
@@ -1719,7 +1785,7 @@ class IdentifiersEdit(QLineEdit, ToMetadataMixin, LineEditIndicators):
         if identifier_found:
             return
         text = str(QApplication.clipboard().text()).strip()
-        if text.startswith('http://') or text.startswith('https://'):
+        if text.startswith(('http://', 'https://')):
             return self.paste_prefix('url')
         try:
             prefix = gprefs['paste_isbn_prefixes'][0]
@@ -1765,14 +1831,14 @@ class IdentifiersEdit(QLineEdit, ToMetadataMixin, LineEditIndicators):
         rules = msprefs['id_link_rules']
         if rules:
             formatter = EvalFormatter()
-            vals = {'id' : '__ID_REGEX_PLACEHOLDER__'}
+            vals = {'id': '__ID_REGEX_PLACEHOLDER__'}
             for key in rules.keys():
                 rule = rules[key]
                 for name, template in rule:
                     try:
                         url_pattern = formatter.safe_format(template, vals, '', vals)
                         url_pattern = re.escape(url_pattern).replace('__ID_REGEX_PLACEHOLDER__', '(?P<new_id>.+)')
-                        if url_pattern.startswith('http:') or url_pattern.startswith('https:'):
+                        if url_pattern.startswith(('http:', 'https:')):
                             url_pattern = '(?:http|https):' + url_pattern.partition(':')[2]
                         new_id = re.compile(url_pattern)
                         new_id = new_id.search(text).group('new_id')
@@ -1798,9 +1864,22 @@ class IdentifiersEdit(QLineEdit, ToMetadataMixin, LineEditIndicators):
                     return True
             except Exception:
                 pass
+        for key, prefix in (
+            ('doi', 'https://dx.doi.org/'),
+            ('doi', 'https://doi.org/'),
+            ('arxiv', 'https://arxiv.org/abs/'),
+            ('oclc', 'https://www.worldcat.org/oclc/'),
+            ('issn', 'https://www.worldcat.org/issn/'),
+        ):
+            if text.startswith(prefix):
+                vals = self.current_val
+                vals[key] = text[len(prefix):].strip()
+                self.current_val = vals
+                return True
 
         return False
 # }}}
+
 
 class IndicatorLineEdit(QLineEdit, LineEditIndicators):
     pass
@@ -1844,7 +1923,7 @@ class ISBNDialog(QDialog):  # {{{
         isbn = str(txt)
         ok = None
         if not isbn:
-            pass
+            extra = ''
         elif check_isbn(isbn) is not None:
             extra = _('This ISBN is valid')
             ok = True
@@ -1935,8 +2014,8 @@ class PublisherEdit(EditWithComplete, ToMetadataMixin):  # {{{
 
 # }}}
 
-# DateEdit {{{
 
+# DateEdit {{{
 
 class DateEdit(make_undoable(DateTimeEdit), ToMetadataMixin):
 
@@ -2003,6 +2082,13 @@ class DateEdit(make_undoable(DateTimeEdit), ToMetadataMixin):
             ev.ignore()
         else:
             return super().keyPressEvent(ev)
+
+    def wheelEvent(self, ev):
+        if is_date_undefined(self.current_val):
+            self.setDateTime(QDateTime.currentDateTime())
+            ev.accept()
+        else:
+            return super().wheelEvent(ev)
 
 
 class PubdateEdit(DateEdit):

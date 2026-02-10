@@ -221,7 +221,7 @@ OPTIONS = {
 
         'fb2': ('no_inline_fb2_toc',),
 
-        'pdf': ('no_images', 'unwrap_factor'),
+        'pdf': ('no_images', 'unwrap_factor', 'pdf_engine', 'pdf_header_skip', 'pdf_footer_skip', 'pdf_header_regex', 'pdf_footer_regex'),
 
         'rtf': ('ignore_wmf',),
 
@@ -260,7 +260,7 @@ OPTIONS = {
         'structure_detection': (
             'chapter', 'chapter_mark', 'start_reading_at',
             'remove_first_image', 'remove_fake_margins', 'insert_metadata',
-            'page_breaks_before'),
+            'page_breaks_before', 'add_alt_text_to_img',),
 
         'toc': (
             'level1_toc', 'level2_toc', 'level3_toc',
@@ -280,6 +280,12 @@ OPTIONS = {
             'dont_split_on_page_breaks', 'flow_size', 'no_default_epub_cover',
             'no_svg_cover', 'epub_inline_toc', 'epub_toc_at_end', 'toc_title',
             'preserve_cover_aspect_ratio', 'epub_flatten', 'epub_version', 'epub_max_image_size',),
+
+        'kepub': (
+            'dont_split_on_page_breaks', 'flow_size', 'kepub_max_image_size', 'kepub_prefer_justification',
+            'kepub_affect_hyphenation', 'kepub_disable_hyphenation', 'kepub_hyphenation_min_chars',
+            'kepub_hyphenation_min_chars_before', 'kepub_hyphenation_min_chars_after', 'kepub_hyphenation_limit_lines',
+        ),
 
         'fb2': ('sectionize', 'fb2_genre'),
 
@@ -318,7 +324,7 @@ OPTIONS = {
             'snb_hide_chapter_name','snb_full_screen'),
 
         'txt': (
-            'newline', 'max_line_length', 'force_max_line_length',
+            'newline', 'max_line_length', 'force_max_line_length', 'use_alt_text_for_images',
             'inline_toc', 'txt_output_formatting', 'keep_links', 'keep_image_references',
             'keep_color', 'txt_output_encoding'),
     },

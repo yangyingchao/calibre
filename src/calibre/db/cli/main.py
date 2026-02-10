@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 # License: GPLv3 Copyright: 2017, Kovid Goyal <kovid at kovidgoyal.net>
 
+import http.client
 import json
 import os
 import sys
+from urllib.parse import urlencode, urlparse, urlunparse
 
 from calibre import browser, prints
 from calibre.constants import __appname__, __version__, iswindows
@@ -13,8 +15,6 @@ from calibre.utils.config import OptionParser, prefs
 from calibre.utils.localization import localize_user_manual_link
 from calibre.utils.lock import singleinstance
 from calibre.utils.serialize import MSGPACK_MIME
-from polyglot import http_client
-from polyglot.urllib import urlencode, urlparse, urlunparse
 
 COMMANDS = (
     'list', 'add', 'remove', 'add_format', 'remove_format', 'show_metadata',
@@ -52,15 +52,17 @@ def get_parser(usage):
         help=_(
             'Path to the calibre library. Default is to use the path stored in the settings.'
             ' You can also connect to a calibre Content server to perform actions on'
-            ' remote libraries. To do so use a URL of the form: http://hostname:port/#library_id'
-            ' for example, http://localhost:8080/#mylibrary. library_id is the library id'
+            ' remote libraries. To do so use a URL of the form: {1}'
+            ' for example, {2}. library_id is the library id'
             ' of the library you want to connect to on the Content server. You can use'
             ' the special library_id value of - to get a list of library ids available'
             ' on the server. For details on how to setup access via a Content server, see'
-            ' {}.'
+            ' {0}.'
         ).format(localize_user_manual_link(
-            'https://manual.calibre-ebook.com/generated/en/calibredb.html'
-        ))
+            'https://manual.calibre-ebook.com/generated/en/calibredb.html'),
+            'http://hostname:port/#library_id',
+            'http://localhost:8080/#mylibrary',
+        )
     )
     go.add_option(
         '-h', '--help', help=_('show this help message and exit'), action='help'
@@ -184,13 +186,13 @@ class DBCtx:
         return m.implementation(self.db.new_api, None, *args)
 
     def interpret_http_error(self, err):
-        if err.code == http_client.UNAUTHORIZED:
+        if err.code == http.client.UNAUTHORIZED:
             if self.has_credentials:
                 raise SystemExit('The username/password combination is incorrect')
             raise SystemExit('A username and password is required to access this server')
-        if err.code == http_client.FORBIDDEN:
+        if err.code == http.client.FORBIDDEN:
             raise SystemExit(err.reason)
-        if err.code == http_client.NOT_FOUND:
+        if err.code == http.client.NOT_FOUND:
             raise SystemExit(err.reason)
 
     def remote_run(self, name, m, *args):

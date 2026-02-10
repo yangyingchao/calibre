@@ -9,7 +9,7 @@ __docformat__ = 'restructuredtext en'
 import io
 import re
 import struct
-import zlib
+from compression import zlib
 
 from PIL import Image
 
@@ -151,8 +151,8 @@ class Writer(FormatWriter):
                     if len(data) + len(header) < 65505:
                         images.append((header, data))
                 except Exception as e:
-                    self.log.error('Error: Could not include file %s because '
-                        '%s.' % (item.href, e))
+                    self.log.error(f'Error: Could not include file {item.href} because '
+                        f'{e}.')
 
         return images
 

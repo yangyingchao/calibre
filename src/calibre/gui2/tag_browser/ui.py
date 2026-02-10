@@ -39,7 +39,6 @@ from calibre.gui2.widgets import HistoryLineEdit
 from calibre.startup import connect_lambda
 from calibre.utils.icu import sort_key
 from calibre.utils.localization import ngettext
-from polyglot.builtins import iteritems
 
 
 class TagBrowserMixin:  # {{{
@@ -97,15 +96,15 @@ class TagBrowserMixin:  # {{{
         if idx is not None and idx.isValid():
             col = idx.column()
             model = self.library_view.model()
-            if col in range(0, len(model.column_map)):
+            if col in range(len(model.column_map)):
                 current_cat = model.column_map[col]
                 if current_cat in ('authors', 'series', 'publisher', 'tags') or current_cat in cust_cats:
                     cdn = cat_display_name(current_cat) or current_cat
-                    m.addAction(get_icon(current_cat), cdn, menu_func(current_cat, None))
+                    m.addAction(get_icon(current_cat), cdn.replace('&', '&&'), menu_func(current_cat, None))
                     proxy_md = db.new_api.get_proxy_metadata(db.id(idx.row()))
                     items = proxy_md.get(current_cat)
                     if isinstance(items, str):
-                        items = list((items,))
+                        items = [items]
                     if items:
                         items_title = _('{category} for current book').format(category=cdn)
                         if len(items) > 4:
@@ -130,7 +129,7 @@ class TagBrowserMixin:  # {{{
             for cat in sorted(cust_cats, key=lambda v: sort_key(cat_display_name(v))):
                 if cat == current_cat:
                     continue
-                m.addAction(get_icon(cat), cat_display_name(cat), menu_func(cat, None))
+                m.addAction(get_icon(cat), cat_display_name(cat).replace('&', '&&'), menu_func(cat, None))
 
     def init_tag_browser_mixin(self, db):
         self.library_view.model().count_changed_signal.connect(self.tags_view.recount_with_position_based_index)
@@ -170,7 +169,7 @@ class TagBrowserMixin:  # {{{
         current_row_id = self.library_view.current_id
         self.library_view.model().refresh(reset=True)
         self.library_view.model().research(reset=False)
-        self.library_view.current_id = current_row_id # the setter checks for None
+        self.library_view.current_id = current_row_id  # the setter checks for None
 
     def do_restriction_error(self, e):
         error_dialog(self.tags_view, _('Invalid search restriction'),
@@ -246,8 +245,7 @@ class TagBrowserMixin:  # {{{
         '''
         Delete the User category named category_name. Any leading '@' is removed
         '''
-        if category_name.startswith('@'):
-            category_name = category_name[1:]
+        category_name = category_name.removeprefix('@')
         db = self.library_view.model().db
         user_cats = db.new_api.pref('user_categories', {})
         cat_keys = sorted(user_cats.keys(), key=sort_key)
@@ -282,8 +280,7 @@ class TagBrowserMixin:  # {{{
         Delete the item (item_name, item_category) from the User category with
         key user_cat. Any leading '@' characters are removed
         '''
-        if user_cat.startswith('@'):
-            user_cat = user_cat[1:]
+        user_cat = user_cat.removeprefix('@')
         db = self.library_view.model().db
         user_cats = db.new_api.pref('user_categories', {})
         if user_cat not in user_cats:
@@ -405,7 +402,7 @@ class TagBrowserMixin:  # {{{
                 tag_names.append(child.tag.original_name)
         n = '\n   '.join(tag_names)
         if n:
-            n = '%s:\n   %s\n%s:\n   %s'%(_('Item'), orig_name, _('Children'), n)
+            n = '{}:\n   {}\n{}:\n   {}'.format(_('Item'), orig_name, _('Children'), n)
         if n:
             # Use a new "see this again" name to force the dialog to appear at
             # least once, thus announcing the new feature.
@@ -460,7 +457,7 @@ class TagBrowserMixin:  # {{{
         if fm['datatype'] == 'series':
             series_index_field = field_name + '_index'
         changes = {}
-        for book_id, existing in iteritems(existing_values):
+        for book_id, existing in existing_values.items():
             if isinstance(existing, tuple):
                 existing = list(existing)
                 if remove:
@@ -469,16 +466,13 @@ class TagBrowserMixin:  # {{{
                     except ValueError:
                         continue
                     changes[book_id] = existing
-                else:
-                    if item_name not in existing:
-                        changes[book_id] = existing + [item_name]
-            else:
-                if remove:
-                    if existing == item_name:
-                        changes[book_id] = None
-                else:
-                    if existing != item_name:
-                        changes[book_id] = item_name
+                elif item_name not in existing:
+                    changes[book_id] = existing + [item_name]
+            elif remove:
+                if existing == item_name:
+                    changes[book_id] = None
+            elif existing != item_name:
+                changes[book_id] = item_name
         if changes:
             db.set_field(field_name, changes)
             if series_index_field is not None:
@@ -879,6 +873,10 @@ class TagBrowserWidget(QFrame):  # {{{
                 action=ac, group=_('Tag browser'))
         ac.triggered.connect(self.filter_book_list)
 
+        l.m.addSeparator()
+        ac = l.m.addAction(QIcon.ic('config.png'), _('Show all Tag browser se&ttings'))
+        ac.triggered.connect(self.show_tag_browser_preferences)
+
         ac = QAction(parent)
         parent.addAction(ac)
         parent.keyboard.register_shortcut('tag browser toggle item',
@@ -889,13 +887,18 @@ class TagBrowserWidget(QFrame):  # {{{
         ac = QAction(parent)
         parent.addAction(ac)
         parent.keyboard.register_shortcut('tag browser set focus',
-                _("Give the Tag browser keyboard focus"), default_keys=(),
+                _('Give the Tag browser keyboard focus'), default_keys=(),
                 action=ac, group=_('Tag browser'))
         ac.triggered.connect(self.give_tb_focus)
 
         # self.leak_test_timer = QTimer(self)
         # self.leak_test_timer.timeout.connect(self.test_for_leak)
         # self.leak_test_timer.start(5000)
+
+    def show_tag_browser_preferences(self):
+        from calibre.gui2.ui import get_gui
+        get_gui().iactions['Preferences'].do_config(initial_plugin=('Interface', 'Look & Feel', 'tag_browser_tab'),
+                                                   close_after_initial=True)
 
     def about_to_show_configure_menu(self):
         ac = self.alter_tb.m.show_counts_action
@@ -947,8 +950,26 @@ class TagBrowserWidget(QFrame):  # {{{
         self.tags_view.model().prefs['tag_browser_hide_empty_categories'] ^= True
         self.tags_view.recount_with_position_based_index()
 
-    def save_state(self):
-        gprefs.set('tag browser search box visible', self.toggle_search_button.isChecked())
+    def save_state(self, gprefs_local=None):
+        if gprefs_local is None:
+            gprefs_local = gprefs
+        gprefs_local.set('tag browser search box visible', self.toggle_search_button.isChecked())
+
+    def restore_expansion_state(self, state):
+        '''
+        Expands the tag browser tree so that the node specified in state is
+        visible. Use get_expansion_state() to get the state. The intent is that
+        a plugin could restore the state in the library_changed() method.
+        '''
+        if state is not None:
+            self.tags_view.restore_expansion(state)
+
+    def get_expansion_state(self):
+        '''
+        Returns the currently expanded node in the tag browser as a string
+        suitable for restoring using restore_expansion_state.
+        '''
+        return self.tags_view.current_expansion
 
     def toggle_item(self):
         self.tags_view.toggle_current_index()
@@ -1071,6 +1092,5 @@ class TagBrowserWidget(QFrame):  # {{{
             ev.accept()
             return
         return QFrame.keyPressEvent(self, ev)
-
 
 # }}}

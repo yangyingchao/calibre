@@ -8,7 +8,6 @@ import time
 from collections import defaultdict
 from contextlib import suppress
 from itertools import count, repeat
-from typing import Optional
 
 import apsw
 import xxhash
@@ -17,15 +16,15 @@ from calibre import sanitize_file_name
 from calibre.constants import iswindows
 from calibre.db import FTSQueryError
 from calibre.db.annotations import unicode_normalize
+from calibre.db.constants import NOTES_DB_NAME, NOTES_DIR_NAME
+from calibre.db.notes.schema_upgrade import SchemaUpgrade
 from calibre.utils.copy_files import WINDOWS_SLEEP_FOR_RETRY_TIME
 from calibre.utils.filenames import copyfile_using_links, make_long_path_useable
 from calibre.utils.icu import lower as icu_lower
 
-from .schema_upgrade import SchemaUpgrade
-from ..constants import NOTES_DB_NAME, NOTES_DIR_NAME
-
 if iswindows:
     from calibre_extensions import winutil
+
 
 class cmt(str):
     pass
@@ -84,7 +83,7 @@ class Notes:
     def reopen(self, backend):
         conn = backend.get_connection()
         conn.notes_dbpath = os.path.join(self.notes_dir, NOTES_DB_NAME)
-        conn.execute("ATTACH DATABASE ? AS notes_db", (conn.notes_dbpath,))
+        conn.execute('ATTACH DATABASE ? AS notes_db', (conn.notes_dbpath,))
         self.allowed_fields = set()
         triggers = []
         for table in backend.tables.values():
@@ -120,7 +119,7 @@ class Notes:
     def path_for_resource(self, resource_hash: str) -> str:
         hashalg, digest = resource_hash.split(':', 1)
         prefix = digest[:2]
-        # Cant use colons in filenames on windows safely
+        # Can't use colons in filenames on windows safely
         return os.path.join(self.resources_dir, prefix, f'{hashalg}-{digest}')
 
     def remove_resources(self, conn, note_id, resources_to_potentially_remove, delete_from_link_table=True):
@@ -281,7 +280,7 @@ class Notes:
         if field_name:
             return {item_id for (item_id,) in conn.execute('SELECT item FROM notes_db.notes WHERE colname=?', (field_name,))}
         ans = defaultdict(set)
-        for (note_id, field_name) in conn.execute('SELECT item, colname FROM notes_db.notes'):
+        for note_id, field_name in conn.execute('SELECT item, colname FROM notes_db.notes'):
             ans[field_name].add(note_id)
         return ans
 
@@ -368,7 +367,7 @@ class Notes:
                     name = f'{base_name}-{c}{ext}'
         return resource_hash
 
-    def get_resource_data(self, conn, resource_hash) -> Optional[dict]:
+    def get_resource_data(self, conn, resource_hash) -> dict | None:
         ans = None
         for (name,) in conn.execute('SELECT name FROM notes_db.resources WHERE hash=?', (resource_hash,)):
             path = self.path_for_resource(resource_hash)
@@ -413,13 +412,15 @@ class Notes:
             return
         fts_engine_query = unicode_normalize(fts_engine_query)
         fts_table = 'notes_fts' + ('_stemmed' if use_stemming else '')
+        hl_data = ()
         if return_text:
             text = 'notes.searchable_text'
             if highlight_start is not None and highlight_end is not None:
                 if snippet_size is not None:
-                    text = f'''snippet("{fts_table}", 0, '{highlight_start}', '{highlight_end}', '…', {max(1, min(snippet_size, 64))})'''
+                    text = f'''snippet("{fts_table}", 0, ?, ?, '…', {max(1, min(snippet_size, 64))})'''
                 else:
-                    text = f'''highlight("{fts_table}", 0, '{highlight_start}', '{highlight_end}')'''
+                    text = f'''highlight("{fts_table}", 0, ?, ?)'''
+                hl_data = (highlight_start, highlight_end)
             text = ', ' + text
         else:
             text = ''
@@ -433,7 +434,7 @@ class Notes:
         if limit is not None:
             query += f' LIMIT {limit}'
         try:
-            for record in conn.execute(query, restrict_to_fields+(fts_engine_query,)):
+            for record in conn.execute(query, hl_data + restrict_to_fields + (fts_engine_query,)):
                 result = {
                     'id': record[0],
                     'field': record[1],
@@ -468,7 +469,11 @@ class Notes:
         resources = {}
         errors = []
         for subdir in os.listdir(make_long_path_useable(self.resources_dir)):
-            for rf in os.listdir(make_long_path_useable(os.path.join(self.resources_dir, subdir))):
+            try:
+                subitems = os.listdir(make_long_path_useable(os.path.join(self.resources_dir, subdir)))
+            except NotADirectoryError:
+                continue
+            for rf in subitems:
                 if not rf.endswith(METADATA_EXT):
                     name_path = os.path.join(self.resources_dir, subdir, rf + METADATA_EXT)
                     name = 'unnamed'

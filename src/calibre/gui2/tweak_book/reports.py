@@ -7,6 +7,7 @@ __copyright__ = '2015, Kovid Goyal <kovid at kovidgoyal.net>'
 import os
 import textwrap
 import time
+import unicodedata
 from collections import defaultdict
 from contextlib import suppress
 from csv import writer as csv_writer
@@ -65,10 +66,10 @@ from calibre.gui2.tweak_book import current_container, dictionaries, tprefs
 from calibre.gui2.tweak_book.widgets import Dialog
 from calibre.gui2.webengine import RestartingWebEngineView
 from calibre.utils.icu import numeric_sort_key, primary_contains
-from calibre.utils.localization import calibre_langcode_to_name, canonicalize_lang
+from calibre.utils.localization import calibre_langcode_to_name, canonicalize_lang, ngettext
 from calibre.utils.unicode_names import character_name_from_code
 from calibre.utils.webengine import secure_webengine
-from polyglot.builtins import as_bytes, iteritems
+from polyglot.builtins import as_bytes
 
 # Utils {{{
 
@@ -204,6 +205,11 @@ class FilesView(QTableView):
             self.delete_selected()
             ev.accept()
             return
+        if ev.key() in (Qt.Key.Key_Enter, Qt.Key.Key_Return):
+            if (index := self.currentIndex()).isValid():
+                ev.accept()
+                self._double_clicked(index)
+                return
         return QTableView.keyPressEvent(self, ev)
 
     @property
@@ -260,12 +266,12 @@ class FilesView(QTableView):
 
 # }}}
 
-# Files {{{
 
+# Files {{{
 
 class FilesModel(FileCollection):
 
-    COLUMN_HEADERS = (_('Folder'), _('Name'), _('Size (KB)'), _('Type'), _('Word count'))
+    COLUMN_HEADERS = (ngettext('Folder', 'Folders', 1), _('Name'), _('Size (KB)'), _('Type'), _('Word count'))
     alignments = Qt.AlignmentFlag.AlignLeft, Qt.AlignmentFlag.AlignLeft, Qt.AlignmentFlag.AlignRight, Qt.AlignmentFlag.AlignLeft, Qt.AlignmentFlag.AlignRight
     CATEGORY_NAMES = {
         'image':_('Image'),
@@ -308,7 +314,7 @@ class FilesModel(FileCollection):
                 return entry.basename
             if col == 2:
                 sz = entry.size / 1024.
-                return '%.2f ' % sz
+                return f'{sz:.2f} '
             if col == 3:
                 return self.CATEGORY_NAMES.get(entry.category)
             if col == 4:
@@ -363,8 +369,8 @@ class FilesWidget(QWidget):
 
 # }}}
 
-# Jump {{{
 
+# Jump {{{
 
 def jump_to_location(loc):
     from calibre.gui2.tweak_book.boss import get_boss
@@ -390,7 +396,7 @@ def jump_to_location(loc):
 class Jump:
 
     def __init__(self):
-        self.pos_map = defaultdict(lambda : -1)
+        self.pos_map = defaultdict(lambda: -1)
 
     def clear(self):
         self.pos_map.clear()
@@ -402,10 +408,11 @@ class Jump:
             jump_to_location(loc)
 
 
-jump = Jump()  # }}}
+jump = Jump()
+# }}}
+
 
 # Images {{{
-
 
 class ImagesDelegate(QStyledItemDelegate):
 
@@ -499,11 +506,11 @@ class ImagesModel(FileCollection):
                 return entry.basename
             if col == 1:
                 sz = entry.size / 1024.
-                return ('%.2f' % sz if int(sz) != sz else str(sz))
+                return (f'{sz:.2f}' if int(sz) != sz else str(sz))
             if col == 2:
                 return str(len(entry.usage))
             if col == 3:
-                return '%d x %d' % (entry.width, entry.height)
+                return f'{entry.width} x {entry.height}'
         elif role == Qt.ItemDataRole.UserRole:
             try:
                 return self.files[index.row()]
@@ -563,8 +570,8 @@ class ImagesWidget(QWidget):
         self.files.save_table('image-files-table')
 # }}}
 
-# Links {{{
 
+# Links {{{
 
 class LinksModel(FileCollection):
 
@@ -714,21 +721,20 @@ class LinksWidget(QWidget):
         if index.column() < 3:
             # Jump to source
             jump_to_location(link.location)
-        else:
-            # Jump to destination
-            if link.is_external:
-                if link.href:
-                    open_url(link.href)
-            elif link.anchor.location:
-                jump_to_location(link.anchor.location)
+        # Jump to destination
+        elif link.is_external:
+            if link.href:
+                open_url(link.href)
+        elif link.anchor.location:
+            jump_to_location(link.anchor.location)
 
     def save(self):
         self.links.save_table('links-table')
         save_state('links-view-splitter', bytearray(self.splitter.saveState()))
 # }}}
 
-# Words {{{
 
+# Words {{{
 
 class WordsModel(FileCollection):
 
@@ -769,7 +775,7 @@ class WordsModel(FileCollection):
             if col == 1:
                 ans = calibre_langcode_to_name(canonicalize_lang(entry.locale.langcode)) or ''
                 if entry.locale.countrycode:
-                    ans += ' (%s)' % entry.locale.countrycode
+                    ans += f' ({entry.locale.countrycode})'
                 return ans
             if col == 2:
                 return str(len(entry.usage))
@@ -827,8 +833,8 @@ class WordsWidget(QWidget):
         self.words.save_table('words-table')
 # }}}
 
-# Characters {{{
 
+# Characters {{{
 
 class CharsModel(FileCollection):
 
@@ -905,7 +911,8 @@ class CharsWidget(QWidget):
     def __call__(self, data):
         self.model(data)
         self.chars.resize_rows()
-        self.summary.setText(''.join(self.model.all_chars))
+        c = unicodedata.category
+        self.summary.setText(''.join(sorted(ch for ch in self.model.all_chars if c(ch) not in ('Zs', 'Cc'))))
         self.filter_edit.clear()
 
     def double_clicked(self, index):
@@ -946,8 +953,8 @@ class CharsWidget(QWidget):
 
 # }}}
 
-# CSS {{{
 
+# CSS {{{
 
 class CSSRulesModel(QAbstractItemModel):
 
@@ -1015,12 +1022,14 @@ class CSSRulesModel(QAbstractItemModel):
         return 1
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if index.column() != 0:
+            return
         if role == SORT_ROLE:
             entry = self.index_to_entry(index)
             if isinstance(entry, CSSEntry):
-                return entry.count if self.sort_on_count else entry.sort_key
+                return entry.count if self.sort_on_count else QByteArray(entry.sort_key)
             if isinstance(entry, CSSFileMatch):
-                return len(entry.locations) if self.sort_on_count else entry.sort_key
+                return len(entry.locations) if self.sort_on_count else QByteArray(entry.sort_key)
             if isinstance(entry, MatchLocation):
                 return entry.sourceline
         elif role == Qt.ItemDataRole.DisplayRole:
@@ -1096,6 +1105,7 @@ class CSSWidget(QWidget):
         e.setClearButtonEnabled(True)
         self.model = m = self.MODEL(self)
         self.proxy = p = self.PROXY(self)
+        m.sort_on_count = self.read_state('sort-on-counts', True)
         p.setSourceModel(m)
         self.view = f = QTreeView(self)
         f.setAlternatingRowColors(True)
@@ -1108,10 +1118,10 @@ class CSSWidget(QWidget):
         l.addLayout(h)
         h.addWidget(QLabel(_('Sort by:')))
         self.counts_button = b = QRadioButton(_('&Counts'), self)
-        b.setChecked(self.read_state('sort-on-counts', True))
+        b.setChecked(m.sort_on_count)
         h.addWidget(b)
         self.name_button = b = QRadioButton(_('&Name'), self)
-        b.setChecked(not self.read_state('sort-on-counts', True))
+        b.setChecked(not m.sort_on_count)
         h.addWidget(b)
         b.toggled.connect(self.resort)
         h.addStrut(20)
@@ -1195,8 +1205,8 @@ class CSSWidget(QWidget):
 
 # }}}
 
-# Classes {{{
 
+# Classes {{{
 
 class ClassesModel(CSSRulesModel):
 
@@ -1238,9 +1248,9 @@ class ClassesModel(CSSRulesModel):
         if role == SORT_ROLE:
             entry = self.index_to_entry(index)
             if isinstance(entry, ClassEntry):
-                return entry.num_of_matches if self.sort_on_count else entry.sort_key
+                return entry.num_of_matches if self.sort_on_count else QByteArray(entry.sort_key)
             if isinstance(entry, ClassFileMatch):
-                return len(entry.class_elements) if self.sort_on_count else entry.sort_key
+                return len(entry.class_elements) if self.sort_on_count else QByteArray(entry.sort_key)
             if isinstance(entry, ClassElement):
                 return entry.line_number
             if isinstance(entry, CSSRule):
@@ -1330,8 +1340,8 @@ class ClassesWidget(CSSWidget):
 
 # }}}
 
-# Wrapper UI {{{
 
+# Wrapper UI {{{
 
 class ReportsWidget(QWidget):
 
@@ -1401,7 +1411,7 @@ class ReportsWidget(QWidget):
             self.stack.widget(i)(data)
             if DEBUG:
                 category = self.reports.item(i).data(Qt.ItemDataRole.DisplayRole)
-                print('Widget time for %12s: %.2fs seconds' % (category, time.time() - st))
+                print(f'Widget time for {category:12}: {time.time() - st:.2f}s seconds')
 
     def save(self):
         save_state('splitter-state', bytearray(self.splitter.saveState()))
@@ -1417,7 +1427,7 @@ class ReportsWidget(QWidget):
                 'Export of %s data is not supported') % category, show=True)
         data = w.to_csv()
         fname = choose_save_file(self, 'report-csv-export', _('Choose a filename for the data'), filters=[
-            (_('CSV files'), ['csv'])], all_files=False, initial_filename='%s.csv' % category)
+            (_('CSV files'), ['csv'])], all_files=False, initial_filename=f'{category}.csv')
         if fname:
             with open(fname, 'wb') as f:
                 f.write(as_bytes(data))
@@ -1502,8 +1512,8 @@ class Reports(Dialog):
                 ' information.'), det_msg=data, show=True)
         data, timing = data
         if DEBUG:
-            for x, t in sorted(iteritems(timing), key=itemgetter(1)):
-                print('Time for %6s data: %.3f seconds' % (x, t))
+            for x, t in sorted(timing.items(), key=itemgetter(1)):
+                print(f'Time for {x:6} data: {t:.3f} seconds')
         self.reports(data)
 
     def accept(self):

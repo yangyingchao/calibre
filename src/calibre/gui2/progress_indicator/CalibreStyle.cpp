@@ -82,8 +82,8 @@ static QPixmap styleCachePixmap(const QSize &size)
 }
 
 
-static void draw_arrow(Qt::ArrowType type, QPainter *painter, const QStyleOption *option, const QRect &rect, const QColor &color)
-{
+static void
+draw_arrow(Qt::ArrowType type, QPainter *painter, const QStyleOption *option, const QRect &rect, const QColor &color) {
     if (rect.isEmpty())
         return;
 
@@ -137,6 +137,85 @@ static void draw_arrow(Qt::ArrowType type, QPainter *painter, const QStyleOption
 
     painter->drawPixmap(rect, cachePixmap);
 }
+
+// scrollbar {{{
+void
+CalibreStyle::draw_scrollbar(const QStyleOptionSlider *scroll_bar, QPainter * painter, const QWidget * widget) const {
+    bool is_dark = is_color_dark(scroll_bar->palette.color(QPalette::Window));
+    bool horizontal = scroll_bar->orientation == Qt::Horizontal;
+
+    QColor alphaOutline = scroll_bar->palette.window().color();
+    if (is_dark) {
+        alphaOutline = alphaOutline.darker(140);
+    } else {
+        alphaOutline = alphaOutline.lighter(180);
+    }
+    alphaOutline.setAlpha(180);
+
+    QRect scrollBarSubLine = subControlRect(CC_ScrollBar, scroll_bar, SC_ScrollBarSubLine, widget);
+    QRect scrollBarAddLine = subControlRect(CC_ScrollBar, scroll_bar, SC_ScrollBarAddLine, widget);
+    QRect scrollBarSlider = subControlRect(CC_ScrollBar, scroll_bar, SC_ScrollBarSlider, widget);
+    QRect scrollBarGroove = subControlRect(CC_ScrollBar, scroll_bar, SC_ScrollBarGroove, widget);
+
+    QRect rect = scroll_bar->rect;
+
+    // Paint groove
+    QLinearGradient gradient(rect.center().x(), rect.top(), rect.center().x(), rect.bottom());
+    if (!horizontal) gradient = QLinearGradient(rect.left(), rect.center().y(), rect.right(), rect.center().y());
+    QColor buttonColor = scroll_bar->palette.color(QPalette::Button);
+    if (is_dark) {
+        gradient.setColorAt(0, buttonColor.darker(107));
+        gradient.setColorAt(0.1, buttonColor.darker(105));
+        gradient.setColorAt(0.9, buttonColor.darker(105));
+        gradient.setColorAt(1, buttonColor.darker(107));
+    } else {
+        gradient.setColorAt(0, buttonColor.darker(105));
+        gradient.setColorAt(0.1, buttonColor.darker(103));
+        gradient.setColorAt(0.9, buttonColor.darker(103));
+        gradient.setColorAt(1, buttonColor.darker(105));
+    }
+    painter->save();
+    painter->setPen(Qt::NoPen);
+    painter->fillRect(rect, gradient);
+    if (horizontal) painter->drawLine(rect.topLeft(), rect.topRight());
+    else painter->drawLine(rect.topLeft(), rect.bottomLeft());
+    QColor subtleEdge = alphaOutline;
+    subtleEdge.setAlpha(40);
+    painter->setPen(subtleEdge);
+    painter->setBrush(Qt::NoBrush);
+    painter->drawRect(scrollBarGroove.adjusted(1, 0, -1, -1));
+    painter->restore();
+
+    // Paint slider
+    gradient = QLinearGradient(scrollBarSlider.center().x(), scrollBarSlider.top(), scrollBarSlider.center().x(), scrollBarSlider.bottom());
+    if (!horizontal) gradient = QLinearGradient(scrollBarSlider.left(), scrollBarSlider.center().y(), scrollBarSlider.right(), scrollBarSlider.center().y());
+    QColor m = scroll_bar->palette.window().color();
+    m = is_dark ? m.lighter(130) : m.darker(115);
+    if (scroll_bar->state & State_MouseOver) {
+        gradient.setColorAt(0, is_dark ? m.lighter() : m.darker(115)); gradient.setColorAt(1, is_dark ? m.lighter(175) : m.darker(145));
+    } else {
+        gradient.setColorAt(0, m); gradient.setColorAt(1, is_dark ? m.lighter() : m.darker(135));
+    }
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setBrush(gradient); painter->setPen(alphaOutline);
+    painter->drawRoundedRect(QRectF(scrollBarSlider.adjusted(horizontal ? -1 : 0, horizontal ? 0 : -1, horizontal ? 0 : -1, horizontal ? -1 : 0)), 5., 5.);
+    painter->restore();
+
+    // Paint arrows
+    QRect upRect = scrollBarSubLine.adjusted(horizontal ? 0 : 1, horizontal ? 1 : 0, horizontal ? -2 : -1, horizontal ? -1 : -2);
+    Qt::ArrowType arrowType = Qt::UpArrow;
+    if (horizontal) arrowType = scroll_bar->direction == Qt::LeftToRight ? Qt::LeftArrow : Qt::RightArrow;
+    QColor arrowColor = scroll_bar->palette.windowText().color();
+    draw_arrow(arrowType, painter, scroll_bar, upRect, arrowColor);
+
+    QRect downRect = scrollBarAddLine.adjusted(1, 1, -1, -1);
+    arrowType = Qt::DownArrow;
+    if (horizontal) arrowType = scroll_bar->direction == Qt::LeftToRight ? Qt::RightArrow : Qt::LeftArrow;
+    draw_arrow(arrowType, painter, scroll_bar, downRect, arrowColor);
+
+    return;
+} // }}}
 
 
 CalibreStyle::CalibreStyle(int transient_scroller) : QProxyStyle(QString::fromUtf8("Fusion")), transient_scroller(transient_scroller) {
@@ -208,17 +287,31 @@ void CalibreStyle::drawComplexControl(ComplexControl control, const QStyleOption
                 return QProxyStyle::drawComplexControl(control, &opt, painter, widget);
             }
             break; /// }}}
+
+        case CC_ScrollBar: {
+            const QStyleOptionSlider *scroll_bar = qstyleoption_cast<const QStyleOptionSlider *>(option);
+            if (!transient_scroller && scroll_bar) {
+                this->draw_scrollbar(scroll_bar, painter, widget);
+                return;
+            }} break;
+
         default:
             break;
     }
     return QProxyStyle::drawComplexControl(control, option, painter, widget);
 }
 
+QSize CalibreStyle::sizeFromContents(ContentsType type, const QStyleOption *option, const QSize &contentsSize, const QWidget *widget) const {
+    QSize ans = QProxyStyle::sizeFromContents(type, option, contentsSize, widget);
+    if (type == CT_SpinBox) ans += QSize(0, 3);  // fusion style reduces spinbox height by 3 for some reason, undo that
+    return ans;
+}
+
 void CalibreStyle::drawPrimitive(PrimitiveElement element, const QStyleOption * option, QPainter * painter, const QWidget * widget) const {
     const QStyleOptionViewItem *vopt = NULL;
     switch (element) {
         case PE_FrameTabBarBase: // {{{
-            // dont draw line below tabs in dark mode as it looks bad
+            // don't draw line below tabs in dark mode as it looks bad
             if (const QStyleOptionTabBarBase *tbb = qstyleoption_cast<const QStyleOptionTabBarBase *>(option)) {
                 if (tbb->shape == QTabBar::RoundedNorth) {
                     QColor bg = option->palette.color(QPalette::Window);
@@ -227,23 +320,22 @@ void CalibreStyle::drawPrimitive(PrimitiveElement element, const QStyleOption * 
             }
             break; // }}}
 
-        case PE_IndicatorCheckBox: // {{{
-            // Fix color used to draw checkbox outline in dark mode
-            if (is_color_dark(option->palette.color(QPalette::Window))) {
-                baseStyle()->drawPrimitive(element, option, painter, widget);
-                painter->save();
-                painter->translate(0.5, 0.5);
-                QRect rect = option->rect;
-                rect = rect.adjusted(0, 0, -1, -1);
+        case PE_IndicatorCheckBox: { // {{{
+            // Fix color used to draw checkbox outline
+            baseStyle()->drawPrimitive(element, option, painter, widget);
+            painter->save();
+            painter->translate(0.5, 0.5);
+            QRect rect = option->rect;
+            rect = rect.adjusted(0, 0, -1, -1);
 
+            if (option->state & State_HasFocus && option->state & State_KeyboardFocusChange)
+                painter->setPen(QPen(is_color_dark(option->palette.color(QPalette::Window)) ? Qt::white : Qt::black));
+            else
                 painter->setPen(QPen(option->palette.color(QPalette::WindowText)));
-                if (option->state & State_HasFocus && option->state & State_KeyboardFocusChange)
-                    painter->setPen(QPen(Qt::white));
-                painter->drawRect(rect);
-                painter->restore();
-                return;
-            }
-            break; // }}}
+            painter->drawRect(rect);
+            painter->restore();
+            return;
+        } // }}}
 
         case PE_IndicatorRadioButton: // {{{
             // Fix color used to draw radiobutton outline in dark mode

@@ -45,7 +45,6 @@ from calibre.startup import connect_lambda
 from calibre.utils.date import now
 from calibre.utils.filenames import make_long_path_useable
 from calibre.utils.icu import primary_sort_key, sort_key
-from polyglot.builtins import iteritems, itervalues
 
 
 class Preview(QLabel):
@@ -212,12 +211,12 @@ class CoverSettingsWidget(QWidget):
                 ('subtitle', _('&Subtitle font family:'), _('&Subtitle font size:')),
                 ('footer', _('&Footer font family:'), _('&Footer font size:')),
         ):
-            attr = '%s_font_family' % x
+            attr = f'{x}_font_family'
             ff = FontFamilyChooser(fp)
             setattr(self, attr, ff)
             l.addRow(label, ff)
             ff.family_changed.connect(self.emit_changed)
-            attr = '%s_font_size' % x
+            attr = f'{x}_font_size'
             fs = QSpinBox(fp)
             setattr(self, attr, fs)
             fs.setMinimum(8), fs.setMaximum(200), fs.setSuffix(' px')
@@ -304,9 +303,9 @@ class CoverSettingsWidget(QWidget):
 
     def _apply_prefs(self, prefs):
         for x in ('title', 'subtitle', 'footer'):
-            attr = '%s_font_family' % x
+            attr = f'{x}_font_family'
             getattr(self, attr).font_family = prefs[attr]
-            attr = '%s_font_size' % x
+            attr = f'{x}_font_size'
             getattr(self, attr).setValue(prefs[attr])
 
         for x in ('title', 'subtitle', 'footer'):
@@ -331,12 +330,12 @@ class CoverSettingsWidget(QWidget):
         if not self.for_global_prefs and lu in self.colors_map and self.colors_map[lu].checkState() == Qt.CheckState.Checked:
             self.colors_map[lu].setSelected(True)
         else:
-            for name, li in iteritems(self.colors_map):
+            for name, li in self.colors_map.items():
                 if li.checkState() == Qt.CheckState.Checked:
                     li.setSelected(True)
                     break
             else:
-                next(itervalues(self.colors_map)).setSelected(True)
+                next(iter(self.colors_map.values())).setSelected(True)
 
         disabled = set(prefs['disabled_styles'])
         self.styles_list.clear()
@@ -349,12 +348,12 @@ class CoverSettingsWidget(QWidget):
         if not self.for_global_prefs and lu in self.style_map and self.style_map[lu].checkState() == Qt.CheckState.Checked:
             self.style_map[lu].setSelected(True)
         else:
-            for name, li in iteritems(self.style_map):
+            for name, li in self.style_map.items():
                 if li.checkState() == Qt.CheckState.Checked:
                     li.setSelected(True)
                     break
             else:
-                next(itervalues(self.style_map)).setSelected(True)
+                next(iter(self.style_map.values())).setSelected(True)
 
     @property
     def current_colors(self):
@@ -364,27 +363,27 @@ class CoverSettingsWidget(QWidget):
 
     @property
     def disabled_colors(self):
-        for name, li in iteritems(self.colors_map):
+        for name, li in self.colors_map.items():
             if li.checkState() == Qt.CheckState.Unchecked:
                 yield name
 
     @property
     def custom_colors(self):
         ans = {}
-        for name, li in iteritems(self.colors_map):
+        for name, li in self.colors_map.items():
             if name.startswith('#'):
                 ans[name] = li.data(Qt.ItemDataRole.UserRole)
         return ans
 
     @property
     def current_style(self):
-        for name, li in iteritems(self.style_map):
+        for name, li in self.style_map.items():
             if li.isSelected():
                 return name
 
     @property
     def disabled_styles(self):
-        for name, li in iteritems(self.style_map):
+        for name, li in self.style_map.items():
             if li.checkState() == Qt.CheckState.Unchecked:
                 yield name
 
@@ -392,9 +391,9 @@ class CoverSettingsWidget(QWidget):
     def current_prefs(self):
         prefs = {k:self.original_prefs[k] for k in self.original_prefs.defaults}
         for x in ('title', 'subtitle', 'footer'):
-            attr = '%s_font_family' % x
+            attr = f'{x}_font_family'
             prefs[attr] = getattr(self, attr).font_family
-            attr = '%s_font_size' % x
+            attr = f'{x}_font_size'
             prefs[attr] = getattr(self, attr).value()
         prefs['color_themes'] = self.custom_colors
         prefs['disabled_styles'] = list(self.disabled_styles)
@@ -412,7 +411,7 @@ class CoverSettingsWidget(QWidget):
             self.colors_list.insertItem(0, li)
             cm = OrderedDict()
             cm[name] = li
-            for k, v in iteritems(self.colors_map):
+            for k, v in self.colors_map.items():
                 cm[k] = v
             self.colors_map = cm
             li.setSelected(True)
@@ -498,7 +497,7 @@ class CoverSettingsWidget(QWidget):
         prefs = self.prefs_for_rendering
         hr = h / prefs['cover_height']
         for x in ('title', 'subtitle', 'footer'):
-            attr = '%s_font_size' % x
+            attr = f'{x}_font_size'
             prefs[attr] = int(prefs[attr] * hr)
         prefs['cover_width'], prefs['cover_height'] = w, h
         img = generate_cover(self.mi, prefs=prefs, as_qimage=True)
@@ -520,7 +519,7 @@ class CoverSettingsWidget(QWidget):
 
     def restore_defaults(self):
         defaults = self.original_prefs.defaults.copy()
-        # Dont delete custom color themes when restoring defaults
+        # Don't delete custom color themes when restoring defaults
         defaults['color_themes'] = self.custom_colors
         self.apply_prefs(defaults)
         self.update_preview()
@@ -531,7 +530,7 @@ class CoverSettingsWidget(QWidget):
 
     def save_as_prefs(self):
         with self.original_prefs:
-            for k, v in iteritems(self.current_prefs):
+            for k, v in self.current_prefs.items():
                 self.original_prefs[k] = v
 
     @property

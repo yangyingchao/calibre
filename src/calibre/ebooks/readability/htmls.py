@@ -1,16 +1,15 @@
 import re
 
-import lxml.html
 from lxml.html import tostring
 
 from calibre.ebooks.chardet import xml_to_unicode
 from calibre.ebooks.readability.cleaners import clean_attributes, normalize_spaces
-from polyglot.builtins import iteritems
+from calibre.utils.xml_parse import document_fromstring
 
 
 def build_doc(page):
     page_unicode = xml_to_unicode(page, strip_encoding_pats=True)[0]
-    doc = lxml.html.document_fromstring(page_unicode)
+    doc = document_fromstring(page_unicode)
     return doc
 
 
@@ -24,12 +23,12 @@ def normalize_entities(cur_title):
         '\u2013':'-',
         '&mdash;': '-',
         '&ndash;': '-',
-        '\u00A0': ' ',
-        '\u00AB': '"',
-        '\u00BB': '"',
+        '\u00a0': ' ',
+        '\u00ab': '"',
+        '\u00bb': '"',
         '&quot;': '"',
     }
-    for c, r in iteritems(entities):
+    for c, r in entities.items():
         if c in cur_title:
             cur_title = cur_title.replace(c, r)
 

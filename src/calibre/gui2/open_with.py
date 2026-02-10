@@ -39,7 +39,6 @@ from calibre.gui2.widgets2 import Dialog
 from calibre.utils.config import JSONConfig
 from calibre.utils.icu import numeric_sort_key as sort_key
 from calibre.utils.resources import get_image_path as I
-from polyglot.builtins import iteritems, string_or_bytes
 
 ENTRY_ROLE = Qt.ItemDataRole.UserRole
 
@@ -63,7 +62,7 @@ def run_program(entry, path, parent):
         return error_dialog(
             parent, _('Failed to run'), _(
             'Failed to run program, click "Show details" for more information'),
-            det_msg='Command line: %r\n%s' %(cmdline, as_unicode(err)))
+            det_msg=f'Command line: {cmdline!r}\n{as_unicode(err)}')
     t = Thread(name='WaitProgram', target=process.wait)
     t.daemon = True
     t.start()
@@ -152,34 +151,31 @@ if iswindows:
                 return
             qans = ans.replace('"', r'\"')
             name = friendly_app_name(exe=ans) or os.path.splitext(os.path.basename(ans))[0]
-            return {'cmdline':'"%s" "%%1"' % qans, 'name':name}
+            return {'cmdline':f'"{qans}" "%1"', 'name':name}
 
     def entry_to_cmdline(entry, path):
         cmdline = entry['cmdline']
         qpath = path.replace('"', r'\"')
+        if '%1' not in cmdline:
+            cmdline += ' "%1"'
         return cmdline.replace('%1', qpath)
 
     del run_program
 
-    def run_program(entry, path, parent):  # noqa
-        import re
+    def run_program(entry, path, parent):
         cmdline = entry_to_cmdline(entry, path)
-        flags = subprocess.CREATE_DEFAULT_ERROR_MODE | subprocess.CREATE_NEW_PROCESS_GROUP
-        if re.match(r'"[^"]+?(.bat|.cmd|.com)"', cmdline, flags=re.I):
-            flags |= subprocess.CREATE_NO_WINDOW
-            console = ' (console)'
-        else:
-            flags |= subprocess.DETACHED_PROCESS
-            console = ''
-        print('Running Open With commandline%s:' % console, repr(entry['cmdline']), ' |==> ', repr(cmdline))
+        argv = winutil.parse_cmdline(cmdline)
+        exe = argv[0]
+        rest = subprocess.list2cmdline(argv[1:])
+        print('Running Open With commandline:', repr(entry['cmdline']), ' |==> ', repr(exe), repr(rest))
         try:
             with sanitize_env_vars():
-                winutil.run_cmdline(cmdline, flags, 2000)
+                os.startfile(exe, 'open', rest)
         except Exception as err:
             return error_dialog(
                 parent, _('Failed to run'), _(
                 'Failed to run program, click "Show details" for more information'),
-                det_msg='Command line: %r\n%s' %(cmdline, as_unicode(err)))
+                det_msg=f'Command line: {cmdline!r}\n{err}')
     # }}}
 
 elif ismacos:
@@ -240,7 +236,7 @@ else:
 
     def entry_to_item(entry, parent):
         icon_path = entry.get('Icon') or I('blank.png')
-        if not isinstance(icon_path, string_or_bytes):
+        if not isinstance(icon_path, (str, bytes)):
             icon_path = I('blank.png')
         ans = QListWidgetItem(QIcon(icon_path), entry.get('Name') or _('Unknown'), parent)
         ans.setData(ENTRY_ROLE, entry)
@@ -489,12 +485,12 @@ def register_keyboard_shortcuts(gui=None, finalize=False):
         gui = get_gui()
     if gui is None:
         return
-    for unique_name, action in iteritems(registered_shortcuts):
+    for unique_name, action in registered_shortcuts.items():
         gui.keyboard.unregister_shortcut(unique_name)
         gui.removeAction(action)
     registered_shortcuts.clear()
 
-    for filetype, applications in iteritems(oprefs['entries']):
+    for filetype, applications in oprefs['entries'].items():
         for application in applications:
             text = entry_to_icon_text(application, only_text=True)
             t = _('cover image') if filetype.upper() == 'COVER_IMAGE' else filetype.upper()

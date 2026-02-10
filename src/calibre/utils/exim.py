@@ -23,9 +23,10 @@ from calibre.utils.config_base import StringConfig, create_global_prefs, prefs
 from calibre.utils.filenames import samefile
 from calibre.utils.localization import _
 from polyglot.binary import as_hex_unicode
-from polyglot.builtins import error_message, iteritems
+from polyglot.builtins import error_message
 
 # Export {{{
+
 
 class FileDest:
 
@@ -86,7 +87,7 @@ class Exporter:
 
     def set_metadata(self, key, val):
         if key in self.metadata:
-            raise KeyError('The metadata already contains the key: %s' % key)
+            raise KeyError(f'The metadata already contains the key: {key}')
         self.metadata[key] = val
 
     def current_pos(self):
@@ -192,11 +193,11 @@ def export(destdir, library_paths=None, dbmap=None, progress1=None, progress2=No
     if library_paths is None:
         library_paths = all_known_libraries()
     dbmap = dbmap or {}
-    dbmap = {os.path.normcase(os.path.abspath(k)):v for k, v in iteritems(dbmap)}
+    dbmap = {os.path.normcase(os.path.abspath(k)):v for k, v in dbmap.items()}
     exporter = Exporter(destdir)
     exporter.metadata['libraries'] = libraries = {}
     total = len(library_paths) + 1
-    for i, (lpath, count) in enumerate(iteritems(library_paths)):
+    for i, (lpath, count) in enumerate(library_paths.items()):
         if abort is not None and abort.is_set():
             return
         if progress1 is not None:
@@ -222,6 +223,7 @@ def export(destdir, library_paths=None, dbmap=None, progress1=None, progress2=No
     if progress1 is not None:
         progress1(_('Completed'), total, total)
 # }}}
+
 
 # Import {{{
 
@@ -364,7 +366,9 @@ class Importer:
         self.tail_size = tail_size = struct.calcsize(Exporter.TAIL_FMT)
         self.version = -1
         for name in os.listdir(path_to_export_dir):
-            if name.lower().endswith(Exporter.EXT):
+            # Exclude the "appledouble" files created by macOS.
+            # See https://bugs.launchpad.net/calibre/+bug/2117345
+            if name.lower().endswith(Exporter.EXT) and not name.startswith('._'):
                 path = os.path.join(path_to_export_dir, name)
                 with open(path, 'rb') as f:
                     f.seek(0, os.SEEK_END)
@@ -372,12 +376,11 @@ class Importer:
                     f.seek(-tail_size, os.SEEK_END)
                     raw = f.read()
                 if len(raw) != tail_size:
-                    raise ValueError('The exported data in %s is not valid, tail too small' % name)
+                    raise ValueError(f'The exported data in {name} is not valid, tail too small')
                 part_num, version, is_last = struct.unpack(Exporter.TAIL_FMT, raw)
                 if version > Exporter.VERSION:
-                    raise ValueError('The exported data in %s is not valid,'
-                                     ' version (%d) is higher than maximum supported version.'
-                                     ' You might need to upgrade calibre first.' % (name, version))
+                    raise ValueError(f'The exported data in {name} is not valid, version ({version})'
+                                     ' is higher than maximum supported version. You might need to upgrade calibre first.')
                 part_map[part_num] = path, is_last, size_of_part
                 if self.version == -1:
                     self.version = version
@@ -385,7 +388,7 @@ class Importer:
                     raise ValueError(f'The exported data in {name} is not valid as it contains a mix of parts with versions: {self.version} and {version}')
         nums = sorted(part_map)
         if not nums:
-            raise ValueError('No exported data found in: %s' % path_to_export_dir)
+            raise ValueError(f'No exported data found in: {path_to_export_dir}')
         if nums[0] != 1:
             raise ValueError('The first part of this exported data set is missing')
         if not part_map[nums[-1]][1]:
@@ -458,7 +461,7 @@ def import_data(importer, library_path_map, config_location=None, progress1=None
     config_location = os.path.abspath(os.path.realpath(config_location))
     total = len(library_path_map) + 1
     library_usage_stats = Counter()
-    for i, (library_key, dest) in enumerate(iteritems(library_path_map)):
+    for i, (library_key, dest) in enumerate(library_path_map.items()):
         if abort is not None and abort.is_set():
             return
         if isinstance(dest, bytes):
@@ -471,7 +474,7 @@ def import_data(importer, library_path_map, config_location=None, progress1=None
             if err.errno != errno.EEXIST:
                 raise
         if not os.path.isdir(dest):
-            raise ValueError('%s is not a directory' % dest)
+            raise ValueError(f'{dest} is not a directory')
         import_library(library_key, importer, dest, progress=progress2, abort=abort).close()
         stats_key = os.path.abspath(dest).replace(os.sep, '/')
         library_usage_stats[stats_key] = importer.metadata['libraries'].get(library_key, 1)
@@ -538,15 +541,15 @@ def run_exporter(export_dir=None, args=None, check_known_libraries=True):
         if not os.path.exists(export_dir):
             os.makedirs(export_dir)
         if os.listdir(export_dir):
-            raise SystemExit('%s is not empty' % export_dir)
-        all_libraries = {os.path.normcase(os.path.abspath(path)):lus for path, lus in iteritems(all_known_libraries())}
+            raise SystemExit(f'{export_dir} is not empty')
+        all_libraries = {os.path.normcase(os.path.abspath(path)):lus for path, lus in all_known_libraries().items()}
         if 'all' in args[1:]:
             libraries = set(all_libraries)
         else:
             libraries = {os.path.normcase(os.path.abspath(os.path.expanduser(path))) for path in args[1:]}
         if check_known_libraries and libraries - set(all_libraries):
             raise SystemExit('Unknown library: ' + tuple(libraries - set(all_libraries))[0])
-        libraries = {p: all_libraries[p] for p in libraries}
+        libraries = {p: all_libraries.get(p, 1) for p in libraries}
         print('Exporting libraries:', ', '.join(sorted(libraries)), 'to:', export_dir)
         export(export_dir, progress1=cli_report, progress2=cli_report, library_paths=libraries)
         return
@@ -556,12 +559,12 @@ def run_exporter(export_dir=None, args=None, check_known_libraries=True):
     if not os.path.exists(export_dir):
         os.makedirs(export_dir)
     if not os.path.isdir(export_dir):
-        raise SystemExit('%s is not a folder' % export_dir)
+        raise SystemExit(f'{export_dir} is not a folder')
     if os.listdir(export_dir):
-        raise SystemExit('%s is not empty' % export_dir)
+        raise SystemExit(f'{export_dir} is not empty')
     library_paths = {}
-    for lpath, lus in iteritems(all_known_libraries()):
-        if input_unicode('Export the library %s [y/n]: ' % lpath).strip().lower() == 'y':
+    for lpath, lus in all_known_libraries().items():
+        if input_unicode(f'Export the library {lpath} [y/n]: ').strip().lower() == 'y':
             library_paths[lpath] = lus
     if library_paths:
         export(export_dir, progress1=cli_report, progress2=cli_report, library_paths=library_paths)
@@ -572,7 +575,7 @@ def run_exporter(export_dir=None, args=None, check_known_libraries=True):
 def run_importer():
     export_dir = input_unicode('Enter path to folder containing previously exported data: ').rstrip('\r')
     if not os.path.isdir(export_dir):
-        raise SystemExit('%s is not a folder' % export_dir)
+        raise SystemExit(f'{export_dir} is not a folder')
     try:
         importer = Importer(export_dir)
     except ValueError as err:
@@ -582,9 +585,9 @@ def run_importer():
     if not os.path.exists(import_dir):
         os.makedirs(import_dir)
     if not os.path.isdir(import_dir):
-        raise SystemExit('%s is not a folder' % import_dir)
+        raise SystemExit(f'{import_dir} is not a folder')
     if os.listdir(import_dir):
-        raise SystemExit('%s is not empty' % import_dir)
+        raise SystemExit(f'{import_dir} is not empty')
     import_data(importer, {
         k:os.path.join(import_dir, os.path.basename(k)) for k in importer.metadata['libraries']}, progress1=cli_report, progress2=cli_report)
 

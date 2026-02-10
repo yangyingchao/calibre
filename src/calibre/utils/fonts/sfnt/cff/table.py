@@ -12,7 +12,6 @@ from calibre.utils.fonts.sfnt import UnknownTable
 from calibre.utils.fonts.sfnt.cff.constants import STANDARD_CHARSETS, cff_standard_strings
 from calibre.utils.fonts.sfnt.cff.dict_data import PrivateDict, TopDict
 from calibre.utils.fonts.sfnt.errors import NoGlyphs, UnsupportedFont
-from polyglot.builtins import iteritems, itervalues
 
 # Useful links
 # http://www.adobe.com/content/dam/Adobe/en/devnet/font/pdfs/5176.CFF.pdf
@@ -25,8 +24,7 @@ class CFF:
         (self.major_version, self.minor_version, self.header_size,
                 self.offset_size) = unpack_from(b'>4B', raw)
         if (self.major_version, self.minor_version) != (1, 0):
-            raise UnsupportedFont('The CFF table has unknown version: '
-                    '(%d, %d)'%(self.major_version, self.minor_version))
+            raise UnsupportedFont(f'The CFF table has unknown version: ({self.major_version}, {self.minor_version})')
         offset = self.header_size
 
         # Read Names Index
@@ -62,7 +60,7 @@ class CFF:
         cs_type = self.top_dict.safe_get('CharstringType')
         if cs_type != 2:
             raise UnsupportedFont('This font has unsupported CharstringType: '
-                    '%s'%cs_type)
+                    f'{cs_type}')
         self.char_strings = CharStringsIndex(raw, offset)
         self.num_glyphs = len(self.char_strings)
 
@@ -105,7 +103,7 @@ class Index(list):
                             for i in range(offset, offset+3*(count+1), 3)]
             else:
                 fmt = {1:'B', 2:'H', 4:'L'}[self.offset_size]
-                fmt = ('>%d%s'%(count+1, fmt)).encode('ascii')
+                fmt = f'>{count + 1}{fmt}'.encode('ascii')
                 offsets = unpack_from(fmt, raw, offset)
             offset += self.offset_size * (count+1) - 1
 
@@ -133,7 +131,7 @@ class Charset(list):
         super().__init__()
         self.standard_charset = offset if offset in {0, 1, 2} else None
         if is_CID and self.standard_charset is not None:
-            raise ValueError("CID font must not use a standard charset")
+            raise ValueError('CID font must not use a standard charset')
         if self.standard_charset is None:
             self.append(b'.notdef')
             fmt = unpack_from(b'>B', raw, offset)[0]
@@ -141,15 +139,14 @@ class Charset(list):
             f = {0:self.parse_fmt0, 1:self.parse_fmt1,
                 2:partial(self.parse_fmt1, is_two_byte=True)}.get(fmt, None)
             if f is None:
-                raise UnsupportedFont('This font uses unsupported charset '
-                        'table format: %d'%fmt)
+                raise UnsupportedFont(f'This font uses unsupported charset table format: {fmt}')
             f(raw, offset, strings, num_glyphs, is_CID)
 
     def parse_fmt0(self, raw, offset, strings, num_glyphs, is_CID):
-        fmt = ('>%dH'%(num_glyphs-1)).encode('ascii')
+        fmt = f'>{num_glyphs - 1}H'.encode('ascii')
         ids = unpack_from(fmt, raw, offset)
         if is_CID:
-            ids = ('cid%05d'%x for x in ids)
+            ids = (f'cid{x:05}' for x in ids)
         else:
             ids = (strings[x] for x in ids)
         self.extend(ids)
@@ -163,7 +160,7 @@ class Charset(list):
             first, nleft = unpack_from(fmt, raw, offset)
             offset += sz
             count += nleft + 1
-            self.extend('cid%05d'%x if is_CID else strings[x] for x in
+            self.extend(f'cid{x:05}' if is_CID else strings[x] for x in
                     range(first, first + nleft+1))
 
     def lookup(self, glyph_id):
@@ -196,8 +193,8 @@ class CFFTable(UnknownTable):
         # Map codes from the cmap table to glyph names, this will be used to
         # reconstruct character_map for the subset font
         charset_map = {code:self.cff.charset.safe_lookup(glyph_id) for code,
-                glyph_id in iteritems(character_map)}
-        charset = set(itervalues(charset_map))
+                glyph_id in character_map.items()}
+        charset = set(charset_map.values())
         charset.discard(None)
         if not charset and character_map:
             raise NoGlyphs('This font has no glyphs for the specified characters')
@@ -208,7 +205,7 @@ class CFFTable(UnknownTable):
 
         # Rebuild character_map with the glyph ids from the subset font
         character_map.clear()
-        for code, charname in iteritems(charset_map):
+        for code, charname in charset_map.items():
             glyph_id = s.charname_map.get(charname, None)
             if glyph_id:
                 character_map[code] = glyph_id

@@ -25,7 +25,6 @@ from calibre.web.feeds.recipes.collection import (
     update_custom_recipe,
     update_custom_recipes,
 )
-from polyglot.builtins import iteritems
 
 
 class NewsTreeItem:
@@ -94,7 +93,7 @@ class NewsCategory(NewsTreeItem):
 
     def data(self, role):
         if role == Qt.ItemDataRole.DisplayRole:
-            return (self.cdata + ' [%d]'%len(self.children))
+            return (self.cdata + f' [{len(self.children)}]')
         elif role == Qt.ItemDataRole.FontRole:
             return self.bold_font
         elif role == Qt.ItemDataRole.ForegroundRole and self.category == _('Scheduled'):
@@ -134,7 +133,7 @@ class NewsItem(NewsTreeItem):
             return (self.title)
         if role == Qt.ItemDataRole.DecorationRole:
             if self.icon is None:
-                icon = '%s.png'%self.urn[8:]
+                icon = f'{self.urn[8:]}.png'
                 p = QPixmap()
                 if icon in self.favicons:
                     try:
@@ -171,16 +170,17 @@ class RecipeModel(QAbstractItemModel, AdaptSQP):
     def __init__(self, *args):
         QAbstractItemModel.__init__(self, *args)
         SearchQueryParser.__init__(self, locations=['all'])
-        self.default_icon = (QIcon.ic('news.png'))
-        self.custom_icon = (QIcon.ic('user_profile.png'))
+        self.default_icon = QIcon.ic('news.png')
+        self.custom_icon = QIcon.ic('user_profile.png')
         self.builtin_recipe_collection = get_builtin_recipe_collection()
         self.scheduler_config = SchedulerConfig()
+        self.favicon_cache = {}
         try:
             with zipfile.ZipFile(P('builtin_recipes.zip',
                     allow_user_override=False), 'r') as zf:
                 self.favicons = {x.filename: x for x in zf.infolist() if
                     x.filename.endswith('.png')}
-        except:
+        except Exception:
             self.favicons = {}
         self.do_refresh()
 
@@ -188,7 +188,7 @@ class RecipeModel(QAbstractItemModel, AdaptSQP):
         if download:
             try:
                 return download_builtin_recipe(urn)
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
         return get_builtin_recipe(urn)
@@ -209,9 +209,9 @@ class RecipeModel(QAbstractItemModel, AdaptSQP):
 
     def update_custom_recipes(self, script_urn_map):
         script_ids = []
-        for urn, title_script in iteritems(script_urn_map):
+        for urn, title_script in script_urn_map.items():
             id_ = int(urn[len('custom:'):])
-            (title, script) = title_script
+            title, script = title_script
             script_ids.append((id_, title, script))
 
         update_custom_recipes(script_ids)
@@ -287,6 +287,23 @@ class RecipeModel(QAbstractItemModel, AdaptSQP):
         self.root = new_root
         self.reset()
 
+    def favicon_for_urn(self, urn: str) -> QIcon:
+        icon = urn[8:] + '.png'
+        if not (p := self.favicon_cache.get(icon)):
+            p = QPixmap()
+            if icon in self.favicons:
+                try:
+                    f = P('builtin_recipes.zip', allow_user_override=False)
+                    with zipfile.ZipFile(f, 'r') as zf:
+                        p.loadFromData(zf.read(self.favicons[icon]))
+                except Exception:
+                    pass
+            elif urn.startswith('custom:'):
+                p = self.custom_icon
+            p = QIcon(p)
+            self.favicon_cache[icon] = p
+        return p
+
     def reset(self):
         self.beginResetModel(), self.endResetModel()
 
@@ -308,6 +325,9 @@ class RecipeModel(QAbstractItemModel, AdaptSQP):
 
     def get_customize_info(self, urn):
         return self.scheduler_config.get_customize_info(urn)
+
+    def get_recipe_specific_option_metadata(self, urn):
+        return self.scheduler_config.get_recipe_specific_option_metadata(urn)
 
     def get_matches(self, location, query):
         query = query.strip().lower()
@@ -424,9 +444,8 @@ class RecipeModel(QAbstractItemModel, AdaptSQP):
         self.scheduler_config.schedule_recipe(self.recipe_from_urn(urn),
                 sched_type, schedule)
 
-    def customize_recipe(self, urn, add_title_tag, custom_tags, keep_issues):
-        self.scheduler_config.customize_recipe(urn, add_title_tag,
-                custom_tags, keep_issues)
+    def customize_recipe(self, urn, val):
+        self.scheduler_config.customize_recipe(urn, val)
 
     def get_to_be_downloaded_recipes(self):
         ans = self.scheduler_config.get_to_be_downloaded_recipes()

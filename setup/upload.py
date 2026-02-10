@@ -15,21 +15,19 @@ import subprocess
 import sys
 import time
 from subprocess import check_call
-from tempfile import NamedTemporaryFile, gettempdir, mkdtemp
+from tempfile import NamedTemporaryFile, mkdtemp
+from urllib.request import Request, urlopen
 from zipfile import ZipFile
-
-from polyglot.builtins import iteritems
-from polyglot.urllib import Request, urlopen
 
 if __name__ == '__main__':
     d = os.path.dirname
     sys.path.insert(0, d(d(os.path.abspath(__file__))))
 
-from setup import Command, __appname__, __version__, installer_names
+from setup import Command, __appname__, __version__, installer_names, manual_build_dir
 
 DOWNLOADS = '/srv/main/downloads'
-HTML2LRF = "calibre/ebooks/lrf/html/demo"
-TXT2LRF = "src/calibre/ebooks/lrf/txt/demo"
+HTML2LRF = 'calibre/ebooks/lrf/html/demo'
+TXT2LRF = 'src/calibre/ebooks/lrf/txt/demo'
 STAGING_HOST = 'download.calibre-ebook.com'
 BACKUP_HOST = 'code.calibre-ebook.com'
 STAGING_USER = BACKUP_USER = 'root'
@@ -72,9 +70,9 @@ def upload_signatures():
                 f.write(fingerprint)
             scp.append(sha512)
         for srv in 'code main'.split():
-            check_call(scp + ['{0}:/srv/{0}/signatures/'.format(srv)])
+            check_call(scp + [f'{srv}:/srv/{srv}/signatures/'])
             check_call(
-                ['ssh', srv, 'chown', '-R', 'http:http', '/srv/%s/signatures' % srv]
+                ['ssh', srv, 'chown', '-R', 'http:http', f'/srv/{srv}/signatures']
             )
     finally:
         shutil.rmtree(tdir)
@@ -97,7 +95,6 @@ class ReUpload(Command):  # {{{
         for x in installer_names():
             if os.path.exists(x):
                 os.remove(x)
-
 
 # }}}
 
@@ -136,10 +133,10 @@ def send_to_backup(loc):
 
 
 def gh_cmdline(ver, data):
-    return [
+    safe = [
         __appname__, ver, 'fmap', 'github', __appname__, data['username'],
-        data['password']
     ]
+    return safe + [data['password']], safe + ['PASSWORD_REDACTED']
 
 
 def sf_cmdline(ver, sdata):
@@ -152,13 +149,12 @@ def calibre_cmdline(ver):
     return [__appname__, ver, 'fmap', 'calibre']
 
 
-def run_remote_upload(args):
-    print('Running remotely:', ' '.join(args))
+def run_remote_upload(args, safe=None):
+    print('Running remotely:', ' '.join(safe or args))
     subprocess.check_call([
         'ssh', '-x', f'{STAGING_USER}@{STAGING_HOST}', 'cd', STAGING_DIR, '&&',
         'python', 'hosting.py'
     ] + args)
-
 
 # }}}
 
@@ -199,9 +195,7 @@ def upload_to_fosshub():
     entries = []
     for fname in files:
         desc = installer_description(fname)
-        url = 'https://download.calibre-ebook.com/{}/{}'.format(
-            __version__, os.path.basename(fname)
-        )
+        url = f'https://download.calibre-ebook.com/{__version__}/{os.path.basename(fname)}'
         entries.append({
             'fileUrl': url,
             'type': desc,
@@ -259,7 +253,7 @@ class UploadInstallers(Command):  # {{{
         print('\nRecording dist sizes')
         args = [
             f'{__version__}:{fname}:{size}'
-            for fname, size in iteritems(sizes)
+            for fname, size in sizes.items()
         ]
         check_call(['ssh', 'code', '/usr/local/bin/dist_sizes'] + args)
 
@@ -279,13 +273,13 @@ class UploadInstallers(Command):  # {{{
                 )
 
         with open(os.path.join(tdir, 'fmap'), 'wb') as fo:
-            for f, desc in iteritems(files):
+            for f, desc in files.items():
                 fo.write((f'{f}: {desc}\n').encode())
 
         while True:
             try:
                 send_data(tdir)
-            except:
+            except Exception:
                 print('\nUpload to staging failed, retrying in a minute')
                 time.sleep(60)
             else:
@@ -294,7 +288,7 @@ class UploadInstallers(Command):  # {{{
         while True:
             try:
                 send_to_backup(tdir)
-            except:
+            except Exception:
                 print('\nUpload to backup failed, retrying in a minute')
                 time.sleep(60)
             else:
@@ -302,10 +296,11 @@ class UploadInstallers(Command):  # {{{
 
     def upload_to_github(self, replace):
         data = get_github_data()
-        args = gh_cmdline(__version__, data)
+        args, safe = gh_cmdline(__version__, data)
         if replace:
             args = ['--replace'] + args
-        run_remote_upload(args)
+            safe = ['--replace'] + safe
+        run_remote_upload(args, safe)
 
     def upload_to_sourceforge(self):
         sdata = get_sourceforge_data()
@@ -314,7 +309,6 @@ class UploadInstallers(Command):  # {{{
 
     def upload_to_calibre(self):
         run_remote_upload(calibre_cmdline(__version__))
-
 
 # }}}
 
@@ -348,7 +342,7 @@ class UploadUserManual(Command):  # {{{
         for x in glob.glob(self.j(path, '*')):
             self.build_plugin_example(x)
 
-        srcdir = self.j(gettempdir(), 'user-manual-build', 'en', 'html') + '/'
+        srcdir = self.j(manual_build_dir(), 'en', 'html') + '/'
         check_call(
             ' '.join(
                 ['rsync', '-zz', '-rl', '--info=progress2', srcdir, 'main:/srv/manual/']
@@ -356,7 +350,6 @@ class UploadUserManual(Command):  # {{{
             shell=True
         )
         check_call('ssh main chown -R http:http /srv/manual'.split())
-
 
 # }}}
 
@@ -367,23 +360,21 @@ class UploadDemo(Command):  # {{{
 
     def run(self, opts):
         check_call(
-            '''ebook-convert %s/demo.html /tmp/html2lrf.lrf '''
+            f'''ebook-convert {self.j(self.SRC, HTML2LRF)}/demo.html /tmp/html2lrf.lrf '''
             '''--title='Demonstration of html2lrf' --authors='Kovid Goyal' '''
             '''--header '''
             '''--serif-family "/usr/share/fonts/corefonts, Times New Roman" '''
-            '''--mono-family  "/usr/share/fonts/corefonts, Andale Mono" '''
-            '''''' % self.j(self.SRC, HTML2LRF),
+            '''--mono-family  "/usr/share/fonts/corefonts, Andale Mono" ''',
             shell=True
         )
 
         lrf = self.j(self.SRC, 'calibre', 'ebooks', 'lrf', 'html', 'demo')
         check_call(
-            'cd %s && zip -j /tmp/html-demo.zip * /tmp/html2lrf.lrf' % lrf,
+            f'cd {lrf} && zip -j /tmp/html-demo.zip * /tmp/html2lrf.lrf',
             shell=True
         )
 
         check_call(f'scp /tmp/html-demo.zip main:{DOWNLOADS}/', shell=True)
-
 
 # }}}
 
@@ -409,9 +400,7 @@ class UploadToServer(Command):  # {{{
             ('ssh code /apps/update-calibre-version.py ' + __version__).split()
         )
         check_call((
-            'ssh main /usr/local/bin/update-calibre-version.py %s && /usr/local/bin/update-calibre-code.py && /apps/static/generate.py'
-            % __version__
+            f'ssh main /usr/local/bin/update-calibre-version.py {__version__} && /usr/local/bin/update-calibre-code.py && /apps/static/generate.py'
         ).split())
-
 
 # }}}

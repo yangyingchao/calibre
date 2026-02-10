@@ -42,11 +42,11 @@ class TestEmail(QDialog):
     def __init__(self, pa, parent):
         QDialog.__init__(self, parent)
         self.test_func = parent.test_email_settings
-        self.setWindowTitle(_("Test email settings"))
+        self.setWindowTitle(_('Test email settings'))
         self.setWindowIcon(QIcon.ic('config.ui'))
         l = QVBoxLayout(self)
         opts = smtp_prefs().parse()
-        self.from_ = la = QLabel(_("Send test mail from %s to:")%opts.from_)
+        self.from_ = la = QLabel(_('Send test mail from %s to:')%opts.from_)
         l.addWidget(la)
         self.to = le = QLineEdit(self)
         if pa:
@@ -109,11 +109,12 @@ class RelaySetup(QDialog):
         self.bb = bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
+        fields = dict(service)
+        fields['link_markup'] = '<a href="https://{url}">{url}</a>'.format(**fields)
         self.tl = QLabel(('<p>'+_('Setup sending email using') +
                 ' <b>{name}</b><p>' +
-            _('If you don\'t have an account, you can sign up for a free {name} email '
-            'account at <a href="https://{url}">{url}</a>. {extra}')).format(
-                **service))
+            _("If you don't have an account, you can sign up for a free {name} email "
+            'account at {link_markup}. {extra}')).format(**fields))
         l.addWidget(self.tl, 0, 0, 3, 0)
         self.tl.setWordWrap(True)
         self.tl.setOpenExternalLinks(True)
@@ -200,11 +201,11 @@ class SendEmail(QWidget, Ui_Form):
         getattr(self, 'relay_'+opts.encryption.lower()).setChecked(True)
         self.relay_tls.toggled.connect(self.changed)
 
-        for x in ('gmx', 'hotmail'):
+        for x in ('gmx',):
             button = getattr(self, 'relay_use_'+x)
             button.clicked.connect(partial(self.create_service_relay, x))
         self.relay_show_password.stateChanged.connect(
-         lambda state : self.relay_password.setEchoMode(
+         lambda state: self.relay_password.setEchoMode(
              QLineEdit.EchoMode.Password if
              state == 0 else QLineEdit.EchoMode.Normal))
         self.test_email_button.clicked.connect(self.test_email)
@@ -238,7 +239,7 @@ class SendEmail(QWidget, Ui_Form):
                 username=opts.relay_username, debug_output=debug_out,
                 password=from_hex_unicode(opts.relay_password),
                 encryption=opts.encryption, port=opts.relay_port)
-        except:
+        except Exception:
             import traceback
             tb = traceback.format_exc()
             tb += '\n\nLog:\n' + buf.getvalue()
@@ -271,7 +272,7 @@ class SendEmail(QWidget, Ui_Form):
                         ' show you more ads. They are trying to claim that SMTP is insecure,'
                         ' that is incorrect and simply an excuse. To use a Gmail account'
                         ' you will need to "allow less secure apps" as described'
-                        ' <a href="https://support.google.com/accounts/answer/6010255">here</a>.'),
+                        ' <a href="{}">here</a>.').format('https://support.google.com/accounts/answer/6010255'),
                     'at_in_username': True,
                 },
                 'hotmail': {

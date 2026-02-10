@@ -2,6 +2,7 @@
 # vim:fileencoding=utf-8
 # License: GPL v3 Copyright: 2019, Kovid Goyal <kovid at kovidgoyal.net>
 
+import ast
 import json
 import os
 import re
@@ -24,26 +25,30 @@ dlls = [
     # 'WebView',
     'Positioning',
     'Sensors',
+    'SpatialAudio',
     'Sql',
     'Svg',
+    'TextToSpeech',
     'WebChannel',
     'WebEngineCore',
     'WebEngineWidgets',
     'Widgets',
-    # 'Multimedia',
+    'Multimedia',
+    'MultimediaWidgets',
     'OpenGL',
     'OpenGLWidgets',
     'Quick',
     'QuickWidgets',
     'Qml',
+    'QmlMeta',
     'QmlModels',
-    # 'MultimediaWidgets',
+    'QmlWorkerScript',
     'Xml',
     # 'XmlPatterns',
 ]
 
 if islinux:
-    dlls += ['XcbQpa', 'WaylandClient', 'WaylandEglClientHwIntegration', 'DBus']
+    dlls += ['XcbQpa', 'WaylandClient', 'DBus']
 elif ismacos:
     dlls += ['DBus']
 
@@ -56,6 +61,8 @@ QT_PLUGINS = [
     'imageformats',
     'iconengines',
     'tls',
+    'multimedia',
+    'texttospeech',
     # 'mediaservice',
     'platforms',
     # 'playlistformats',
@@ -82,7 +89,8 @@ PYQT_MODULES = (
     'QtCore',
     'QtGui',
     'QtNetwork',
-    # 'QtMultimedia', 'QtMultimediaWidgets',
+    'QtMultimedia', 'QtMultimediaWidgets',
+    'QtTextToSpeech',
     'QtPrintSupport',
     'QtSensors',
     'QtSvg',
@@ -108,12 +116,18 @@ def initialize_constants():
     nv = re.search(r'numeric_version\s+=\s+\((\d+), (\d+), (\d+)\)', src)
     calibre_constants['version'
                       ] = '%s.%s.%s' % (nv.group(1), nv.group(2), nv.group(3))
-    calibre_constants['appname'] = re.search(
-        r'__appname__\s+=\s+(u{0,1})[\'"]([^\'"]+)[\'"]', src
-    ).group(2)
+    def get_str_assign(which):
+        pat = r'__appname__\s+=\s+(u{0,1})[\'"]([^\'"]+)[\'"]'.replace('__appname__', which)
+        return re.search(pat, src).group(2)
+
+    calibre_constants['appname'] = get_str_assign('__appname__')
+    calibre_constants['MAIN_APP_UID'] = get_str_assign('MAIN_APP_UID')
+    calibre_constants['VIEWER_APP_UID'] = get_str_assign('VIEWER_APP_UID')
+    calibre_constants['EDITOR_APP_UID'] = get_str_assign('EDITOR_APP_UID')
     epsrc = re.compile(r'entry_points = (\{.*?\})',
                        re.DOTALL).search(read_cal_file('linux.py')).group(1)
-    entry_points = eval(epsrc, {'__appname__': calibre_constants['appname']})
+    epsrc = epsrc.replace('__appname__+', repr(calibre_constants['appname']))
+    entry_points = ast.literal_eval(epsrc)
 
     def e2b(ep):
         return re.search(r'\s*(.*?)\s*=', ep).group(1).strip()

@@ -25,7 +25,7 @@ def fts_search(ctx, rd):
     ans = {'metadata': metadata_cache, 'indexing_status': {'left': l, 'total': t}}
 
     use_stemming = rd.query.get('use_stemming', 'y') == 'y'
-    query = rd.query.get('query' '')
+    query = rd.query.get('query')
     if not query:
         raise HTTPBadRequest('No search query specified')
     qid = rd.query.get('query_id')
@@ -33,7 +33,7 @@ def fts_search(ctx, rd):
         ans['query_id'] = qid
     book_ids = None
     if rd.query.get('restriction'):
-        book_ids = db.search('', restriction=rd.query.get('restriction'))
+        book_ids = db.search('', restriction=rd.query.get('restriction'), allow_templates=False)
 
     def add_metadata(result):
         result.pop('id', None)
@@ -107,7 +107,7 @@ def fts_snippets(ctx, rd, book_ids):
         raise HTTPPreconditionRequired('Full text searching is not enabled on this library')
 
     use_stemming = rd.query.get('use_stemming', 'y') == 'y'
-    query = rd.query.get('query' '')
+    query = rd.query.get('query')
     if not query:
         raise HTTPBadRequest('No search query specified')
     try:

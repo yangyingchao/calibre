@@ -61,7 +61,7 @@ class KIBANO(N516):
 
 class THEBOOK(N516):
     name = 'The Book driver'
-    gui_name = 'The Book'
+    gui_name = 'Book'
     description    = _('Communicate with The Book reader.')
     author         = 'Kovid Goyal'
 
@@ -142,7 +142,7 @@ class ALEX(N516):
                 cpath = self.alex_cpath(path)
                 if os.path.exists(cpath):
                     os.remove(cpath)
-            except:
+            except Exception:
                 pass
         self.report_progress(1.0, _('Removing books from device...'))
 

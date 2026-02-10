@@ -67,8 +67,7 @@ def extract_book(pathtoebook, tdir, log=None, view_kepub=False, processed=False,
         if not only_input_plugin:
             # Run the HTML preprocess/parsing from the conversion pipeline as
             # well
-            if (processed or plumber.input_fmt.lower() in {'pdb', 'pdf', 'rb'} and
-                    not hasattr(pathtoopf, 'manifest')):
+            if processed or (plumber.input_fmt.lower() in {'pdb', 'pdf', 'rb'} and not hasattr(pathtoopf, 'manifest')):
                 if hasattr(pathtoopf, 'manifest'):
                     pathtoopf = write_oebbook(pathtoopf, tdir)
                 pathtoopf = create_oebbook(log, pathtoopf, plumber.opts)
@@ -106,7 +105,7 @@ class EbookIterator(BookmarksMixin):
 
     def search(self, text, index, backwards=False):
         from calibre.ebooks.oeb.polish.parsing import parse
-        pmap = [(i, path) for i, path in enumerate(self.spine)]
+        pmap = list(enumerate(self.spine))
         if backwards:
             pmap.reverse()
         q = text.lower()
@@ -173,7 +172,7 @@ class EbookIterator(BookmarksMixin):
                     self.spine.append(Spiny(spath, mime_type=mt))
                     if is_comic:
                         self.spine[-1].is_single_page = True
-                except:
+                except Exception:
                     self.log.warn('Missing spine item:', repr(spath))
 
         cover = self.opf.cover
@@ -192,7 +191,7 @@ class EbookIterator(BookmarksMixin):
            self.opf.path_to_html_toc not in self.spine:
             try:
                 self.spine.append(Spiny(self.opf.path_to_html_toc))
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
 
@@ -239,5 +238,5 @@ class EbookIterator(BookmarksMixin):
         for x in self.delete_on_exit:
             try:
                 os.remove(x)
-            except:
+            except Exception:
                 pass

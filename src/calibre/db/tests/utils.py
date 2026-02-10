@@ -6,6 +6,7 @@ __copyright__ = '2013, Kovid Goyal <kovid at kovidgoyal.net>'
 
 import os
 import shutil
+import tempfile
 
 from calibre import walk
 from calibre.db.tests.base import BaseTest
@@ -15,7 +16,7 @@ from calibre.db.utils import ThumbnailCache
 class UtilsTest(BaseTest):
 
     def setUp(self):
-        self.tdir = self.mkdtemp()
+        self.tdir = tempfile.mkdtemp(prefix='db_test_')
 
     def tearDown(self):
         shutil.rmtree(self.tdir)
@@ -27,7 +28,7 @@ class UtilsTest(BaseTest):
         total = 0
         for i in range(1, num+1):
             sz = i * 1000
-            c.insert(i, i, (('%d'%i) * sz).encode('ascii'))
+            c.insert(i, i, (f'{i}' * sz).encode('ascii'))
             total += sz
         return total
 
@@ -44,7 +45,7 @@ class UtilsTest(BaseTest):
         for i in (3, 4, 2, 5, 1):
             data, ts = c[i]
             self.assertEqual(i, ts, 'timestamp not correct')
-            self.assertEqual((('%d'%i) * (i*1000)).encode('ascii'), data)
+            self.assertEqual((f'{i}' * (i*1000)).encode('ascii'), data)
         c.set_group_id('a')
         self.basic_fill(c)
         order = tuple(c.items)

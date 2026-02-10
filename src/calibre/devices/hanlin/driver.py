@@ -44,11 +44,11 @@ class HANLINV3(USBMS):
 
         try:
             main_num = int(re.findall(r'\d+', main)[0]) if main else None
-        except:
+        except Exception:
             main_num = None
         try:
             card_num = int(re.findall(r'\d+', card)[0]) if card else None
-        except:
+        except Exception:
             card_num = None
 
         if card_num is not None and main_num is not None and card_num > main_num:
@@ -97,8 +97,8 @@ class HANLINV5(HANLINV3):
     gui_name       = 'Hanlin V5'
     description    = _('Communicate with Hanlin V5 e-book readers.')
 
-    VENDOR_ID	= [0x0492]
-    PRODUCT_ID	= [0x8813]
+    VENDOR_ID   = [0x0492]
+    PRODUCT_ID  = [0x8813]
     BCD         = [0x319]
 
     OSX_MAIN_MEM = 'Hanlin V5 Internal Memory'

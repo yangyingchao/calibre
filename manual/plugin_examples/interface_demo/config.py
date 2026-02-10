@@ -6,14 +6,15 @@ __license__   = 'GPL v3'
 __copyright__ = '2011, Kovid Goyal <kovid@kovidgoyal.net>'
 __docformat__ = 'restructuredtext en'
 
-from calibre.utils.config import JSONConfig
 from qt.core import QHBoxLayout, QLabel, QLineEdit, QWidget
+
+from calibre.utils.config import JSONConfig
 
 # This is where all preferences for this plugin will be stored
 # Remember that this name (i.e. plugins/interface_demo) is also
 # in a global namespace, so make it as unique as possible.
 # You should always prefix your config file name with plugins/,
-# so as to ensure you dont accidentally clobber a calibre config file
+# so as to ensure you don't accidentally clobber a calibre config file
 prefs = JSONConfig('plugins/interface_demo')
 
 # Set defaults

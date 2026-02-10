@@ -29,7 +29,6 @@ from calibre.library.comments import merge_comments
 from calibre.utils.config import tweaks
 from calibre.utils.icu import sort_key
 from calibre.utils.localization import ngettext
-from polyglot.builtins import iteritems
 
 DATA_FILES_ICON_NAME = 'unpack-book.png'
 
@@ -110,9 +109,12 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
         from calibre.gui2.dialogs.data_files_manager import DataFilesManager
         db = self.gui.current_db
         ids = self.gui.library_view.get_selected_ids()
+        num = len(ids)
         for book_id in ids:
-            d = DataFilesManager(db, book_id, self.gui)
+            d = DataFilesManager(db, book_id, self.gui, num - 1)
             d.exec()
+            if d.num_left < 1:
+                break
         cr = self.gui.library_view.currentIndex().row()
         self.gui.library_view.model().refresh_ids(ids, cr)
 
@@ -244,7 +246,7 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
     def cleanup_bulk_download(self, tdir, *args):
         try:
             shutil.rmtree(tdir, ignore_errors=True)
-        except:
+        except Exception:
             pass
 
     def metadata_downloaded(self, job):
@@ -333,10 +335,10 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
 
         id_map = {}
         for bid in good_ids:
-            opf = os.path.join(tdir, '%d.mi'%bid)
+            opf = os.path.join(tdir, f'{bid}.mi')
             if not os.path.exists(opf):
                 opf = None
-            cov = os.path.join(tdir, '%d.cover'%bid)
+            cov = os.path.join(tdir, f'{bid}.cover')
             if not os.path.exists(cov):
                 cov = None
             id_map[bid] = (opf, cov)
@@ -380,7 +382,7 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
                     failed_ids |= d.rejected_ids
                     restrict_to_failed = True
                 nid_map = {}
-                for book_id, (changed, mi) in iteritems(d.accepted):
+                for book_id, (changed, mi) in d.accepted.items():
                     if mi is None:  # discarded
                         continue
                     if changed:
@@ -506,8 +508,7 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
         if id_ is None:
             view._view_file(fmt)
         else:
-            db = self.gui.library_view.model().db
-            view.view_format(db.row(id_), fmt)
+            view.view_format_by_id(id_, fmt)
 
     def edit_format_callback(self, id_, fmt):
         edit = self.gui.iactions['Tweak ePub']
@@ -534,7 +535,7 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
         changed = False
         refresh_books = set(book_ids)
         try:
-            current_tab = 0
+            current_tab = -1
             while True:
                 dialog = MetadataBulkDialog(self.gui, rows,
                                 self.gui.library_view.model(), current_tab, refresh_books)
@@ -569,7 +570,7 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
 
     def books_dropped(self, merge_map):
         covers_replaced = False
-        for dest_id, src_ids in iteritems(merge_map):
+        for dest_id, src_ids in merge_map.items():
             if not self.confirm_large_merge(len(src_ids) + 1):
                 continue
             from calibre.gui2.dialogs.confirm_merge import merge_drop
@@ -579,7 +580,7 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
             if d.merge_formats:
                 self.add_formats(dest_id, self.formats_for_ids(list(src_ids)))
             if d.merge_metadata:
-                self.merge_metadata(dest_id, src_ids, replace_cover=d.replace_cover)
+                self.merge_metadata(dest_id, src_ids, replace_cover=d.replace_cover, save_alternate_cover=d.save_alternate_cover)
                 if d.replace_cover:
                     covers_replaced = True
             if d.delete_books:
@@ -613,16 +614,17 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
         title = mi.title
         hpos = self.gui.library_view.horizontalScrollBar().value()
         if safe_merge:
-            if not confirm_merge('<p>'+_(
+            confirmed, save_alternate_cover = confirm_merge('<p>'+_(
                 'Book formats and metadata from the selected books '
                 'will be added to the <b>first selected book</b> (%s).<br> '
                 'The second and subsequently selected books will not '
                 'be deleted or changed.<br><br>'
                 'Please confirm you want to proceed.')%title + '</p>',
-                'merge_books_safe', self.gui, mi):
+                'merge_books_safe', self.gui, mi, ask_about_save_alternate_cover=True)
+            if not confirmed:
                 return
             self.add_formats(dest_id, self.formats_for_books(rows))
-            self.merge_metadata(dest_id, src_ids)
+            self.merge_metadata(dest_id, src_ids, save_alternate_cover=save_alternate_cover)
         elif merge_only_formats:
             if not confirm_merge('<p>'+_(
                 'Book formats from the selected books will be merged '
@@ -635,12 +637,12 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
                 'and any duplicate formats in the second and subsequently selected books '
                 'will be permanently <b>deleted</b> from your calibre library.<br><br>  '
                 'Are you <b>sure</b> you want to proceed?')%title + '</p>',
-                'merge_only_formats', self.gui, mi):
+                'merge_only_formats', self.gui, mi)[0]:
                 return
             self.add_formats(dest_id, self.formats_for_books(rows))
             self.delete_books_after_merge(src_ids)
         else:
-            if not confirm_merge('<p>'+_(
+            confirmed, save_alternate_cover = confirm_merge('<p>'+_(
                 'Book formats and metadata from the selected books will be merged '
                 'into the <b>first selected book</b> (%s).<br><br>'
                 'After being merged, the second and '
@@ -649,10 +651,11 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
                 'and any duplicate formats in the second and subsequently selected books '
                 'will be permanently <b>deleted</b> from your calibre library.<br><br>  '
                 'Are you <b>sure</b> you want to proceed?')%title + '</p>',
-                'merge_books', self.gui, mi):
+                'merge_books', self.gui, mi, ask_about_save_alternate_cover=True)
+            if not confirmed:
                 return
             self.add_formats(dest_id, self.formats_for_books(rows))
-            self.merge_metadata(dest_id, src_ids)
+            self.merge_metadata(dest_id, src_ids, save_alternate_cover=save_alternate_cover)
             self.merge_data_files(dest_id, src_ids)
             self.delete_books_after_merge(src_ids)
             # leave the selection highlight on first selected book
@@ -709,8 +712,8 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
     def delete_books_after_merge(self, ids_to_delete):
         self.gui.library_view.model().delete_books_by_id(ids_to_delete)
 
-    def merge_metadata(self, dest_id, src_ids, replace_cover=False):
-        self.gui.current_db.new_api.merge_book_metadata(dest_id, src_ids, replace_cover)
+    def merge_metadata(self, dest_id, src_ids, replace_cover=False, save_alternate_cover=False):
+        self.gui.current_db.new_api.merge_book_metadata(dest_id, src_ids, replace_cover, save_alternate_cover=save_alternate_cover)
     # }}}
 
     def edit_device_collections(self, view, oncard=None):
@@ -721,7 +724,7 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
         if d.result() == QDialog.DialogCode.Accepted:
             to_rename = d.to_rename  # dict of new text to old ids
             to_delete = d.to_delete  # list of ids
-            for old_id, new_name in iteritems(to_rename):
+            for old_id, new_name in to_rename.items():
                 model.rename_collection(old_id, new_name=str(new_name))
             for item in to_delete:
                 model.delete_collection_using_id(item)
@@ -749,7 +752,7 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
         '''
         if title is None:
             title = _('Applying changed metadata')
-        self.apply_id_map = list(iteritems(id_map))
+        self.apply_id_map = list(id_map.items())
         self.apply_current_idx = 0
         self.apply_failures = []
         self.applied_ids = set()
@@ -815,14 +818,14 @@ class EditMetadataAction(InterfaceActionWithLibraryDrop):
             db.set_metadata(book_id, mi, commit=False, set_title=set_title,
                     set_authors=set_authors, notify=False)
             self.applied_ids.add(book_id)
-        except:
+        except Exception:
             import traceback
             self.apply_failures.append((book_id, traceback.format_exc()))
 
         try:
             if mi.cover:
                 os.remove(mi.cover)
-        except:
+        except Exception:
             pass
 
     def finalize_apply(self):

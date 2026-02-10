@@ -45,7 +45,7 @@ class Worker(Thread):
         start = time.time()
         try:
             self.plugin.identify(self.log, self.rq, self.abort, **self.kwargs)
-        except:
+        except Exception:
             self.log.exception('Plugin', self.plugin.name, 'failed')
         self.plugin.dl_time_spent = time.time() - start
 
@@ -62,8 +62,8 @@ def is_worker_alive(workers):
 
 # }}}
 
-# Merge results from different sources {{{
 
+# Merge results from different sources {{{
 
 class xISBN(Thread):
 
@@ -122,14 +122,13 @@ class ISBNMerge:
                     if xw.is_alive():
                         self.log.error('Query to xISBN timed out')
                         self.use_xisbn = False
+                    elif xw.exception:
+                        self.log.error('Query to xISBN failed:')
+                        self.log.debug(xw.tb)
                     else:
-                        if xw.exception:
-                            self.log.error('Query to xISBN failed:')
-                            self.log.debug(xw.tb)
-                        else:
-                            isbns, min_year = xw.isbns, xw.min_year
-                            if not msprefs['find_first_edition_date']:
-                                min_year = None
+                        isbns, min_year = xw.isbns, xw.min_year
+                        if not msprefs['find_first_edition_date']:
+                            min_year = None
                 if not isbns:
                     isbns = frozenset([isbn])
                 if isbns in self.pools:
@@ -297,7 +296,7 @@ class ISBNMerge:
             if rating and rating > 0 and rating <= 5:
                 ratings.append(rating)
         if ratings:
-            ans.rating = int(round(sum(ratings)/len(ratings)))
+            ans.rating = round(sum(ratings)/len(ratings))
 
         # Smallest language is likely to be valid
         ans.language = self.length_merge('language', results,
@@ -325,8 +324,7 @@ class ISBNMerge:
             for r in results:
                 if r.pubdate is not None:
                     candidate = as_utc(r.pubdate)
-                    if candidate < min_date:
-                        min_date = candidate
+                    min_date = min(min_date, candidate)
             if min_date.year < 3000:
                 ans.pubdate = min_date
 
@@ -502,7 +500,8 @@ def identify(log, abort,  # {{{
             (len(results), time.time() - start_time))
     tm_rules = msprefs['tag_map_rules']
     pm_rules = msprefs['publisher_map_rules']
-    if tm_rules or pm_rules:
+    s_rules = msprefs['series_map_rules']
+    if tm_rules or pm_rules or s_rules:
         from calibre.ebooks.metadata.tag_mapper import map_tags
     am_rules = msprefs['author_map_rules']
     if am_rules:
@@ -533,8 +532,11 @@ def identify(log, abort,  # {{{
         if getattr(r.pubdate, 'year', 2000) <= UNDEFINED_DATE.year:
             r.pubdate = None
         if pm_rules and r.publisher:
-            pubs = map_tags([r.publisher], pm_rules)
+            pubs = map_tags([r.publisher], pm_rules, separator='')
             r.publisher = pubs[0] if pubs else ''
+        if s_rules and r.series:
+            ss = map_tags([r.series], s_rules, separator='')
+            r.series = ss[0] if ss else ''
 
     if msprefs['swap_author_names']:
         for r in results:

@@ -15,6 +15,7 @@ from qt.core import (
     QCursor,
     QEvent,
     QFont,
+    QGraphicsPixmapItem,
     QGraphicsScene,
     QGraphicsView,
     QIcon,
@@ -43,14 +44,13 @@ from qt.core import (
 from calibre import fit_image, force_unicode, strftime
 from calibre.constants import ismacos, iswindows
 from calibre.ebooks import BOOK_EXTENSIONS
-from calibre.gui2 import error_dialog, gprefs, pixmap_to_data, warning_dialog
+from calibre.gui2 import clip_border_radius, error_dialog, gprefs, pixmap_to_data, warning_dialog
 from calibre.gui2.dnd import DownloadDialog, dnd_get_files, dnd_get_image, dnd_get_local_image_and_pixmap, dnd_has_extension, dnd_has_image, image_extensions
 from calibre.gui2.filename_pattern_ui import Ui_Form
 from calibre.gui2.progress_indicator import ProgressIndicator as _ProgressIndicator
 from calibre.startup import connect_lambda
 from calibre.utils.config import XMLConfig, prefs
 from calibre.utils.localization import _, localize_user_manual_link
-from polyglot.builtins import native_string_type
 
 history = XMLConfig('history')
 
@@ -321,6 +321,8 @@ class ImageDropMixin:  # {{{
         pmap = cb.pixmap()
         if pmap.isNull() and cb.supportsSelection():
             pmap = cb.pixmap(QClipboard.Mode.Selection)
+        if ismacos:  # Without this there is a crash when Qt tries to save this pixmap as JPEG data
+            pmap = pmap.copy()
         if not pmap.isNull():
             self.set_pixmap(pmap)
             self.cover_changed.emit(
@@ -337,7 +339,7 @@ def draw_size(p, rect, w, h):
     f = p.font()
     f.setBold(True)
     p.setFont(f)
-    sz = '\u00a0%d x %d\u00a0'%(w, h)
+    sz = f'\xa0{w} x {h}\xa0'
     flags = Qt.AlignmentFlag.AlignBottom|Qt.AlignmentFlag.AlignRight|Qt.TextFlag.TextSingleLine
     szrect = p.boundingRect(rect, flags, sz)
     p.fillRect(szrect.adjusted(0, 0, 0, 4), QColor(0, 0, 0, 200))
@@ -414,7 +416,8 @@ class ImageView(QWidget, ImageDropMixin):
         x = int(abs(cw - w)/2)
         y = int(abs(ch - h)/2)
         target = QRect(x, y, w, h)
-        p.drawPixmap(target, pmap)
+        with clip_border_radius(p, target):
+            p.drawPixmap(target, pmap)
         if self.draw_border:
             pen = QPen()
             pen.setWidth(self.BORDER_WIDTH)
@@ -425,7 +428,18 @@ class ImageView(QWidget, ImageDropMixin):
 # }}}
 
 
-class CoverView(QGraphicsView, ImageDropMixin):  # {{{
+# CoverView {{{
+
+class RoundedPixmap(QGraphicsPixmapItem):
+
+    def paint(self, painter, option, widget):
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        target = self.boundingRect().toAlignedRect()
+        with clip_border_radius(painter, target):
+            painter.drawPixmap(target, self.pixmap())
+
+
+class CoverView(QGraphicsView, ImageDropMixin):
 
     cover_changed = pyqtSignal(object)
 
@@ -445,7 +459,7 @@ class CoverView(QGraphicsView, ImageDropMixin):  # {{{
 
     def set_pixmap(self, pmap):
         self.scene = QGraphicsScene()
-        self.scene.addPixmap(pmap)
+        self.scene.addItem(RoundedPixmap(pmap))
         self.setScene(self.scene)
 
     def set_background(self, brush=None):
@@ -460,8 +474,8 @@ class CoverView(QGraphicsView, ImageDropMixin):  # {{{
 
 # }}}
 
-# BasicList {{{
 
+# BasicList {{{
 
 class BasicListItem(QListWidgetItem):
 
@@ -662,7 +676,7 @@ class CompleteLineEdit(EnLineEdit):  # {{{
         self.completer = ItemsCompleter(self, complete_items)
         self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
 
-        self.completer.activated[native_string_type].connect(self.complete_text)
+        self.completer.activated[str].connect(self.complete_text)
 
         self.completer.setWidget(self)
 
@@ -906,24 +920,24 @@ class PythonHighlighter(QSyntaxHighlighter):  # {{{
     Rules = ()
     Formats = {}
 
-    KEYWORDS = ["and", "as", "assert", "break", "class", "continue", "def",
-        "del", "elif", "else", "except", "exec", "finally", "for", "from",
-        "global", "if", "import", "in", "is", "lambda", "not", "or",
-        "pass", "print", "raise", "return", "try", "while", "with",
-        "yield"]
+    KEYWORDS = ['and', 'as', 'assert', 'break', 'class', 'continue', 'def',
+        'del', 'elif', 'else', 'except', 'exec', 'finally', 'for', 'from',
+        'global', 'if', 'import', 'in', 'is', 'lambda', 'not', 'or',
+        'pass', 'print', 'raise', 'return', 'try', 'while', 'with',
+        'yield']
 
-    BUILTINS = ["abs", "all", "any", "basestring", "bool", "callable", "chr",
-        "classmethod", "cmp", "compile", "complex", "delattr", "dict",
-        "dir", "divmod", "enumerate", "eval", "execfile", "exit", "file",
-        "filter", "float", "frozenset", "getattr", "globals", "hasattr",
-        "hex", "id", "int", "isinstance", "issubclass", "iter", "len",
-        "list", "locals", "long", "map", "max", "min", "object", "oct",
-        "open", "ord", "pow", "property", "range", "reduce", "repr",
-        "reversed", "round", "set", "setattr", "slice", "sorted",
-        "staticmethod", "str", "sum", "super", "tuple", "type", "unichr",
-        "unicode", "vars", "xrange", "zip"]
+    BUILTINS = ['abs', 'all', 'any', 'basestring', 'bool', 'callable', 'chr',
+        'classmethod', 'cmp', 'compile', 'complex', 'delattr', 'dict',
+        'dir', 'divmod', 'enumerate', 'eval', 'execfile', 'exit', 'file',
+        'filter', 'float', 'frozenset', 'getattr', 'globals', 'hasattr',
+        'hex', 'id', 'int', 'isinstance', 'issubclass', 'iter', 'len',
+        'list', 'locals', 'long', 'map', 'max', 'min', 'object', 'oct',
+        'open', 'ord', 'pow', 'property', 'range', 'reduce', 'repr',
+        'reversed', 'round', 'set', 'setattr', 'slice', 'sorted',
+        'staticmethod', 'str', 'sum', 'super', 'tuple', 'type', 'unichr',
+        'unicode', 'vars', 'xrange', 'zip']
 
-    CONSTANTS = ["False", "True", "None", "NotImplemented", "Ellipsis"]
+    CONSTANTS = ['False', 'True', 'None', 'NotImplemented', 'Ellipsis']
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -939,26 +953,26 @@ class PythonHighlighter(QSyntaxHighlighter):  # {{{
             r.append((a, b))
 
         a(re.compile(
-                "|".join([r"\b%s\b" % keyword for keyword in cls.KEYWORDS])),
-                "keyword")
+                '|'.join([rf'\b{keyword}\b' for keyword in cls.KEYWORDS])),
+                'keyword')
         a(re.compile(
-                "|".join([r"\b%s\b" % builtin for builtin in cls.BUILTINS])),
-                "builtin")
+                '|'.join([rf'\b{builtin}\b' for builtin in cls.BUILTINS])),
+                'builtin')
         a(re.compile(
-                "|".join([r"\b%s\b" % constant
-                for constant in cls.CONSTANTS])), "constant")
+                '|'.join([rf'\b{constant}\b'
+                for constant in cls.CONSTANTS])), 'constant')
         a(re.compile(
-                r"\b[+-]?[0-9]+[lL]?\b"
-                r"|\b[+-]?0[xX][0-9A-Fa-f]+[lL]?\b"
-                r"|\b[+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\b"),
-                "number")
+                r'\b[+-]?[0-9]+[lL]?\b'
+                r'|\b[+-]?0[xX][0-9A-Fa-f]+[lL]?\b'
+                r'|\b[+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\b'),
+                'number')
         a(re.compile(
-                r"\bPyQt6\b|\bQt?[A-Z][a-z]\w+\b"), "pyqt")
-        a(re.compile(r"\b@\w+\b"), "decorator")
-        stringRe = re.compile(r"""(?:'[^']*?'|"[^"]*?")""")
-        a(stringRe, "string")
+                r'\bPyQt6\b|\bQt?[A-Z][a-z]\w+\b'), 'pyqt')
+        a(re.compile(r'\b@\w+\b'), 'decorator')
+        stringRe = re.compile(r'''(?:'[^']*?'|"[^"]*?")''')
+        a(stringRe, 'string')
         cls.stringRe = re.compile(r"""(:?"["]".*?"["]"|'''.*?''')""")
-        a(cls.stringRe, "string")
+        a(cls.stringRe, 'string')
         cls.tripleSingleRe = re.compile(r"""'''(?!")""")
         cls.tripleDoubleRe = re.compile(r'''"""(?!')''')
         cls.Rules = tuple(r)
@@ -968,17 +982,18 @@ class PythonHighlighter(QSyntaxHighlighter):  # {{{
         baseFormat = QTextCharFormat()
         baseFormat.setFontFamilies(['monospace'])
         p = QApplication.instance().palette()
+        is_dark = QApplication.instance().is_dark_theme
         for name, color, bold, italic in (
-                ("normal", None, False, False),
-                ("keyword", p.color(QPalette.ColorRole.Link).name(), True, False),
-                ("builtin", p.color(QPalette.ColorRole.Link).name(), False, False),
-                ("constant", p.color(QPalette.ColorRole.Link).name(), False, False),
-                ("decorator", "#0000E0", False, False),
-                ("comment", "#007F00", False, True),
-                ("string", "#808000", False, False),
-                ("number", "#924900", False, False),
-                ("error", "#FF0000", False, False),
-                ("pyqt", "#50621A", False, False)):
+                ('normal', None, False, False),
+                ('keyword', p.color(QPalette.ColorRole.Link).name(), True, False),
+                ('builtin', p.color(QPalette.ColorRole.Link).name(), False, False),
+                ('constant', p.color(QPalette.ColorRole.Link).name(), False, False),
+                ('decorator', '#0000E0', False, False),
+                ('comment', '#00c700' if is_dark else '#007F00', False, True),
+                ('string', '#b6b600' if is_dark else '#808000', False, False),
+                ('number', '#d96d00' if is_dark else '#924900', False, False),
+                ('error', '#FF0000', False, False),
+                ('pyqt', '#50621A', False, False)):
 
             fmt = QTextCharFormat(baseFormat)
             if color is not None:
@@ -996,18 +1011,17 @@ class PythonHighlighter(QSyntaxHighlighter):  # {{{
         prevState = self.previousBlockState()
 
         self.setFormat(0, textLength,
-                       self.Formats["normal"])
+                       self.Formats['normal'])
 
-        if text.startswith("Traceback") or text.startswith("Error: "):
+        if text.startswith(('Traceback', 'Error: ')):
             self.setCurrentBlockState(ERROR)
             self.setFormat(0, textLength,
-                           self.Formats["error"])
+                           self.Formats['error'])
             return
-        if prevState == ERROR and \
-           not (text.startswith('>>>') or text.startswith("#")):
+        if prevState == ERROR and not text.startswith(('>>>', '#')):
             self.setCurrentBlockState(ERROR)
             self.setFormat(0, textLength,
-                           self.Formats["error"])
+                           self.Formats['error'])
             return
 
         for regex, fmt in PythonHighlighter.Rules:
@@ -1019,8 +1033,8 @@ class PythonHighlighter(QSyntaxHighlighter):  # {{{
         # PythonHighlighter.Rules.append((re.compile(r"#.*"), "comment"))
         if not text:
             pass
-        elif text[0] == "#":
-            self.setFormat(0, len(text), self.Formats["comment"])
+        elif text[0] == '#':
+            self.setFormat(0, len(text), self.Formats['comment'])
         else:
             stack = []
             for i, c in enumerate(text):
@@ -1029,8 +1043,8 @@ class PythonHighlighter(QSyntaxHighlighter):  # {{{
                         stack.pop()
                     else:
                         stack.append(c)
-                elif c == "#" and len(stack) == 0:
-                    self.setFormat(i, len(text), self.Formats["comment"])
+                elif c == '#' and len(stack) == 0:
+                    self.setFormat(i, len(text), self.Formats['comment'])
                     break
 
         self.setCurrentBlockState(NORMAL)
@@ -1048,11 +1062,11 @@ class PythonHighlighter(QSyntaxHighlighter):  # {{{
                     i = len(text)
                     self.setCurrentBlockState(state)
                 self.setFormat(0, i + 3,
-                               self.Formats["string"])
+                               self.Formats['string'])
             elif i > -1:
                 self.setCurrentBlockState(state)
                 self.setFormat(i, len(text),
-                               self.Formats["string"])
+                               self.Formats['string'])
 
     def rehighlight(self):
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
@@ -1085,7 +1099,6 @@ class SplitterHandle(QSplitterHandle):
 
     def mouseDoubleClickEvent(self, ev):
         self.double_clicked.emit(self)
-
 
 
 class PaperSizes(QComboBox):  # {{{

@@ -27,7 +27,6 @@ from calibre.ebooks.mobi.writer8.toc import TOCAdder
 from calibre.ebooks.oeb.base import OEB_DOCS, OEB_STYLES, SVG_MIME, XHTML, XPath, extract, urlnormalize
 from calibre.ebooks.oeb.normalize_css import condense_sheet
 from calibre.ebooks.oeb.parse_utils import barename
-from polyglot.builtins import iteritems
 
 XML_DOCS = OEB_DOCS | {SVG_MIME}
 
@@ -121,10 +120,9 @@ class KF8Writer:
                 idx = to_ref(idx)
                 if is_image:
                     self.used_images.add(ref)
-                    return 'kindle:embed:%s?mime=%s'%(idx,
-                            self.resources.mime_map[ref])
+                    return f'kindle:embed:{idx}?mime={self.resources.mime_map[ref]}'
                 else:
-                    return 'kindle:embed:%s'%idx
+                    return f'kindle:embed:{idx}'
             return oref
 
         for item in self.oeb.manifest:
@@ -132,7 +130,7 @@ class KF8Writer:
             if item.media_type in XML_DOCS:
                 root = self.data(item)
                 for tag in XPath('//h:img|//svg:image')(root):
-                    for attr, ref in iteritems(tag.attrib):
+                    for attr, ref in tag.attrib.items():
                         if attr.split('}')[-1].lower() in {'src', 'href'}:
                             tag.attrib[attr] = pointer(item, ref)
 
@@ -173,7 +171,7 @@ class KF8Writer:
                     idx = sheets.get(href, None)
                     if idx is not None:
                         idx = to_ref(idx)
-                        rule.href = 'kindle:flow:%s?mime=text/css'%idx
+                        rule.href = f'kindle:flow:{idx}?mime=text/css'
                         changed = True
             return changed
 
@@ -185,7 +183,7 @@ class KF8Writer:
                 idx = sheets.get(href, None)
                 if idx is not None:
                     idx = to_ref(idx)
-                    link.set('href', 'kindle:flow:%s?mime=text/css'%idx)
+                    link.set('href', f'kindle:flow:{idx}?mime=text/css')
 
             for tag in XPath('//h:style')(root):
                 p = tag.getparent()
@@ -205,11 +203,11 @@ class KF8Writer:
                 extract(tag)
                 inlines[raw].append(repl)
 
-        for raw, elems in iteritems(inlines):
+        for raw, elems in inlines.items():
             idx = to_ref(len(self.flows))
             self.flows.append(raw)
             for link in elems:
-                link.set('href', 'kindle:flow:%s?mime=text/css'%idx)
+                link.set('href', f'kindle:flow:{idx}?mime=text/css')
 
         for item in self.oeb.manifest:
             if item.media_type in OEB_STYLES:
@@ -241,7 +239,7 @@ class KF8Writer:
                 p = svg.getparent()
                 pos = p.index(svg)
                 img = etree.Element(XHTML('img'),
-                        src="kindle:flow:%s?mime=image/svg+xml"%to_ref(idx))
+                        src=f'kindle:flow:{to_ref(idx)}?mime=image/svg+xml')
                 p.insert(pos, img)
                 extract(svg)
 
@@ -250,8 +248,7 @@ class KF8Writer:
                 abshref = item.abshref(src)
                 idx = images.get(abshref, None)
                 if idx is not None:
-                    img.set('src', 'kindle:flow:%s?mime=image/svg+xml'%
-                            to_ref(idx))
+                    img.set('src', f'kindle:flow:{to_ref(idx)}?mime=image/svg+xml')
 
     def replace_internal_links_with_placeholders(self):
         self.link_map = {}
@@ -270,7 +267,7 @@ class KF8Writer:
                     # a non utf-8 quoted url? Since we cannot interpret it, pass it through.
                     pass
                 if href in hrefs:
-                    placeholder = 'kindle:pos:fid:0000:off:%s'%to_href(count)
+                    placeholder = f'kindle:pos:fid:0000:off:{to_href(count)}'
                     self.link_map[placeholder] = (href, frag)
                     a.set('href', placeholder)
 
@@ -304,7 +301,7 @@ class KF8Writer:
                         # https://bugs.launchpad.net/bugs/1489495
                         if id_:
                             cid += 1
-                            val = 'c%d' % cid
+                            val = f'c{cid}'
                             self.id_map[(item.href, id_)] = val
                             tag.set('cid', val)
                     else:
@@ -319,7 +316,7 @@ class KF8Writer:
 
     def chunk_it_up(self):
         placeholder_map = {}
-        for placeholder, x in iteritems(self.link_map):
+        for placeholder, x in self.link_map.items():
             href, frag = x
             aid = self.id_map.get(x, None)
             if aid is None:

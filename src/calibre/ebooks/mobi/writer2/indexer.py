@@ -12,7 +12,6 @@ from struct import pack
 
 from calibre.ebooks.mobi.utils import CNCX as CNCX_
 from calibre.ebooks.mobi.utils import RECORD_SIZE, align_block, encint, encode_number_as_hex, encode_tbs
-from polyglot.builtins import iteritems, itervalues
 
 
 class CNCX(CNCX_):  # {{{
@@ -37,7 +36,7 @@ class TAGX:  # {{{
     BITMASKS.update({x:(1 << i) for i, x in enumerate([1, 2, 3, 4, 5, 21, 22, 23])})
     BITMASKS.update({x:(1 << i) for i, x in enumerate([69, 70, 71, 72, 73])})
 
-    NUM_VALUES = defaultdict(lambda :1)
+    NUM_VALUES = defaultdict(lambda:1)
     NUM_VALUES[11] = 3
     NUM_VALUES[0] = 0
 
@@ -64,7 +63,7 @@ class TAGX:  # {{{
         '''
         TAGX block for the Primary index header of a periodical
         '''
-        for i in (1, 2, 3, 4, 5, 21, 22, 23, 0, 69, 70, 71, 72,73, 0):
+        for i in (1, 2, 3, 4, 5, 21, 22, 23, 0, 69, 70, 71, 72, 73, 0):
             self.add_tag(i)
         return self.header(2) + bytes(self.byts)
 
@@ -86,8 +85,8 @@ class TAGX:  # {{{
             self.add_tag(i)
         return self.header(1) + bytes(self.byts)
 
-
 # }}}
+
 
 # Index Entries {{{
 
@@ -108,7 +107,7 @@ class IndexEntry:
             'author_offset': 71,
 
     }
-    RTAG_MAP = {v:k for k, v in iteritems(TAG_VALUES)}  # noqa
+    RTAG_MAP = {v:k for k, v in TAG_VALUES.items()}
 
     def __init__(self, offset, label_offset):
         self.offset, self.label_offset = offset, label_offset
@@ -127,9 +126,8 @@ class IndexEntry:
         self.desc_offset = None
 
     def __repr__(self):
-        return ('IndexEntry(offset=%r, depth=%r, length=%r, index=%r,'
-                ' parent_index=%r)')%(self.offset, self.depth, self.length,
-                        self.index, self.parent_index)
+        return (f'IndexEntry(offset={self.offset!r}, depth={self.depth!r}, length={self.length!r}, index={self.index!r},'
+                f' parent_index={self.parent_index!r})')
 
     @property
     def size(self):
@@ -222,9 +220,8 @@ class SecondaryIndexEntry(IndexEntry):
         tag = self.INDEX_MAP[index]
 
         # The values for this index entry
-        # I dont know what the 5 means, it is not the number of entries
-        self.secondary = [5 if tag == min(
-            itervalues(self.INDEX_MAP)) else 0, 0, tag]
+        # I don't know what the 5 means, it is not the number of entries
+        self.secondary = [5 if tag == min(self.INDEX_MAP.values()) else 0, 0, tag]
 
     @property
     def tag_nums(self):
@@ -236,7 +233,7 @@ class SecondaryIndexEntry(IndexEntry):
 
     @classmethod
     def entries(cls):
-        rmap = {v:k for k,v in iteritems(cls.INDEX_MAP)}
+        rmap = {v:k for k,v in cls.INDEX_MAP.items()}
         for tag in sorted(rmap, reverse=True):
             yield cls(rmap[tag])
 
@@ -281,14 +278,13 @@ class TBS:  # {{{
                 for x in ('starts', 'ends', 'completes'):
                     for idx in data[x]:
                         depth_map[idx.depth].append(idx)
-                for l in itervalues(depth_map):
+                for l in depth_map.values():
                     l.sort(key=lambda x:x.offset)
                 self.periodical_tbs(data, first, depth_map)
+        elif not data:
+            self.bytestring = b''
         else:
-            if not data:
-                self.bytestring = b''
-            else:
-                self.book_tbs(data, first)
+            self.book_tbs(data, first)
 
     def periodical_tbs(self, data, first, depth_map):
         buf = io.BytesIO()
@@ -317,26 +313,25 @@ class TBS:  # {{{
             else:
                 parent_section_index = max(iter(self.section_map))
 
-        else:
-            # Non terminal record
+        # Non terminal record
 
-            if spanner is not None:
-                # record is spanned by a single article
-                parent_section_index = spanner.parent_index
-                typ = (self.type_110 if parent_section_index == 1 else
-                        self.type_010)
-            elif not depth_map[1]:
-                # has only article nodes, i.e. spanned by a section
+        elif spanner is not None:
+            # record is spanned by a single article
+            parent_section_index = spanner.parent_index
+            typ = (self.type_110 if parent_section_index == 1 else
+                    self.type_010)
+        elif not depth_map[1]:
+            # has only article nodes, i.e. spanned by a section
+            parent_section_index = depth_map[2][0].parent_index
+            typ = (self.type_111 if parent_section_index == 1 else
+                    self.type_010)
+        else:
+            # has section transitions
+            if depth_map[2]:
                 parent_section_index = depth_map[2][0].parent_index
-                typ = (self.type_111 if parent_section_index == 1 else
-                        self.type_010)
             else:
-                # has section transitions
-                if depth_map[2]:
-                    parent_section_index = depth_map[2][0].parent_index
-                else:
-                    parent_section_index = depth_map[1][0].index
-                typ = self.type_011
+                parent_section_index = depth_map[1][0].index
+            typ = self.type_011
 
         buf.write(typ)
 
@@ -369,7 +364,7 @@ class TBS:  # {{{
 
                 try:
                     next_sec = sections[i+1]
-                except:
+                except Exception:
                     next_sec = None
 
                 extra = {}
@@ -448,8 +443,7 @@ class Indexer:  # {{{
         if self.is_periodical and self.masthead_offset is None:
             raise ValueError('Periodicals must have a masthead')
 
-        self.log('Generating MOBI index for a %s'%('periodical' if
-            self.is_periodical else 'book'))
+        self.log('Generating MOBI index for a {}'.format('periodical' if self.is_periodical else 'book'))
         self.is_flat_periodical = False
         if self.is_periodical:
             periodical_node = next(iter(oeb.toc))
@@ -531,7 +525,7 @@ class Indexer:  # {{{
 
         ans = header + body
         if len(ans) > 0x10000:
-            raise ValueError('Too many entries (%d) in the TOC'%len(offsets))
+            raise ValueError(f'Too many entries ({len(offsets)}) in the TOC')
         return ans
     # }}}
 
@@ -637,9 +631,8 @@ class Indexer:  # {{{
             try:
                 offset = id_offsets[node.href]
                 label = self.cncx[node.title]
-            except:
-                self.log.warn('TOC item %s [%s] not found in document'%(
-                    node.title, node.href))
+            except Exception:
+                self.log.warn(f'TOC item {node.title} [{node.href}] not found in document')
                 continue
 
             if offset in seen:
@@ -654,7 +647,7 @@ class Indexer:  # {{{
         for i, index in enumerate(indices):
             try:
                 next_offset = indices[i+1].offset
-            except:
+            except Exception:
                 next_offset = self.serializer.body_end_offset
             index.length = next_offset - index.offset
 
@@ -665,7 +658,7 @@ class Indexer:  # {{{
         for i, index in enumerate(indices):
             try:
                 next_offset = indices[i+1].offset
-            except:
+            except Exception:
                 next_offset = self.serializer.body_end_offset
             index.length = next_offset - index.offset
 
@@ -703,7 +696,7 @@ class Indexer:  # {{{
                 offset = id_offsets[sec.href]
                 label = self.cncx[sec.title]
                 klass = self.cncx[sec.klass]
-            except:
+            except Exception:
                 continue
             if offset in seen_sec_offsets:
                 continue
@@ -717,7 +710,7 @@ class Indexer:  # {{{
                     offset = id_offsets[art.href]
                     label = self.cncx[art.title]
                     klass = self.cncx[art.klass]
-                except:
+                except Exception:
                     continue
                 if offset in seen_art_offsets:
                     continue
@@ -745,12 +738,12 @@ class Indexer:  # {{{
             sec, normalized_articles = x
             try:
                 sec.length = normalized_sections[s+1][0].offset - sec.offset
-            except:
+            except Exception:
                 sec.length = self.serializer.body_end_offset - sec.offset
             for i, art in enumerate(normalized_articles):
                 try:
                     art.length = normalized_articles[i+1].offset - art.offset
-                except:
+                except Exception:
                     art.length = sec.offset + sec.length - art.offset
 
         # Filter
@@ -786,14 +779,14 @@ class Indexer:  # {{{
             sec, articles = x
             try:
                 next_offset = normalized_sections[s+1][0].offset
-            except:
+            except Exception:
                 next_offset = self.serializer.body_end_offset
             sec.length = next_offset - sec.offset
 
             for a, art in enumerate(articles):
                 try:
                     next_offset = articles[a+1].offset
-                except:
+                except Exception:
                     next_offset = sec.next_offset
                 art.length = next_offset - art.offset
 
@@ -802,7 +795,7 @@ class Indexer:  # {{{
             sec, articles = x
             try:
                 next_sec = normalized_sections[s+1][0]
-            except:
+            except Exception:
                 if (sec.length == 0 or sec.next_offset !=
                         self.serializer.body_end_offset):
                     raise ValueError('Invalid section layout')
@@ -812,7 +805,7 @@ class Indexer:  # {{{
             for a, art in enumerate(articles):
                 try:
                     next_art = articles[a+1]
-                except:
+                except Exception:
                     if (art.length == 0 or art.next_offset !=
                             sec.next_offset):
                         raise ValueError('Invalid article layout')
@@ -867,13 +860,12 @@ class Indexer:  # {{{
                         data['completes'].append(index)
                     else:
                         data['starts'].append(index)
-                else:
-                    # Node starts before current records
-                    if index.next_offset <= next_offset:
-                        # Node ends in current record
-                        data['ends'].append(index)
-                    elif index.depth == deepest:
-                        data['spans'] = index
+                # Node starts before current records
+                elif index.next_offset <= next_offset:
+                    # Node ends in current record
+                    data['ends'].append(index)
+                elif index.depth == deepest:
+                    data['spans'] = index
 
             if (data['ends'] or data['completes'] or data['starts'] or
                     data['spans'] is not None):

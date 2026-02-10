@@ -9,14 +9,15 @@ Based on ideas from comiclrf created by FangornUK.
 import os
 import time
 import traceback
+from queue import Empty
 
 from calibre import extract, prints, walk
 from calibre.constants import filesystem_encoding
 from calibre.ptempfile import PersistentTemporaryDirectory
+from calibre.utils.cleantext import clean_ascii_chars
 from calibre.utils.icu import numeric_sort_key
 from calibre.utils.ipc.job import ParallelJob
 from calibre.utils.ipc.server import Server
-from polyglot.queue import Empty
 
 # If the specified screen has either dimension larger than this value, no image
 # rescaling is done (we assume that it is a tablet output profile)
@@ -35,8 +36,8 @@ def extract_comic(path_to_comic_file):
     extract(path_to_comic_file, tdir)
     for x in walk(tdir):
         bn = os.path.basename(x)
-        nbn = bn.replace('#', '_')
-        if nbn != bn:
+        nbn = clean_ascii_chars(bn.replace('#', '_'))
+        if nbn and nbn != bn:
             os.rename(x, os.path.join(os.path.dirname(x), nbn))
     return tdir
 
@@ -168,7 +169,7 @@ class PageProcessor(list):  # {{{
                 if self.opts.comic_image_size:
                     SCRWIDTH, SCRHEIGHT = map(int, [x.strip() for x in
                         self.opts.comic_image_size.split('x')])
-            except:
+            except Exception:
                 pass  # Ignore
 
             if self.opts.keep_aspect_ratio:
@@ -212,9 +213,8 @@ class PageProcessor(list):  # {{{
                     # to leave it as original size
                     img = resize_image(img, newsizex, newsizey)
                     img = add_borders_to_image(img, left=deltax, right=deltax, top=deltay, bottom=deltay)
-            else:
-                if SCRWIDTH < MAX_SCREEN_SIZE and SCRHEIGHT < MAX_SCREEN_SIZE:
-                    img = resize_image(img, SCRWIDTH, SCRHEIGHT)
+            elif SCRWIDTH < MAX_SCREEN_SIZE and SCRHEIGHT < MAX_SCREEN_SIZE:
+                img = resize_image(img, SCRWIDTH, SCRHEIGHT)
 
             if not self.opts.dont_sharpen:
                 img = gaussian_sharpen_image(img, 0.0, 1.0)
@@ -235,7 +235,7 @@ class PageProcessor(list):  # {{{
                     final_fmt = QImage.Format.Format_Indexed8 if uses_256_colors else QImage.Format.Format_Grayscale16
                     if img.format() != final_fmt:
                         img = img.convertToFormat(final_fmt)
-            dest = '%d_%d.%s'%(self.num, i, self.opts.output_format)
+            dest = f'{self.num}_{i}.{self.opts.output_format}'
             dest = os.path.join(self.dest, dest)
             with open(dest, 'wb') as f:
                 f.write(image_to_data(img, fmt=self.opts.output_format))
@@ -252,7 +252,7 @@ def render_pages(tasks, dest, opts, notification=lambda x, y: x):
         try:
             pages.extend(PageProcessor(path, dest, opts, num))
             msg = _('Rendered %s')%path
-        except:
+        except Exception:
             failures.append(path)
             msg = _('Failed %s')%path
             if opts.verbose:

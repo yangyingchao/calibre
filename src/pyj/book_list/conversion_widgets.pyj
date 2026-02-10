@@ -360,6 +360,7 @@ def structure_detection(container):
     g.appendChild(choices('chapter_mark', _('Chap&ter mark:'), ['pagebreak', 'rule', 'both', 'none']))
     g.appendChild(checkbox('remove_first_image', _('Remove first &image')))
     g.appendChild(checkbox('remove_fake_margins', _('Remove &fake margins')))
+    g.appendChild(checkbox('add_alt_text_to_img', _('Add &alt text to images')))
     g.appendChild(checkbox('insert_metadata', _('Insert metadata at start of book')))
     g.appendChild(lineedit('page_breaks_before', _('Insert page breaks before'), 50))
     g.appendChild(lineedit('start_reading_at', _('Start reading at'), 50))
@@ -486,6 +487,11 @@ def pdf_input(container):
     container.appendChild(g)
     g.appendChild(float_spin('unwrap_factor', _('Line &un-wrapping factor:'), max=1, step=0.01))
     g.appendChild(checkbox('no_images', _('No &images')))
+    g.appendChild(choices('pdf_engine', _('PDF &engine:'), {'calibre': 'calibre', 'pdftohtml': 'pdftohtml'}))
+    g.appendChild(int_spin('pdf_header_skip', _('Remove headers at &top of page by:'), min=-1, max=999999, step=1))
+    g.appendChild(int_spin('pdf_footer_skip', _('Remove footers at &bottom of page by:'), min=-1, max=999999, step=1))
+    g.appendChild(lineedit('pdf_header_regex', _('Regular expression to remove &header at top of page:')))
+    g.appendChild(lineedit('pdf_footer_regex', _('Regular expression to remove &footer at bottom of page:')))
 # }}}
 
 # RTF Input {{{
@@ -543,6 +549,25 @@ def epub_output(container):
     g.appendChild(lineedit('epub_max_image_size', _('Shrink &images larger than:')))
     g.appendChild(choices('epub_version', _('EP&UB version:'), ui_data.versions))
 # }}}
+
+# KEPUB Output {{{
+@ep
+def kepub_output(container):
+    g = E.div(class_='simple-group')
+    container.appendChild(g)
+    g.appendChild(checkbox('dont_split_on_page_breaks', _('Do not &split on page breaks')))
+    g.appendChild(int_spin('flow_size', _('Split files &larger than:'), unit='KB', max=1000000, step=20))
+    g.appendChild(lineedit('kepub_max_image_size', _('Shrink &images larger than:')))
+    g.appendChild(lineedit('kepub_prefer_justification', _('Prefer improved text justification to proper highlighting')))
+    g.appendChild(checkbox('kepub_affect_hyphenation', _('Enable/disable &hyphenation for this book')))
+    g.appendChild(checkbox('kepub_disable_hyphenation', _('&Prevent all hyphenation')))
+    c = _('characters')
+    g.appendChild(int_spin('kepub_hyphenation_min_chars', _('Hyphenation: &minimum word length:'), unit=c))
+    g.appendChild(int_spin('kepub_hyphenation_min_chars_before', _('Hyphenation: minimum characters &before:'), unit=c))
+    g.appendChild(int_spin('kepub_hyphenation_min_chars_after', _('Hyphenation: minimum characters &after:'), unit=c))
+    g.appendChild(int_spin('kepub_hyphenation_limit_lines', _('Hyphenation: &limit lines:'), unit=_('lines')))
+# }}}
+
 
 # DOCX Output {{{
 @ep
@@ -708,6 +733,7 @@ def txt_output(container):
     g = g.lastChild
     g.appendChild(checkbox('keep_links', _('Do not remove links (<a> tags) before processing')))
     g.appendChild(checkbox('keep_image_references', _('Do not remove image &references before processing')))
+    g.appendChild(checkbox('use_alt_text_for_images', _('Replace images with their alt attribute text')))
     g.appendChild(checkbox('keep_color', _('Keep text &color, when possible')))
 
 @ep

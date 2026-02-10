@@ -8,7 +8,9 @@ __docformat__ = 'restructuredtext en'
 from functools import partial
 
 from qt.core import (
+    QAction,
     QActionGroup,
+    QApplication,
     QCoreApplication,
     QFrame,
     QHBoxLayout,
@@ -76,7 +78,7 @@ class LocationManager(QObject):  # {{{
                 a.triggered.connect(self._configure_requested)
                 self._mem.append(a)
                 a = m.addAction(QIcon.ic('sync.png'), _('Update cached metadata on device'))
-                a.triggered.connect(lambda x : self.update_device_metadata.emit())
+                a.triggered.connect(lambda x: self.update_device_metadata.emit())
                 self._mem.append(a)
 
             else:
@@ -160,7 +162,7 @@ class LocationManager(QObject):  # {{{
         for i, loc in enumerate(('main', 'carda', 'cardb')):
             t = self.tooltips[loc]
             if self.free[i] > -1:
-                t += '\n\n%s '%human_readable(self.free[i]) + _('available')
+                t += f'\n\n{human_readable(self.free[i])} ' + _('available')
             ac = getattr(self, 'location_'+loc)
             ac.setToolTip(t)
             ac.setWhatsThis(t)
@@ -211,7 +213,7 @@ class SearchBar(QFrame):  # {{{
         x.setText(_('Virtual library'))
         x.setAutoRaise(True)
         x.setIcon(QIcon.ic('vl.png'))
-        x.setObjectName("virtual_library")
+        x.setObjectName('virtual_library')
         x.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         l.addWidget(x)
 
@@ -238,11 +240,30 @@ class SearchBar(QFrame):  # {{{
         sb.setVisible(False)
         l.addWidget(sb)
 
+        parent.group_by_button = self.group_by_button = gb = QToolButton(self)
+        self.group_by_menu_action = ac = QAction()
+        parent.addAction(ac)
+        ac.triggered.connect(self.show_group_by_menu)
+        gb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        gb.setToolTip(_('Change how the displayed books are grouped'))
+        parent.keyboard.register_shortcut(
+            'show group by menu', _('Show the Group by menu for grouping books in the Bookshelf view'),
+            action=ac, group=_('Main window layout'), default_keys=())
+        gb.setCursor(Qt.CursorShape.PointingHandCursor)
+        gb.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        gb.setAutoRaise(True)
+        gb.setText(_('Group by'))
+        gb.setIcon(QIcon.ic('bookshelf.png'))
+        gb.setMenu(QMenu(gb))
+        gb.menu().aboutToShow.connect(self.populate_group_by_menu)
+        gb.setVisible(False)
+        l.addWidget(gb)
+
         x = parent.search = SearchBox2(self, as_url=search_as_url)
         x.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-        x.setObjectName("search")
-        x.setToolTip(_("<p>Search the list of books by title, author, publisher, "
-                       "tags, comments, etc.<br><br>Words separated by spaces are ANDed"))
+        x.setObjectName('search')
+        x.setToolTip(_('<p>Search the list of books by title, author, publisher, '
+                       'tags, comments, etc.<br><br>Words separated by spaces are ANDed'))
         x.setMinimumContentsLength(10)
         l.addWidget(x)
 
@@ -254,7 +275,7 @@ class SearchBar(QFrame):  # {{{
         parent.addAction(ac)
         ac.setToolTip(_('Advanced search'))
         parent.keyboard.register_shortcut('advanced search toggle',
-                _('Advanced search'), default_keys=("Shift+Ctrl+F",),
+                _('Advanced search'), default_keys=('Shift+Ctrl+F',),
                 action=ac)
 
         # This error icon will be placed after the clear button icon
@@ -290,6 +311,14 @@ class SearchBar(QFrame):  # {{{
     def populate_sort_menu(self):
         from calibre.gui2.ui import get_gui
         get_gui().iactions['Sort By'].update_menu(self.sort_button.menu())
+
+    def populate_group_by_menu(self):
+        from calibre.gui2.ui import get_gui
+        get_gui().bookshelf_view.populate_group_by_menu(self.group_by_button.menu())
+
+    def show_group_by_menu(self):
+        if self.group_by_button.isVisible():
+            self.group_by_button.click()
 
     def do_fts(self):
         from calibre.gui2.ui import get_gui
@@ -357,14 +386,22 @@ class MainWindowMixin:  # {{{
         smw.setAlignment(Qt.AlignmentFlag.AlignCenter)
         smw.setVisible(False)
         smw.setAutoFillBackground(True)
-        smw.setStyleSheet('QLabel { background-color: rgba(200, 200, 200, 200); color: black }')
 
     def show_shutdown_message(self, message=''):
         smw = self.shutdown_message_widget
+        bg, fg = 200, 'black'
+        if QApplication.instance().is_dark_theme:
+            bg, fg = 30, 'lightgray'
+        smw.setStyleSheet(f'QLabel {{ background-color: rgba({bg}, {bg}, {bg}, 200); color: {fg} }}')
         smw.setGeometry(0, 0, self.width(), self.height())
         smw.setVisible(True)
         smw.raise_()
         smw.setText(_('<h2>Shutting down</h2><div>') + message)
         # Force processing the events needed to show the message
         QCoreApplication.processEvents()
+
+    def show_sort_button_for_alternate_view(self, show: bool = True) -> None:
+        if self.bars_manager.search_tool_bar.has_sort_by_button:
+            show = False
+        self.sort_button.setVisible(show)
 # }}}

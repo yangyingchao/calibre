@@ -30,9 +30,9 @@ class TXTOutput(OutputFormatPlugin):
         OptionRecommendation(name='newline', recommended_value='system',
             level=OptionRecommendation.LOW,
             short_switch='n', choices=NEWLINE_TYPES,
-            help=_('Type of newline to use. Options are %s. Default is \'system\'. '
-                'Use \'old_mac\' for compatibility with Mac OS 9 and earlier. '
-                'For macOS use \'unix\'. \'system\' will default to the newline '
+            help=_("Type of newline to use. Options are %s. Default is 'system'. "
+                "Use 'old_mac' for compatibility with Mac OS 9 and earlier. "
+                "For macOS use 'unix'. 'system' will default to the newline "
                 'type used by this OS.') % sorted(NEWLINE_TYPES)),
         OptionRecommendation(name='txt_output_encoding', recommended_value='utf-8',
             level=OptionRecommendation.LOW,
@@ -69,6 +69,11 @@ class TXTOutput(OutputFormatPlugin):
             help=_('Do not remove image references within the document. This is only '
             'useful when paired with a TXT output formatting option that '
             'is not none because links are always removed with plain text output.')),
+        OptionRecommendation(name='use_alt_text_for_images',
+            recommended_value=False, level=OptionRecommendation.LOW,
+            help=_('Replace images with the text from the alt attribute, if any.'
+                   ' Ignored if the option to keep image references is specified.')),
+
         OptionRecommendation(name='keep_color',
             recommended_value=False, level=OptionRecommendation.LOW,
             help=_('Do not remove font color from output. This is only useful when '

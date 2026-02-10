@@ -26,7 +26,6 @@ from calibre.gui2.tweak_book import current_container, editors, set_current_cont
 from calibre.gui2.tweak_book.boss import get_boss
 from calibre.gui2.tweak_book.widgets import Dialog
 from calibre.utils.localization import ngettext
-from polyglot.builtins import iteritems
 
 
 def get_data(name):
@@ -138,12 +137,12 @@ class CheckExternalLinks(Dialog):
 
     def populate_results(self, preserve_pos=False):
         num = len(self.errors) - len(self.fixed_errors)
-        text = '<h3>%s</h3><ol>' % (ngettext(
+        text = '<h3>{}</h3><ol>'.format(ngettext(
             'Found a broken link', 'Found {} broken links', num).format(num))
         for i, (locations, err, url) in enumerate(self.errors):
             if i in self.fixed_errors:
                 continue
-            text += '<li><b>%s</b> \xa0<a href="err:%d">[%s]</a><br>%s<br><ul>' % (url, i, _('Fix this link'), err)
+            text += '<li><b>{}</b> \xa0<a href="err:{}">[{}]</a><br>{}<br><ul>'.format(url, i, _('Fix this link'), err)
             for name, href, lnum, col in locations:
                 text += '<li>{name} \xa0<a href="loc:{lnum},{name}">[{line}: {lnum}]</a></li>'.format(
                     name=name, lnum=lnum, line=_('line number'))
@@ -162,7 +161,7 @@ class CheckExternalLinks(Dialog):
             for name, href in {(l[0], l[1]) for l in err[0]}:
                 nmap[name].add(href)
 
-            for name, hrefs in iteritems(nmap):
+            for name, hrefs in nmap.items():
                 raw = oraw = get_data(name)
                 for href in hrefs:
                     raw = raw.replace(href, newurl)

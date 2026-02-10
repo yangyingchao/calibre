@@ -5,7 +5,8 @@ from collections import defaultdict
 from itertools import chain
 
 from calibre.ebooks.epub.cfi.parse import cfi_sort_key
-from polyglot.builtins import itervalues
+from calibre.utils.date import EPOCH
+from calibre.utils.iso8601 import parse_iso8601
 
 no_cfi_sort_key = cfi_sort_key('/99999999')
 
@@ -30,6 +31,15 @@ def highlight_sort_key(hl):
     return no_cfi_sort_key
 
 
+def annotations_as_copied_list(annots_map):
+    for atype, annots in annots_map.items():
+        for annot in annots:
+            ts = (parse_iso8601(annot['timestamp'], assume_utc=True) - EPOCH).total_seconds()
+            annot = annot.copy()
+            annot['type'] = atype
+            yield annot, ts
+
+
 def sort_annot_list_by_position_in_book(annots, annot_type):
     annots.sort(key={'bookmark': bookmark_sort_key, 'highlight': highlight_sort_key}[annot_type])
 
@@ -38,7 +48,7 @@ def merge_annots_with_identical_field(a, b, field='title'):
     title_groups = defaultdict(list)
     for x in chain(a, b):
         title_groups[x[field]].append(x)
-    for tg in itervalues(title_groups):
+    for tg in title_groups.values():
         tg.sort(key=safe_timestamp_sort_key, reverse=True)
     seen = set()
     changed = False

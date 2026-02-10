@@ -14,35 +14,24 @@ import os
 import re
 import sys
 import textwrap
-import time
 from collections import OrderedDict, deque
 from io import BytesIO
+from queue import Empty, Queue
 
 import apsw
 from qt.core import QAction, QApplication, QDialog, QEvent, QFont, QIcon, QMenu, QSystemTrayIcon, Qt, QTimer, QUrl, pyqtSignal
 
-from calibre import detect_ncpus, force_unicode, prints
+from calibre import detect_ncpus, force_unicode, prints, timed_print
 from calibre.constants import DEBUG, __appname__, config_dir, filesystem_encoding, ismacos, iswindows
 from calibre.customize import PluginInstallationType
 from calibre.customize.ui import available_store_plugins, interface_actions
 from calibre.db.legacy import LibraryDatabase
-from calibre.gui2 import (
-    Dispatcher,
-    GetMetadata,
-    config,
-    error_dialog,
-    gprefs,
-    info_dialog,
-    max_available_height,
-    open_url,
-    question_dialog,
-    timed_print,
-    warning_dialog,
-)
+from calibre.gui2 import Dispatcher, GetMetadata, config, error_dialog, gprefs, info_dialog, max_available_height, open_url, question_dialog, warning_dialog
 from calibre.gui2.auto_add import AutoAdder
 from calibre.gui2.changes import handle_changes
 from calibre.gui2.cover_flow import CoverFlowMixin
 from calibre.gui2.device import DeviceMixin
+from calibre.gui2.dialogs.ff_doc_editor import FFDocEditor
 from calibre.gui2.dialogs.message_box import JobError
 from calibre.gui2.ebook_download import EbookDownloadMixin
 from calibre.gui2.email import EmailMixin
@@ -67,8 +56,6 @@ from calibre.utils.config import dynamic, prefs
 from calibre.utils.ipc.pool import Pool
 from calibre.utils.resources import get_image_path as I
 from calibre.utils.resources import get_path as P
-from polyglot.builtins import string_or_bytes
-from polyglot.queue import Empty, Queue
 
 
 def get_gui():
@@ -85,7 +72,7 @@ def add_quick_start_guide(library_view, refresh_cover_browser=None):
     gprefs['quick_start_guide_added'] = True
     imgbuf = BytesIO(calibre_cover2(_('Quick Start Guide'), ''))
     try:
-        with open(P('quick_start/%s.epub' % l), 'rb') as src:
+        with open(P(f'quick_start/{l}.epub'), 'rb') as src:
             buf = BytesIO(src.read())
     except OSError as err:
         if err.errno != errno.ENOENT:
@@ -111,7 +98,6 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         SavedSearchBoxMixin, SearchRestrictionMixin, LayoutMixin, UpdateMixin,
         EbookDownloadMixin
         ):
-
     'The main GUI'
 
     proceed_requested = pyqtSignal(object, object)
@@ -125,7 +111,8 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
     def __init__(self, opts, parent=None, gui_debug=None):
         MainWindow.__init__(self, opts, parent=parent, disable_automatic_gc=True)
         self.setVisible(False)
-        self.setWindowIcon(QApplication.instance().windowIcon())
+        if not ismacos:
+            self.setWindowIcon(QApplication.instance().windowIcon())
         self.extra_files_watcher = ExtraFilesWatcher(self)
         self.jobs_pointer = Pointer(self)
         self.proceed_requested.connect(self.do_proceed,
@@ -187,7 +174,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
             try:
                 st = self.init_istore(store)
                 self.add_istore(st)
-            except:
+            except Exception:
                 # Ignore errors in loading user supplied plugins
                 import traceback
                 traceback.print_exc()
@@ -287,6 +274,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
                 QIcon.ic('eject.png'), _('&Eject connected device'))
         self.eject_action.setEnabled(False)
         self.addAction(self.quit_action)
+        self.system_tray_menu.addAction(self.iactions['Restart'].menuless_qaction)
         self.system_tray_menu.addAction(self.quit_action)
         self.keyboard.register_shortcut('quit calibre', _('Quit calibre'),
                 default_keys=('Ctrl+Q',), action=self.quit_action)
@@ -319,7 +307,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         self.addAction(self.ctrl_esc_action)
         self.keyboard.register_shortcut('clear virtual library',
                 _('Clear the Virtual library'), default_keys=('Ctrl+Esc',),
-                action=self.ctrl_esc_action)
+                group=_('Virtual library'), action=self.ctrl_esc_action)
         self.ctrl_esc_action.triggered.connect(self.ctrl_esc)
 
         self.alt_esc_action = QAction(self)
@@ -328,6 +316,13 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
                 _('Clear the additional restriction'), default_keys=('Alt+Esc',),
                 action=self.alt_esc_action)
         self.alt_esc_action.triggered.connect(self.clear_additional_restriction)
+
+        self.ff_doc_editor_action = QAction(self)
+        self.addAction(self.ff_doc_editor_action)
+        self.keyboard.register_shortcut('open ff document editor',
+                _('Open the template documentation editor'), default_keys=(''),
+                action=self.ff_doc_editor_action)
+        self.ff_doc_editor_action.triggered.connect(self.open_ff_doc_editor)
 
         # ###################### Start spare job server ########################
         QTimer.singleShot(1000, self.create_spare_pool)
@@ -355,11 +350,11 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         if not gprefs.get('quick_start_guide_added', False):
             try:
                 add_quick_start_guide(self.library_view)
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
         for view in ('library', 'memory', 'card_a', 'card_b'):
-            v = getattr(self, '%s_view' % view)
+            v = getattr(self, f'{view}_view')
             v.selectionModel().selectionChanged.connect(self.update_status_bar)
             v.model().count_changed_signal.connect(self.update_status_bar)
 
@@ -390,7 +385,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         for ac in self.iactions.values():
             try:
                 ac.gui_layout_complete()
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
                 if ac.installation_type is PluginInstallationType.BUILTIN:
@@ -420,7 +415,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         for ac in self.iactions.values():
             try:
                 ac.initialization_complete()
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
                 if ac.installation_type is PluginInstallationType.BUILTIN:
@@ -461,6 +456,9 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
 
     def esc(self, *args):
         self.search.clear()
+
+    def open_ff_doc_editor(self):
+        FFDocEditor(False).exec()
 
     def focus_current_view(self):
         view = self.current_view()
@@ -644,7 +642,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
 
     def handle_cli_args(self, args):
         from urllib.parse import parse_qs, unquote, urlparse
-        if isinstance(args, string_or_bytes):
+        if isinstance(args, (str, bytes)):
             args = [args]
         files, urls = [], []
         for p in args:
@@ -753,7 +751,6 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
                 item_val = itemx[4:]
             else:
                 prints('Ignoring invalid item hexval', itemx, file=sys.stderr)
-                return
 
             def doit():
                 nonlocal item_id, item_val
@@ -863,12 +860,12 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
             try:
                 argv = json.loads(msg[len('launched:'):])
             except ValueError:
-                prints('Failed to decode message from other instance: %r' % msg)
+                prints(f'Failed to decode message from other instance: {msg!r}')
                 if DEBUG:
                     error_dialog(self, 'Invalid message',
                                  'Received an invalid message from other calibre instance.'
                                  ' Do you have multiple versions of calibre installed?',
-                                 det_msg='Invalid msg: %r' % msg, show=True)
+                                 det_msg=f'Invalid msg: {msg!r}', show=True)
                 argv = ()
             if isinstance(argv, (list, tuple)) and len(argv) > 1:
                 self.handle_cli_args(argv[1:])
@@ -878,6 +875,16 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
             self.activateWindow()
         elif msg.startswith('shutdown:'):
             self.quit(confirm_quit=False)
+        elif msg.startswith('save-annotations:'):
+            from calibre.gui2.viewer.integration import save_annotations_in_gui
+            try:
+                if not save_annotations_in_gui(self.library_broker, msg[len('save-annotations:'):]):
+                    print('Failed to update annotations for book from viewer, book or library not found.', file=sys.stderr)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                error_dialog(self, _('Failed to update annotations'), _(
+                    'Failed to update annotations in the database for the book being currently viewed.'), det_msg=traceback.format_exc(), show=True)
         elif msg.startswith('bookedited:'):
             parts = msg.split(':')[1:]
             try:
@@ -889,6 +896,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
                     db.format_metadata(book_id, fmt, allow_cache=False, update_db=True)
                     db.reindex_fts_book(book_id, fmt)
                     db.update_last_modified((book_id,))
+                    db.queue_pages_scan(book_id)
                     m.refresh_ids((book_id,))
                     db.event_dispatcher(db.EventType.book_edited, book_id, fmt)
             except Exception:
@@ -899,7 +907,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
             try:
                 data = json.loads(msg[len('web-store:'):])
             except ValueError:
-                prints('Failed to decode message from other instance: %r' % msg)
+                prints(f'Failed to decode message from other instance: {msg!r}')
             path = data['path']
             if data['tags']:
                 before = self.current_db.new_api.all_book_ids()
@@ -912,11 +920,14 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
                     tags += list(data['tags'])
                     self.current_db.new_api.set_field('tags', {book_id: tags})
         else:
-            prints('Ignoring unknown message from other instance: %r' % msg[:20])
+            prints(f'Ignoring unknown message from other instance: {msg[:20]!r}')
 
     def current_view(self):
         '''Convenience method that returns the currently visible view '''
-        idx = self.stack.currentIndex()
+        try:
+            idx = self.stack.currentIndex()
+        except AttributeError:
+            return None  # happens during startup
         if idx == 0:
             return self.library_view
         if idx == 1:
@@ -941,7 +952,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
                 olddb = self.library_view.model().db
                 if copy_structure:
                     default_prefs = dict(olddb.prefs)
-            except:
+            except Exception:
                 olddb = None
             if copy_structure and olddb is not None and default_prefs is not None:
                 default_prefs['field_metadata'] = olddb.new_api.field_metadata.all_metadata()
@@ -968,6 +979,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
                             return
                     else:
                         return
+            self._save_tb_state(gprefs)
             for action in self.iactions.values():
                 try:
                     action.library_about_to_change(olddb, db)
@@ -994,6 +1006,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
             if db.new_api.pref('virtual_lib_on_startup'):
                 self.apply_virtual_library(db.new_api.pref('virtual_lib_on_startup'))
             self.rebuild_vl_tabs()
+            self._restore_tb_expansion_state()  # Do this before plugins library_changed()
             for action in self.iactions.values():
                 try:
                     action.library_changed(db)
@@ -1038,6 +1051,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         self.book_details.reset_info()
         self.layout_container.tag_browser_button.setEnabled(location == 'library')
         self.layout_container.cover_browser_button.setEnabled(location == 'library')
+        self.vl_tabs.update_visibility()
         for action in self.iactions.values():
             action.location_selected(location)
         if location == 'library':
@@ -1116,7 +1130,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
                     msg = msg[msg.find('calibre.web.feeds.input.RecipeDisabled:'):]
                     msg = msg.partition(':')[-1]
                     d = error_dialog(self, _('Recipe Disabled'),
-                        '<p>%s</p>'%msg)
+                        f'<p>{msg}</p>')
                     d.setModal(False)
                     d.show()
                     self._modeless_dialogs.append(d)
@@ -1132,35 +1146,51 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
                             'error':error_dialog}.get(payload['level'],
                                     error_dialog)
                     d = d(self, payload['title'],
-                            '<p>%s</p>'%payload['msg'],
+                            '<p>{}</p>'.format(payload['msg']),
                             det_msg=payload['det_msg'])
                     d.setModal(False)
                     d.show()
                     self._modeless_dialogs.append(d)
                 return
-        except:
+        except Exception:
             pass
         if job.killed:
             return
         try:
             prints(job.details, file=sys.stderr)
-        except:
+        except Exception:
             pass
         if not minz:
             self.job_error_dialog.show_error(dialog_title,
                     _('<b>Failed</b>')+': '+str(job.description),
                     det_msg=job.details, retry_func=retry_func)
 
+    def _save_tb_state(self, gprefs):
+        self.tb_widget.save_state(gprefs)
+        if gprefs['tag_browser_restore_tree_expansion'] and self.current_db is not None:
+            tv_saved_expansions = gprefs.get('tags_view_saved_expansions', {})
+            tv_saved_expansions.update({self.current_db.library_id: self.tb_widget.get_expansion_state()})
+            gprefs['tags_view_saved_expansions'] = tv_saved_expansions
+
+    def _restore_tb_expansion_state(self):
+        if gprefs['tag_browser_restore_tree_expansion'] and self.current_db is not None:
+            tv_saved_expansions = gprefs.get('tags_view_saved_expansions', {})
+            self.tb_widget.restore_expansion_state(tv_saved_expansions.get(self.current_db.library_id))
+
     def read_settings(self):
         self.restore_geometry(gprefs, 'calibre_main_window_geometry', get_legacy_saved_geometry=lambda: config['main_window_geometry'])
         self.read_layout_settings()
+        self._restore_tb_expansion_state()
 
     def write_settings(self):
         with gprefs:  # Only write to gprefs once
             self.save_geometry(gprefs, 'calibre_main_window_geometry')
             dynamic.set('sort_history', self.library_view.model().sort_history)
             self.save_layout_state()
-            self.tb_widget.save_state()
+            self._save_tb_state(gprefs)
+
+    def restart(self):
+        self.quit(restart=True)
 
     def quit(self, checked=True, restart=False, debug_on_restart=False,
             confirm_quit=True, no_plugins_on_restart=False):
@@ -1168,12 +1198,12 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
             return
         if confirm_quit and not self.confirm_quit():
             return
+        self.restart_after_quit = restart
         try:
             self.shutdown()
-        except:
+        except Exception:
             import traceback
             traceback.print_exc()
-        self.restart_after_quit = restart
         self.debug_on_restart = debug_on_restart
         self.no_plugins_on_restart = no_plugins_on_restart
         if self.system_tray_icon is not None and self.restart_after_quit:
@@ -1205,11 +1235,15 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         return True
 
     def shutdown(self, write_settings=True):
+        from time import monotonic
+        st = monotonic()
+        timed_print('Shutdown starting...')
         self.shutting_down = True
         if hasattr(self.library_view, 'connect_to_book_display_timer'):
             self.library_view.connect_to_book_display_timer.stop()
         self.shutdown_started.emit()
         self.show_shutdown_message()
+        timed_print('Shutdown message shown...')
         self.server_change_notification_timer.stop()
         self.extra_files_watcher.clear()
         try:
@@ -1223,11 +1257,14 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
                 _('Running database shutdown plugins. This could take a few seconds...'))
 
         self.grid_view.shutdown()
+        timed_print('Grid view shutdown')
+        self.bookshelf_view.shutdown()
+        timed_print('Bookshelf view shutdown')
         db = None
         try:
             db = self.library_view.model().db
             cf = db.clean
-        except:
+        except Exception:
             pass
         else:
             cf()
@@ -1238,6 +1275,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
             db.prefs.write_serialized(prefs['library_path'])
         for action in self.iactions.values():
             action.shutting_down()
+        timed_print('Actions shutdown')
         if write_settings:
             self.write_settings()
         if getattr(self, 'update_checker', None):
@@ -1247,6 +1285,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         self.job_manager.threaded_server.close()
         self.device_manager.keep_going = False
         self.auto_adder.stop()
+        timed_print('Various services shutdown')
         # Do not report any errors that happen after the shutdown
         # We cannot restore the original excepthook as that causes PyQt to
         # call abort() on unhandled exceptions
@@ -1255,43 +1294,51 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         def eh(t, v, tb):
             try:
                 traceback.print_exception(t, v, tb, file=sys.stderr)
-            except:
+            except Exception:
                 pass
         sys.excepthook = eh
 
         mb = self.library_view.model().metadata_backup
         if mb is not None:
             mb.stop()
+        timed_print('Metadata backup shutdown')
 
         self.library_view.model().close()
+        timed_print('Current database closed')
 
         try:
-            try:
-                if self.content_server is not None:
-                    # If the Content server has any sockets being closed then
-                    # this can take quite a long time (minutes). Tell the user that it is
-                    # happening.
-                    self.show_shutdown_message(
-                        _('Shutting down the Content server. This could take a while...'))
-                    s = self.content_server
-                    self.content_server = None
-                    s.exit()
-            except:
-                pass
+            if self.content_server is not None:
+                # If the Content server has any sockets being closed then
+                # this can take quite a long time (minutes). Tell the user that it is
+                # happening.
+                self.show_shutdown_message(
+                    _('Shutting down the Content server. This could take a while...'))
+                s = self.content_server
+                self.content_server = None
+                s.exit()
+                timed_print('Content server shutdown')
         except KeyboardInterrupt:
             pass
+        except Exception:
+            pass
         self.hide_windows()
+        timed_print('Windows hidden')
         if self._spare_pool is not None:
             self._spare_pool.shutdown()
         from calibre.scraper.simple import cleanup_overseers
         wait_for_cleanup = cleanup_overseers()
         from calibre.live import async_stop_worker
         wait_for_stop = async_stop_worker()
-        time.sleep(2)
+        timed_print('Waiting for overseers and live to shutdown')
         self.istores.join()
         wait_for_cleanup()
         wait_for_stop()
         self.shutdown_completed.emit()
+        timed_print(f'Shutdown complete in {monotonic()-st:.2f}, quitting...')
+        try:
+            sys.stdout.flush()  # Make sure any buffered prints are written for debug mode
+        except Exception:
+            pass
         return True
 
     def run_wizard(self, *args):
@@ -1300,7 +1347,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
             self.restart_after_quit = True
             try:
                 self.shutdown(write_settings=False)
-            except:
+            except Exception:
                 pass
             QApplication.instance().quit()
 
@@ -1317,15 +1364,14 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
                 dynamic['systray_msg'] = True
             self.hide_windows()
             e.ignore()
+        elif self.confirm_quit():
+            try:
+                self.shutdown(write_settings=False)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+            e.accept()
         else:
-            if self.confirm_quit():
-                try:
-                    self.shutdown(write_settings=False)
-                except:
-                    import traceback
-                    traceback.print_exc()
-                e.accept()
-            else:
-                e.ignore()
+            e.ignore()
 
     # }}}

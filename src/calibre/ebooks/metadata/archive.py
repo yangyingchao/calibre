@@ -7,6 +7,7 @@ __docformat__ = 'restructuredtext en'
 
 import os
 from contextlib import closing
+from posixpath import basename
 
 from calibre.customize import FileTypePlugin
 from calibre.utils.localization import canonicalize_lang
@@ -23,7 +24,7 @@ def archive_type(stream):
     from calibre.utils.zipfile import stringFileHeader
     try:
         pos = stream.tell()
-    except:
+    except Exception:
         pos = 0
     id_ = stream.read(4)
     ans = None
@@ -60,6 +61,7 @@ class KPFExtract(FileTypePlugin):
                 of.write(zf.read(candidates[0]))
         return of.name
 
+
 class RAR:
 
     def __init__(self, archive):
@@ -93,6 +95,20 @@ class SevenZip:
         return self.zf.read((fname,))[fname].read()
 
 
+def fname_ok(fname):
+    fname = fname.replace('\\', '/')
+    bn = basename(fname).lower()
+    if bn == 'thumbs.db':
+        return False
+    if '.' not in bn:
+        return False
+    if bn.rpartition('.')[-1] in {'diz', 'nfo'}:
+        return False
+    if '__MACOSX' in fname.split('/'):
+        return False
+    return True
+
+
 class ArchiveExtract(FileTypePlugin):
     name = 'Archive Extract'
     author = 'Kovid Goyal'
@@ -116,18 +132,6 @@ class ArchiveExtract(FileTypePlugin):
             from calibre.utils.zipfile import ZipFile
             zf = ZipFile(archive, 'r')
             comic_ext = 'cbz'
-
-        def fname_ok(fname):
-            bn = os.path.basename(fname).lower()
-            if bn == 'thumbs.db':
-                return False
-            if '.' not in bn:
-                return False
-            if bn.rpartition('.')[-1] in {'diz', 'nfo'}:
-                return False
-            if '__MACOSX' in fname.split('/'):
-                return False
-            return True
 
         with closing(zf):
             fnames = zf.namelist()
@@ -242,7 +246,7 @@ def get_comic_images(path, tdir, first=1, last=0):  # first and last use 1 based
     if fmt == 'rar':
         from calibre.utils.unrar import headers
         for h in headers(path):
-            items[h['filename']] = lambda : partial(h.get, 'file_time', 0)
+            items[h['filename']] = lambda: partial(h.get, 'file_time', 0)
     else:
         from zipfile import ZipFile
         with ZipFile(path) as zf:

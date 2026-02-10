@@ -14,6 +14,7 @@ from functools import partial
 from calibre.ebooks.oeb.polish.container import get_container
 from calibre.ebooks.oeb.polish.cover import set_cover
 from calibre.ebooks.oeb.polish.css import remove_unused_css
+from calibre.ebooks.oeb.polish.download import download_external_resources, get_external_resources, replace_resources
 from calibre.ebooks.oeb.polish.embed import embed_all_fonts
 from calibre.ebooks.oeb.polish.hyphenation import add_soft_hyphens, remove_soft_hyphens
 from calibre.ebooks.oeb.polish.images import compress_images
@@ -22,8 +23,8 @@ from calibre.ebooks.oeb.polish.replace import smarten_punctuation
 from calibre.ebooks.oeb.polish.stats import StatsCollector
 from calibre.ebooks.oeb.polish.subset import iter_subsettable_fonts, subset_all_fonts
 from calibre.ebooks.oeb.polish.upgrade import upgrade_book
+from calibre.utils.localization import ngettext
 from calibre.utils.logging import Log
-from polyglot.builtins import iteritems
 
 ALL_OPTS = {
     'embed': False,
@@ -38,6 +39,7 @@ ALL_OPTS = {
     'upgrade_book': False,
     'add_soft_hyphens': False,
     'remove_soft_hyphens': False,
+    'download_external_resources': False,
 }
 
 CUSTOMIZATION = {
@@ -48,7 +50,7 @@ CUSTOMIZATION = {
     'remove_ncx': True,
 }
 
-SUPPORTED = {'EPUB', 'AZW3'}
+SUPPORTED = {'EPUB', 'AZW3', 'KEPUB'}
 
 # Help {{{
 HELP = {'about': _(
@@ -64,7 +66,7 @@ changes needed for the desired effect.</p>
 <p>You should use this tool as the last step in your e-book creation process.</p>
 {0}
 <p>Note that polishing only works on files in the %s formats.</p>\
-''')%_(' or ').join(sorted('<b>%s</b>'%x for x in SUPPORTED)),
+''')%_(' or ').join(sorted(f'<b>{x}</b>' for x in SUPPORTED)),
 
 'embed': _('''\
 <p>Embed all fonts that are referenced in the document and are not already embedded.
@@ -133,6 +135,12 @@ better when the text is justified, in readers that do not support hyphenation.</
 'remove_soft_hyphens': _('''\
 <p>Remove soft hyphens from all text in the book.</p>
 '''),
+
+'download_external_resources': _('''\
+<p>Download external resources such as images, stylesheets, etc. that point to URLs instead of files in the book.
+All such resources will be downloaded and added to the book so that the book no longer references any external resources.
+</p>
+'''),
 }
 
 
@@ -146,7 +154,7 @@ def hfix(name, raw):
     return raw
 
 
-CLI_HELP = {x:hfix(x, re.sub('<.*?>', '', y)) for x, y in iteritems(HELP)}
+CLI_HELP = {x:hfix(x, re.sub(r'<.*?>', '', y)) for x, y in HELP.items()}
 # }}}
 
 
@@ -159,6 +167,30 @@ def update_metadata(ebook, new_opf):
         stream.seek(0)
         stream.truncate()
         stream.write(opfbytes)
+
+
+def download_resources(ebook, report) -> bool:
+    changed = False
+    url_to_referrer_map = get_external_resources(ebook)
+    if url_to_referrer_map:
+        n = len(url_to_referrer_map)
+        report(ngettext('Downloading one external resource', 'Downloading {} external resources', n).format(n))
+        replacements, failures = download_external_resources(ebook, url_to_referrer_map)
+        if not failures:
+            report(_('Successfully downloaded all resources'))
+        else:
+            tb = [f'{url}\n\t{err}\n' for url, err in failures.items()]
+            if replacements:
+                report(_('Failed to download some resources, see details below:'))
+            else:
+                report(_('Failed to download all resources, see details below:'))
+            report(tb)
+        if replacements:
+            if replace_resources(ebook, url_to_referrer_map, replacements):
+                changed = True
+    else:
+        report(_('No external resources found in book'))
+    return changed
 
 
 def polish_one(ebook, opts, report, customization=None):
@@ -267,12 +299,22 @@ def polish_one(ebook, opts, report, customization=None):
         add_soft_hyphens(ebook, report)
         changed = True
 
+    if opts.download_external_resources:
+        rt(_('Downloading external resources'))
+        try:
+            download_resources(ebook, report)
+        except Exception:
+            import traceback
+            report(_('Failed to download resources with error:'))
+            report(traceback.format_exc())
+        report('')
+
     return changed
 
 
 def polish(file_map, opts, log, report):
     st = time.time()
-    for inbook, outbook in iteritems(file_map):
+    for inbook, outbook in file_map.items():
         report(_('## Polishing: %s')%(inbook.rpartition('.')[-1].upper()))
         ebook = get_container(inbook, log)
         polish_one(ebook, opts, report)
@@ -337,6 +379,7 @@ def option_parser():
     o('--add-soft-hyphens', '-H', help=CLI_HELP['add_soft_hyphens'])
     o('--remove-soft-hyphens', help=CLI_HELP['remove_soft_hyphens'])
     o('--upgrade-book', '-U', help=CLI_HELP['upgrade_book'])
+    o('--download-external-resources', '-d', help=CLI_HELP['download_external_resources'])
 
     o('--verbose', help=_('Produce more verbose output, useful for debugging.'))
 
@@ -363,7 +406,7 @@ def main(args=None):
         inbook, outbook = args
 
     popts = ALL_OPTS.copy()
-    for k, v in iteritems(popts):
+    for k, v in popts.items():
         popts[k] = getattr(opts, k, None)
 
     O = namedtuple('Options', ' '.join(popts))

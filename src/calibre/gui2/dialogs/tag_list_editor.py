@@ -119,6 +119,7 @@ class CountTableWidgetItem(QTableWidgetItem):
 
     def __init__(self, count):
         QTableWidgetItem.__init__(self, str(count))
+        self.setTextAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter)
         self._count = count
 
     def __ge__(self, other):
@@ -150,7 +151,7 @@ class NotesTableWidgetItem(QTableWidgetItem):
         return self._sort_val < other._sort_val
 
 
-class NotesUtilities():
+class NotesUtilities:
 
     def __init__(self, table, category, item_id_getter):
         self.table = table
@@ -184,16 +185,15 @@ class NotesUtilities():
                 else:
                     item.setIcon(QIcon.cached_icon('notes.png'))
                     item.set_sort_val(NotesTableWidgetItem.UNCHANGED)
+            elif has_value:
+                item.setIcon(QIcon.cached_icon('modified.png'))
+                item.set_sort_val(NotesTableWidgetItem.EDITED)
+            elif not bool(self.modified_notes[id_]):
+                item.setIcon(QIcon.cached_icon())
+                item.set_sort_val(NotesTableWidgetItem.EMPTY)
             else:
-                if has_value:
-                    item.setIcon(QIcon.cached_icon('modified.png'))
-                    item.set_sort_val(NotesTableWidgetItem.EDITED)
-                elif not bool(self.modified_notes[id_]):
-                    item.setIcon(QIcon.cached_icon())
-                    item.set_sort_val(NotesTableWidgetItem.EMPTY)
-                else:
-                    item.setIcon(QIcon.cached_icon('trash.png'))
-                    item.set_sort_val(NotesTableWidgetItem.DELETED)
+                item.setIcon(QIcon.cached_icon('trash.png'))
+                item.set_sort_val(NotesTableWidgetItem.DELETED)
         self.table.cellChanged.emit(item.row(), item.column())
         self.table.itemChanged.emit(item)
 
@@ -344,6 +344,7 @@ class TagListEditor(QDialog, Ui_TagListEditor):
                  ttm_is_first_letter=False, category=None, fm=None, link_map=None):
         QDialog.__init__(self, window)
         Ui_TagListEditor.__init__(self)
+        self.table_column_widths = None
         self.setupUi(self)
 
         from calibre.gui2.ui import get_gui
@@ -351,7 +352,7 @@ class TagListEditor(QDialog, Ui_TagListEditor):
         self.search_box.setMinimumContentsLength(25)
         if category is not None:
             item_map = get_gui().current_db.new_api.get_item_name_map(category)
-            self.original_links = {item_map[k]:v for k,v in link_map.items()}
+            self.original_links = {item_map[k]:v for k,v in link_map.items() if k in item_map}
             self.current_links = copy.copy(self.original_links)
         else:
             self.original_links = {}
@@ -403,8 +404,9 @@ class TagListEditor(QDialog, Ui_TagListEditor):
         if ac is not None:
             ac.triggered.connect(self.clear_search)
         self.search_box.textChanged.connect(self.search_text_changed)
-        self.search_button.clicked.connect(self.do_search)
+        self.search_button.clicked.connect(partial(self.do_search, inverted=False))
         self.search_button.setDefault(True)
+        self.search_inverted_button.clicked.connect(partial(self.do_search, inverted=True))
 
         self.filter_box.initialize('tag_list_filter_box_' + cat_name)
         le = self.filter_box.lineEdit()
@@ -412,7 +414,9 @@ class TagListEditor(QDialog, Ui_TagListEditor):
         if ac is not None:
             ac.triggered.connect(self.clear_filter)
         le.returnPressed.connect(self.do_filter)
-        self.filter_button.clicked.connect(self.do_filter)
+        self.filter_button.clicked.connect(partial(self.do_filter, inverted=False))
+        self.filter_inverted_button.clicked.connect(partial(self.do_filter, inverted=True))
+        self.filter_inverted = False
         self.show_button_layout.setSpacing(0)
         self.show_button_layout.setContentsMargins(0, 0, 0, 0)
         self.apply_all_checkbox.setContentsMargins(0, 0, 0, 0)
@@ -511,7 +515,7 @@ class TagListEditor(QDialog, Ui_TagListEditor):
         ca.setEnabled(not item.is_deleted)
 
         if self.category is not None:
-            ca = m.addAction(_("Search the library for {0}").format(item_name))
+            ca = m.addAction(_('Search the library for {0}').format(item_name))
             ca.setIcon(QIcon.cached_icon('lt.png'))
             ca.triggered.connect(partial(self.search_for_books, item))
             ca.setEnabled(not item.is_deleted)
@@ -598,14 +602,14 @@ class TagListEditor(QDialog, Ui_TagListEditor):
             return 'virtual_library'
         return None
 
-    def do_search(self):
+    def do_search(self, inverted=False):
         self.not_found_label.setVisible(False)
         find_text = str(self.search_box.currentText())
         if not find_text:
             return
-        for _ in range(0, self.table.rowCount()):
+        for _ in range(self.table.rowCount()):
             r = self.search_item_row = (self.search_item_row + 1) % self.table.rowCount()
-            if self.string_contains(find_text, self.table.item(r, VALUE_COLUMN).text()):
+            if self.string_contains(find_text, self.table.item(r, VALUE_COLUMN).text()) != inverted:
                 self.table.setCurrentItem(self.table.item(r, VALUE_COLUMN))
                 self.table.setFocus(Qt.FocusReason.OtherFocusReason)
                 return
@@ -629,6 +633,7 @@ class TagListEditor(QDialog, Ui_TagListEditor):
         # If we don't then the old items remain even if replaced by setItem().
         # I'm not sure if this is standard Qt behavior or behavior triggered by
         # something in this class, but replacing the table fixes it.
+        self.table_column_widths = gprefs.get('tag_list_editor_table_widths', None)
         if self.table is not None:
             self.save_geometry()
             self.central_layout.removeWidget(self.table)
@@ -684,7 +689,6 @@ class TagListEditor(QDialog, Ui_TagListEditor):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.EditKeyPressed)
 
         self.restore_geometry(gprefs, 'tag_list_editor_dialog_geometry')
-        self.table_column_widths = gprefs.get('tag_list_editor_table_widths', None)
         if self.table_column_widths is not None:
             for col,width in enumerate(self.table_column_widths):
                 self.table.setColumnWidth(col, width)
@@ -715,7 +719,7 @@ class TagListEditor(QDialog, Ui_TagListEditor):
         self.all_tags = {}
         filter_text = icu_lower(str(self.filter_box.text()))
         for k,v,count in data:
-            if not filter_text or self.string_contains(filter_text, icu_lower(v)):
+            if not filter_text or self.string_contains(filter_text, icu_lower(v)) != self.filter_inverted:
                 self.all_tags[v] = {'key': k, 'count': count, 'cur_name': v,
                                    'is_deleted': k in self.to_delete}
                 self.original_names[k] = v
@@ -729,6 +733,13 @@ class TagListEditor(QDialog, Ui_TagListEditor):
             tags = self.ordered_tags
 
         select_item = None
+        tooltips = (  # must be in the same order as the columns in the table
+             _('Name of the item'),
+             _('Count of books with this item'),
+             _('Value of the item before it was edited'),
+             _('The link (URL) associated with this item'),
+             _('Whether the item has a note. The icon changes if the note was created or edited')
+        )
         with block_signals(self.table):
             self.name_col = QTableWidgetItem(self.category_name)
             self.table.setHorizontalHeaderItem(VALUE_COLUMN, self.name_col)
@@ -741,6 +752,9 @@ class TagListEditor(QDialog, Ui_TagListEditor):
             if self.supports_notes:
                 self.notes_col = QTableWidgetItem(_('Notes'))
                 self.table.setHorizontalHeaderItem(4, self.notes_col)
+            for i,tt in enumerate(tooltips):
+                header_item = self.table.horizontalHeaderItem(i)
+                header_item.setToolTip(tt)
 
             self.table.setRowCount(len(tags))
             if self.supports_notes:
@@ -832,12 +846,13 @@ class TagListEditor(QDialog, Ui_TagListEditor):
         self.filter_box.setText(txt)
         self.do_filter()
 
-    def do_filter(self):
+    def do_filter(self, inverted=False):
+        self.filter_inverted = inverted
         self.fill_in_table(None, None, False)
 
     def table_column_resized(self, *args):
         self.table_column_widths = []
-        for c in range(0, self.table.columnCount()):
+        for c in range(self.table.columnCount()):
             self.table_column_widths.append(self.table.columnWidth(c))
 
     def resizeEvent(self, *args):
@@ -851,7 +866,7 @@ class TagListEditor(QDialog, Ui_TagListEditor):
             # widths will be remembered
             w = self.table.width() - 25 - self.table.verticalHeader().width()
             w //= self.table.columnCount()
-            for c in range(0, self.table.columnCount()):
+            for c in range(self.table.columnCount()):
                 self.table.setColumnWidth(c, w)
 
     def start_editing(self, on_row):
@@ -904,8 +919,8 @@ class TagListEditor(QDialog, Ui_TagListEditor):
         new_text = str(edited_item.text())
         if self.is_enumerated and new_text not in self.enum_permitted_values:
             error_dialog(self, _('Item is not a permitted value'), '<p>' + _(
-                "This column has a fixed set of permitted values. The entered "
-                "text must be one of ({0}).").format(', '.join(self.enum_permitted_values)) +
+                'This column has a fixed set of permitted values. The entered '
+                'text must be one of ({0}).').format(', '.join(self.enum_permitted_values)) +
                 '</p>', show=True)
             with block_signals(self.table):
                 edited_item.setText(self.text_before_editing)

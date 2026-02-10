@@ -65,6 +65,19 @@ class TestCopyFiles(unittest.TestCase):
         contents = set(os.listdir(self.tdir)) - {'base', 'src'}
         self.ae(contents, {'One', 'three'})
 
+    def test_pread_all(self):
+        from calibre_extensions.speedup import pread_all
+        n = os.path.join(self.tdir, 'base')
+        data = os.urandom(1137*1024)
+        with open(n, 'wb') as f:
+            f.write(data)
+        with open(n, 'rb') as f:
+            for n, offset in {
+                0:0, 3:0, 13:13
+            }.items():
+                self.assertEqual(data[offset:offset+n], pread_all(f.fileno(), n, offset))
+            self.assertEqual(data, pread_all(f.fileno(), len(data)))
+
     def test_copying_of_trees(self):
         src, dest = self.s(), self.d()
         copy_tree(src, dest)
@@ -118,6 +131,7 @@ class TestCopyFiles(unittest.TestCase):
                 self.ae(set(os.listdir(self.d())), {'sub', 'lockdir'})
                 self.assertFalse(tuple(walk(self.d())))
             self.ae(before, frozenset(walk(src)), 'Source files were deleted despite there being an error')
+
 
 def find_tests():
     return unittest.defaultTestLoader.loadTestsFromTestCase(TestCopyFiles)

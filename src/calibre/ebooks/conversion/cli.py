@@ -18,7 +18,6 @@ from calibre.ebooks.conversion import ConversionUserFeedBack
 from calibre.utils.config import OptionParser
 from calibre.utils.localization import localize_user_manual_link
 from calibre.utils.logging import Log
-from polyglot.builtins import iteritems
 
 USAGE = '%prog ' + _('''\
 input_file output_file [options]
@@ -88,15 +87,14 @@ def option_recommendation_to_cli_option(add_option, rec):
     switches = ['-'+opt.short_switch] if opt.short_switch else []
     switches.append('--'+opt.long_switch)
     attrs = dict(dest=opt.name, help=opt.help,
-                     choices=opt.choices, default=rec.recommended_value)
+                 choices=opt.choices, default=rec.recommended_value)
     if isinstance(rec.recommended_value, bool):
         attrs['action'] = 'store_false' if rec.recommended_value else \
                           'store_true'
-    else:
-        if isinstance(rec.recommended_value, numbers.Integral):
-            attrs['type'] = 'int'
-        if isinstance(rec.recommended_value, numbers.Real):
-            attrs['type'] = 'float'
+    elif isinstance(rec.recommended_value, numbers.Integral):
+        attrs['type'] = 'int'
+    elif isinstance(rec.recommended_value, numbers.Real):
+        attrs['type'] = 'float'
 
     if opt.long_switch == 'verbose':
         attrs['action'] = 'count'
@@ -121,6 +119,14 @@ def option_recommendation_to_cli_option(add_option, rec):
             ' dialog. Once you create the rules, you can use the "Export" button'
             ' to save them to a file.'
         )
+    elif opt.name == 'recipe_specific_option':
+        attrs['action'] = 'append'
+        attrs['help'] = _(
+            'Recipe specific options. Syntax is option_name:value. For example:'
+            ' {example}. Can be specified multiple'
+            ' times to set different options. To see a list of all available options'
+            ' for a recipe, use {list}.'
+        ).format(example='--recipe-specific-option=date:2030-11-31', list='--recipe-specific-option=list')
     if opt.name in DEFAULT_TRUE_OPTIONS and rec.recommended_value is True:
         switches = ['--disable-'+opt.long_switch]
     add_option(Option(*switches, **attrs))
@@ -143,10 +149,10 @@ def recipe_test(option, opt_str, value, parser):
 
     for arg in parser.rargs:
         # stop on --foo like options
-        if arg[:2] == "--":
+        if arg[:2] == '--':
             break
         # stop on -a, but not on -3 or -3.0
-        if arg[:1] == "-" and len(arg) > 1 and not floatable(arg):
+        if arg[:1] == '-' and len(arg) > 1 and not floatable(arg):
             break
         try:
             value.append(int(arg))
@@ -190,13 +196,13 @@ def add_input_output_options(parser, plumber):
 
 def add_pipeline_options(parser, plumber):
     groups = OrderedDict((
-              ('' , ('',
+              ('', ('',
                     [
                      'input_profile',
                      'output_profile',
                      ]
                     )),
-              (_('LOOK AND FEEL') , (
+              (_('LOOK AND FEEL'), (
                   _('Options to control the look and feel of the output'),
                   [
                       'base_font_size', 'disable_font_rescaling',
@@ -215,7 +221,7 @@ def add_pipeline_options(parser, plumber):
                   ]
                   )),
 
-              (_('HEURISTIC PROCESSING') , (
+              (_('HEURISTIC PROCESSING'), (
                   _('Modify the document text and structure using common'
                      ' patterns. Disabled by default. Use %(en)s to enable. '
                      ' Individual actions can be disabled with the %(dis)s options.')
@@ -223,7 +229,7 @@ def add_pipeline_options(parser, plumber):
                   ['enable_heuristics'] + HEURISTIC_OPTIONS
                   )),
 
-              (_('SEARCH AND REPLACE') , (
+              (_('SEARCH AND REPLACE'), (
                  _('Modify the document text and structure using user defined patterns.'),
                  [
                      'sr1_search', 'sr1_replace',
@@ -233,17 +239,17 @@ def add_pipeline_options(parser, plumber):
                  ]
               )),
 
-              (_('STRUCTURE DETECTION') , (
+              (_('STRUCTURE DETECTION'), (
                   _('Control auto-detection of document structure.'),
                   [
                       'chapter', 'chapter_mark',
                       'prefer_metadata_cover', 'remove_first_image',
                       'insert_metadata', 'page_breaks_before',
-                      'remove_fake_margins', 'start_reading_at',
+                      'remove_fake_margins', 'start_reading_at', 'add_alt_text_to_img',
                   ]
                   )),
 
-              (_('TABLE OF CONTENTS') , (
+              (_('TABLE OF CONTENTS'), (
                   _('Control the automatic generation of a Table of Contents. By '
                   'default, if the source file has a Table of Contents, it will '
                   'be used in preference to the automatically generated one.'),
@@ -254,7 +260,7 @@ def add_pipeline_options(parser, plumber):
                   ]
                   )),
 
-              (_('METADATA') , (_('Options to set metadata in the output'),
+              (_('METADATA'), (_('Options to set metadata in the output'),
                             plumber.metadata_option_names + ['read_metadata_from_opf'],
                             )),
               (_('DEBUG'), (_('Options to help with debugging the conversion'),
@@ -265,7 +271,7 @@ def add_pipeline_options(parser, plumber):
 
               ))
 
-    for group, (desc, options) in iteritems(groups):
+    for group, (desc, options) in groups.items():
         if group:
             group = OptionGroup(parser, group, desc)
             parser.add_option_group(group)
@@ -294,7 +300,7 @@ class ProgressBar:
     def __call__(self, frac, msg=''):
         if msg:
             percent = int(frac*100)
-            self.log('%d%% %s'%(percent, msg))
+            self.log(f'{percent}% {msg}')
 
 
 def create_option_parser(args, log):
@@ -310,9 +316,9 @@ def create_option_parser(args, log):
         for title in titles:
             try:
                 log('\t'+title)
-            except:
+            except Exception:
                 log('\t'+repr(title))
-        log('%d recipes available'%len(titles))
+        log(f'{len(titles)} recipes available')
         raise SystemExit(0)
 
     parser = option_parser()
@@ -339,7 +345,7 @@ def create_option_parser(args, log):
 
 
 def abspath(x):
-    if x.startswith('http:') or x.startswith('https:'):
+    if x.startswith(('http:', 'https:')):
         return x
     return os.path.abspath(os.path.expanduser(x))
 
@@ -362,9 +368,8 @@ def read_sr_patterns(path, log=None):
             line = line.replace('\ue123', '\n')
             try:
                 re.compile(line)
-            except:
-                msg = 'Invalid regular expression: %r from file: %r'%(
-                        line, path)
+            except Exception:
+                msg = f'Invalid regular expression: {line!r} from file: {path!r}'
                 if log is not None:
                     log.error(msg)
                     raise SystemExit(1)

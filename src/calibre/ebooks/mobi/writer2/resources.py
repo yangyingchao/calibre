@@ -16,23 +16,24 @@ from calibre.ebooks.mobi.utils import mobify_image, rescale_image, write_font_re
 from calibre.ebooks.oeb.base import OEB_RASTER_IMAGES
 from calibre.ptempfile import PersistentTemporaryFile
 from calibre.utils.imghdr import what
-from polyglot.builtins import iteritems
 
-PLACEHOLDER_GIF = b'GIF89a\x01\x00\x01\x00\xf0\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00!\xfe calibre-placeholder-gif-for-azw3\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'  # noqa
+PLACEHOLDER_GIF = b'GIF89a\x01\x00\x01\x00\xf0\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00!\xfe calibre-placeholder-gif-for-azw3\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'  # noqa: E501
 
 
 def process_jpegs_for_amazon(data: bytes) -> bytes:
     img = Image.open(BytesIO(data))
     if img.format == 'JPEG':
         # Amazon's MOBI renderer can't render JPEG images without JFIF metadata
-        # and images with EXIF data dont get displayed on the cover screen
+        # and images with EXIF data don't get displayed on the cover screen
         changed = not img.info
+        has_exif = False
         if hasattr(img, 'getexif'):
             exif = img.getexif()
+            has_exif = bool(exif)
             if exif.get(0x0112) in (2,3,4,5,6,7,8):
                 changed = True
                 img = ImageOps.exif_transpose(img)
-        if changed:
+        if changed or has_exif:
             out = BytesIO()
             img.save(out, 'JPEG')
             data = out.getvalue()
@@ -112,7 +113,7 @@ class Resources:
             try:
                 data = self.process_image(item.data)
             except Exception:
-                self.log.warn('Bad image file %r' % item.href)
+                self.log.warn(f'Bad image file {item.href!r}')
                 continue
             else:
                 if mh_href and item.href == mh_href:
@@ -122,7 +123,7 @@ class Resources:
                 self.image_indices.add(len(self.records))
                 self.records.append(data)
                 self.item_map[item.href] = index
-                self.mime_map[item.href] = 'image/%s'%what(None, data)
+                self.mime_map[item.href] = f'image/{what(None, data)}'
                 index += 1
 
                 if cover_href and item.href == cover_href:
@@ -130,7 +131,7 @@ class Resources:
                     self.used_image_indices.add(self.cover_offset)
                     try:
                         tdata = rescale_image(data, dimen=MAX_THUMB_DIMEN, maxsizeb=MAX_THUMB_SIZE)
-                    except:
+                    except Exception:
                         self.log.warn('Failed to generate thumbnail')
                     else:
                         self.image_indices.add(len(self.records))
@@ -166,8 +167,8 @@ class Resources:
                 continue
             try:
                 data = self.process_image(item.data)
-            except:
-                self.log.warn('Bad image file %r' % item.href)
+            except Exception:
+                self.log.warn(f'Bad image file {item.href!r}')
             else:
                 self.records.append(data)
                 self.item_map[item.href] = len(self.records)
@@ -176,7 +177,7 @@ class Resources:
 
     def serialize(self, records, used_images):
         used_image_indices = self.used_image_indices | {
-                v-1 for k, v in iteritems(self.item_map) if k in used_images}
+                v-1 for k, v in self.item_map.items() if k in used_images}
         for i in self.image_indices-used_image_indices:
             self.records[i] = PLACEHOLDER_GIF
         records.extend(self.records)

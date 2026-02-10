@@ -16,14 +16,14 @@ from calibre.ebooks.oeb.polish.check.base import INFO, WARN, BaseError
 from calibre.ebooks.oeb.polish.pretty import pretty_script_or_style as fix_style_tag
 from calibre.ebooks.oeb.polish.utils import PositionFinder, guess_type
 from calibre.utils.xml_parse import safe_xml_fromstring
-from polyglot.builtins import error_message, iteritems
+from polyglot.builtins import error_message
 
 HTML_ENTITTIES = frozenset(html5_entities)
 XML_ENTITIES = {'lt', 'gt', 'amp', 'apos', 'quot'}
 ALL_ENTITIES = HTML_ENTITTIES | XML_ENTITIES
 fix_style_tag
 
-replace_pat = re.compile('&(%s);' % '|'.join(re.escape(x) for x in sorted(HTML_ENTITTIES - XML_ENTITIES)))
+replace_pat = re.compile('&({});'.format('|'.join(re.escape(x) for x in sorted(HTML_ENTITTIES - XML_ENTITIES))))
 mismatch_pat = re.compile(r'tag mismatch:.+?line (\d+).+?line \d+')
 
 
@@ -102,10 +102,10 @@ class NamedEntities(BaseError):
         changed = False
         from calibre.ebooks.oeb.polish.check.main import XML_TYPES
         check_types = XML_TYPES | OEB_DOCS
-        for name, mt in iteritems(container.mime_map):
+        for name, mt in container.mime_map.items():
             if mt in check_types:
                 raw = container.raw_data(name)
-                nraw = replace_pat.sub(lambda m:html5_entities[m.group(1)], raw)
+                nraw = replace_pat.sub(lambda m: html5_entities[m.group(1)], raw)
                 if raw != nraw:
                     changed = True
                     with container.open(name, 'wb') as f:
@@ -146,7 +146,7 @@ class EscapedName(BaseError):
         c = 0
         while self.sname in all_names:
             c += 1
-            self.sname = '%s_%d.%s' % (bn, c, ext)
+            self.sname = f'{bn}_{c}.{ext}'
         rename_files(container, {self.name:self.sname})
         return True
 
@@ -154,12 +154,11 @@ class EscapedName(BaseError):
 class TooLarge(BaseError):
 
     level = INFO
-    MAX_SIZE = 260 *1024
-    HELP = _('This HTML file is larger than %s. Too large HTML files can cause performance problems'
-             ' on some e-book readers. Consider splitting this file into smaller sections.') % human_readable(MAX_SIZE)
 
-    def __init__(self, name):
+    def __init__(self, name, max_size):
         BaseError.__init__(self, _('File too large'), name)
+        self.HELP = _('This HTML file is larger than {}. Too large HTML files can cause performance problems'
+                ' on some e-book readers. Consider splitting this file into smaller sections.').format(human_readable(max_size))
 
 
 class BadEntity(BaseError):
@@ -244,10 +243,10 @@ class EntitityProcessor:
         return b' ' * len(m.group())
 
 
-def check_html_size(name, mt, raw):
+def check_html_size(name, mt, raw, max_size=0):
     errors = []
-    if len(raw) > TooLarge.MAX_SIZE:
-        errors.append(TooLarge(name))
+    if max_size and len(raw) > max_size:
+        errors.append(TooLarge(name, max_size))
     return errors
 
 
@@ -410,7 +409,7 @@ valid_id = re.compile(r'^[a-zA-Z][a-zA-Z0-9_:.-]*$')
 def check_ids(container):
     errors = []
     mts = set(OEB_DOCS) | {guess_type('a.opf'), guess_type('a.ncx')}
-    for name, mt in iteritems(container.mime_map):
+    for name, mt in container.mime_map.items():
         if mt in mts:
             root = container.parsed(name)
             seen_ids = {}
@@ -425,13 +424,13 @@ def check_ids(container):
                     seen_ids[eid] = elem.sourceline
                 if eid and valid_id.match(eid) is None:
                     errors.append(InvalidId(name, elem.sourceline, eid))
-            errors.extend(DuplicateId(name, eid, locs) for eid, locs in iteritems(dups))
+            errors.extend(DuplicateId(name, eid, locs) for eid, locs in dups.items())
     return errors
 
 
 def check_markup(container):
     errors = []
-    for name, mt in iteritems(container.mime_map):
+    for name, mt in container.mime_map.items():
         if mt in OEB_DOCS:
             lines = []
             root = container.parsed(name)

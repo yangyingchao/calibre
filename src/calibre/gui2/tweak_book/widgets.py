@@ -28,7 +28,6 @@ from qt.core import (
     QLabel,
     QLineEdit,
     QListView,
-    QMimeData,
     QModelIndex,
     QPainter,
     QPalette,
@@ -66,7 +65,6 @@ from calibre.gui2.widgets2 import Dialog as BaseDialog
 from calibre.startup import connect_lambda
 from calibre.utils.icu import numeric_sort_key, primary_contains, primary_sort_key, sort_key
 from calibre.utils.matcher import DEFAULT_LEVEL1, DEFAULT_LEVEL2, DEFAULT_LEVEL3, Matcher, get_char
-from polyglot.builtins import iteritems
 
 ROOT = QModelIndex()
 
@@ -140,9 +138,9 @@ class RationalizeFolders(Dialog):  # {{{
         folders = tprefs['folders_for_types']
         for i, (typ, text) in enumerate(self.TYPE_MAP):
             la = QLabel('&' + text)
-            setattr(self, '%s_label' % typ, la)
+            setattr(self, f'{typ}_label', la)
             le = QLineEdit(self)
-            setattr(self, '%s_folder' % typ, le)
+            setattr(self, f'{typ}_folder', le)
             val = folders.get(typ, '')
             if val and not val.endswith('/'):
                 val += '/'
@@ -161,7 +159,7 @@ class RationalizeFolders(Dialog):  # {{{
     def folder_map(self):
         ans = {}
         for typ, x in self.TYPE_MAP:
-            val = str(getattr(self, '%s_folder' % typ).text()).strip().strip('/')
+            val = str(getattr(self, f'{typ}_folder').text()).strip().strip('/')
             ans[typ] = val
         return ans
 
@@ -287,8 +285,8 @@ class ImportForeign(Dialog):  # {{{
         return src, dest
 # }}}
 
-# Quick Open {{{
 
+# Quick Open {{{
 
 def make_highlighted_text(emph, text, positions):
     positions = sorted(set(positions) - {-1})
@@ -376,11 +374,11 @@ class Results(QWidget):
     def __call__(self, results):
         if results:
             self.current_result = 0
-            prefixes = [QStaticText('<b>%s</b>' % os.path.basename(x)) for x in results]
+            prefixes = [QStaticText(f'<b>{os.path.basename(x)}</b>') for x in results]
             [(p.setTextFormat(Qt.TextFormat.RichText), p.setTextOption(self.text_option)) for p in prefixes]
-            self.maxwidth = max(int(ceil(x.size().width())) for x in prefixes)
+            self.maxwidth = max(ceil(x.size().width()) for x in prefixes)
             self.results = tuple((prefix, self.make_text(text, positions), text)
-                for prefix, (text, positions) in zip(prefixes, iteritems(results)))
+                for prefix, (text, positions) in zip(prefixes, results.items()))
         else:
             self.results = ()
             self.current_result = -1
@@ -417,7 +415,7 @@ class Results(QWidget):
                 p.drawStaticText(offset, prefix)
                 offset.setX(self.maxwidth + 5)
                 p.drawStaticText(offset, self.divider)
-                offset.setX(offset.x() + int(ceil(self.divider.size().width())))
+                offset.setX(offset.x() + ceil(self.divider.size().width()))
                 p.drawStaticText(offset, full)
                 offset.setY(int(offset.y() + size.height() + self.MARGIN // 2))
                 if i in (self.current_result, self.mouse_hover_result):
@@ -457,8 +455,8 @@ class QuickOpen(Dialog):
 
     def default_help_text(self):
         example = '<pre>{0}i{1}mages/{0}c{1}hapter1/{0}s{1}cene{0}3{1}.jpg</pre>'.format(
-            '<span style="%s">' % emphasis_style(), '</span>')
-        chars = '<pre style="%s">ics3</pre>' % emphasis_style()
+            f'<span style="{emphasis_style()}">', '</span>')
+        chars = f'<pre style="{emphasis_style()}">ics3</pre>'
 
         return _('''<p>Quickly choose a file by typing in just a few characters from the file name into the field above.
         For example, if want to choose the file:
@@ -509,15 +507,15 @@ class QuickOpen(Dialog):
     @classmethod
     def test(cls):
         from calibre.utils.matcher import get_items_from_dir
-        items = get_items_from_dir(os.getcwd(), lambda x:not x.endswith('.pyc'))
+        items = get_items_from_dir(os.getcwd(), lambda x: not x.endswith('.pyc'))
         d = cls(items)
         d.exec()
         print(d.selected_result)
 
 # }}}
 
-# Filterable names list {{{
 
+# Filterable names list {{{
 
 class NamesDelegate(QStyledItemDelegate):
 
@@ -545,10 +543,10 @@ class NamesDelegate(QStyledItemDelegate):
             to.setWrapMode(QTextOption.WrapMode.NoWrap)
             to.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             positions = sorted(set(positions) - {-1}, reverse=True)
-            text = '<body>%s</body>' % make_highlighted_text(emphasis_style(), text, positions)
+            text = f'<body>{make_highlighted_text(emphasis_style(), text, positions)}</body>'
             doc = QTextDocument()
-            c = 'rgb(%d, %d, %d)'%c.getRgb()[:3]
-            doc.setDefaultStyleSheet(' body { color: %s }'%c)
+            c = 'rgb({}, {}, {})'.format(*c.getRgb()[:3])
+            doc.setDefaultStyleSheet(f' body {{ color: {c} }}')
             doc.setHtml(text)
             doc.setDefaultFont(option.font)
             doc.setDocumentMargin(0.0)
@@ -588,7 +586,7 @@ class NamesModel(QAbstractListModel):
         if not query:
             self.items = tuple((text, None) for text in self.names)
         else:
-            self.items = tuple(iteritems(self.matcher(query)))
+            self.items = tuple(self.matcher(query).items())
         self.endResetModel()
         self.filtered.emit(not bool(query))
 
@@ -619,8 +617,8 @@ def create_filterable_names_list(names, filter_text=None, parent=None, model=Nam
 
 # }}}
 
-# Insert Link {{{
 
+# Insert Link {{{
 
 class AnchorsModel(QAbstractListModel):
 
@@ -814,10 +812,8 @@ class InsertLink(Dialog):
 
 # }}}
 
-# Insert Semantics {{{
 
-
-class InsertSemantics(Dialog):
+class InsertSemantics(Dialog):  # {{{
 
     def __init__(self, container, parent=None):
         self.container = container
@@ -862,7 +858,7 @@ class InsertSemantics(Dialog):
             'bodymatter': _('First "real" page of content'),
         }
         t = _
-        all_types = [(k, ((f'{t(v)} ({type_map_help[k]})') if k in type_map_help else t(v))) for k, v in iteritems(self.known_type_map)]
+        all_types = [(k, ((f'{t(v)} ({type_map_help[k]})') if k in type_map_help else t(v))) for k, v in self.known_type_map.items()]
         all_types.sort(key=lambda x: sort_key(x[1]))
         self.all_types = OrderedDict(all_types)
 
@@ -873,7 +869,7 @@ class InsertSemantics(Dialog):
         self.tl = tl = QFormLayout()
         tl.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.semantic_type = QComboBox(self)
-        for key, val in iteritems(self.all_types):
+        for key, val in self.all_types.items():
             self.semantic_type.addItem(val, key)
         tl.addRow(_('Type of &semantics:'), self.semantic_type)
         self.target = t = QLineEdit(self)
@@ -1112,8 +1108,8 @@ class FilterCSS(Dialog):  # {{{
 
 # }}}
 
-# Add Cover {{{
 
+# Add Cover {{{
 
 class CoverView(QWidget):
 
@@ -1134,13 +1130,11 @@ class CoverView(QWidget):
         canvas_size = self.rect()
         width = self.current_pixmap_size.width()
         extrax = canvas_size.width() - width
-        if extrax < 0:
-            extrax = 0
+        extrax = max(extrax, 0)
         x = int(extrax/2.)
         height = self.current_pixmap_size.height()
         extray = canvas_size.height() - height
-        if extray < 0:
-            extray = 0
+        extray = max(extray, 0)
         y = int(extray/2.)
         target = QRect(x, y, min(canvas_size.width(), width), min(canvas_size.height(), height))
         p = QPainter(self)
@@ -1164,7 +1158,7 @@ class AddCover(Dialog):
     @property
     def image_names(self):
         img_types = {guess_type('a.'+x) for x in ('png', 'jpeg', 'gif')}
-        for name, mt in iteritems(self.container.mime_map):
+        for name, mt in self.container.mime_map.items():
             if mt.lower() in img_types:
                 yield name
 
@@ -1230,8 +1224,7 @@ class AddCover(Dialog):
         if name is not None:
             data = self.container.raw_data(name, decode=False)
             self.cover_view.set_pixmap(data)
-            self.info_label.setText('{}x{}px | {}'.format(
-                self.cover_view.pixmap.width(), self.cover_view.pixmap.height(), human_readable(len(data))))
+            self.info_label.setText(f'{self.cover_view.pixmap.width()}x{self.cover_view.pixmap.height()}px | {human_readable(len(data))}')
 
     def import_image(self):
         ans = choose_images(self, 'add-cover-choose-image', _('Choose a cover image'), formats=(
@@ -1277,13 +1270,21 @@ class PlainTextEdit(QPlainTextEdit):  # {{{
     def selected_text_from_cursor(self, cursor):
         return unicodedata.normalize('NFC', str(cursor.selectedText()).replace(PARAGRAPH_SEPARATOR, '\n').rstrip('\0'))
 
+    def paste(self):
+        super().paste()
+
     @property
     def selected_text(self):
         return self.selected_text_from_cursor(self.textCursor())
 
     def createMimeDataFromSelection(self):
-        ans = QMimeData()
-        ans.setText(self.selected_text)
+        ans = super().createMimeDataFromSelection()
+        for format in ans.formats():
+            if format.startswith('text/'):
+                val = bytes(ans.data(format)).decode()
+                val = unicodedata.normalize('NFC', val.replace(PARAGRAPH_SEPARATOR, '\n').rstrip('\0'))
+                ans.setData(format, val.encode())
+        ans.setText(self.selected_text)  # to workaround Qt converting nbsp to plain space and other infelicities
         return ans
 
     def show_tooltip(self, ev):

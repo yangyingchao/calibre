@@ -1,15 +1,14 @@
 __license__   = 'GPL v3'
 __copyright__ = '2008, Anatoly Shipitsin <norguhtar at gmail.com>'
-"""
+'''
 Convert .fb2 files to .lrf
-"""
+'''
 import os
 import re
 
 from calibre import guess_type
 from calibre.customize.conversion import InputFormatPlugin, OptionRecommendation
 from calibre.utils.resources import get_path as P
-from polyglot.builtins import iteritems
 
 FB2NS  = 'http://www.gribuser.ru/xml/fictionbook/2.0'
 FB21NS = 'http://www.gribuser.ru/xml/fictionbook/2.1'
@@ -77,7 +76,7 @@ class FB2Input(InputFormatPlugin):
             parser = css_parser.CSSParser(fetcher=None,
                     log=logging.getLogger('calibre.css'))
 
-            XHTML_CSS_NAMESPACE = '@namespace "%s";\n' % XHTML_NS
+            XHTML_CSS_NAMESPACE = f'@namespace "{XHTML_NS}";\n'
             text = XHTML_CSS_NAMESPACE + css
             log.debug('Parsing stylesheet...')
             stylesheet = parser.parseString(text)
@@ -91,7 +90,7 @@ class FB2Input(InputFormatPlugin):
         log.debug('Converting XML to HTML...')
         with open(P('templates/fb2.xsl'), 'rb') as f:
             ss = f.read().decode('utf-8')
-        ss = ss.replace("__FB_NS__", fb_ns)
+        ss = ss.replace('__FB_NS__', fb_ns)
         if options.no_inline_fb2_toc:
             log('Disabling generation of inline FB2 TOC')
             ss = re.compile(r'<!-- BUILD TOC -->.*<!-- END BUILD TOC -->',
@@ -105,24 +104,24 @@ class FB2Input(InputFormatPlugin):
         # Handle links of type note and cite
         notes = {a.get('href')[1:]: a for a in result.xpath('//a[@link_note and @href]') if a.get('href').startswith('#')}
         cites = {a.get('link_cite'): a for a in result.xpath('//a[@link_cite]') if not a.get('href', '')}
-        all_ids = {x for x in result.xpath('//*/@id')}
-        for cite, a in iteritems(cites):
+        all_ids = set(result.xpath('//*/@id'))
+        for cite, a in cites.items():
             note = notes.get(cite, None)
             if note:
                 c = 1
-                while 'cite%d' % c in all_ids:
+                while f'cite{c}' in all_ids:
                     c += 1
                 if not note.get('id', None):
-                    note.set('id', 'cite%d' % c)
+                    note.set('id', f'cite{c}')
                     all_ids.add(note.get('id'))
-                a.set('href', '#%s' % note.get('id'))
+                a.set('href', '#{}'.format(note.get('id')))
         for x in result.xpath('//*[@link_note or @link_cite]'):
             x.attrib.pop('link_note', None)
             x.attrib.pop('link_cite', None)
 
         for img in result.xpath('//img[@src]'):
             src = img.get('src')
-            img.set('src', self.binary_map.get(src, src))
+            img.set('src', self.image_map.get(src, src))
 
         # make paragraphs <p> tags
         has_block_elements = etree.XPath('descendant::*[name()="div" or name()="table"]')
@@ -134,7 +133,7 @@ class FB2Input(InputFormatPlugin):
         with open('index.xhtml', 'wb') as f:
             f.write(index.encode('utf-8'))
         with open('inline-styles.css', 'wb') as f:
-            f.write(css.encode('utf-8'))
+            f.write(css.encode('utf-8') or b' ')  # srv/render_book.py filters out empty files but index.xhtml links to this file
         stream.seek(0)
         mi = get_metadata(stream, 'fb2')
         if not mi.title:
@@ -148,10 +147,9 @@ class FB2Input(InputFormatPlugin):
             cpath = os.path.abspath('fb2_cover_calibre_mi.jpg')
         else:
             for img in doc.xpath('//f:coverpage/f:image', namespaces=NAMESPACES):
-                href = img.get('{%s}href'%XLINK_NS, img.get('href', None))
+                href = img.get(f'{{{XLINK_NS}}}href', img.get('href', None))
                 if href is not None:
-                    if href.startswith('#'):
-                        href = href[1:]
+                    href = href.removeprefix('#')
                     cpath = os.path.abspath(href)
                     break
 
@@ -166,24 +164,24 @@ class FB2Input(InputFormatPlugin):
         return os.path.join(os.getcwd(), 'metadata.opf')
 
     def extract_embedded_content(self, doc):
+        from calibre import guess_extension, sanitize_file_name
         from calibre.ebooks.fb2 import base64_decode
-        self.binary_map = {}
+        self.image_map = {}
         for elem in doc.xpath('./*'):
-            if elem.text and 'binary' in elem.tag and 'id' in elem.attrib:
-                ct = elem.get('content-type', '')
-                fname = elem.attrib['id']
-                ext = ct.rpartition('/')[-1].lower()
-                if ext in ('png', 'jpeg', 'jpg'):
-                    if fname.lower().rpartition('.')[-1] not in {'jpg', 'jpeg',
-                            'png'}:
-                        fname += '.' + ext
-                    self.binary_map[elem.get('id')] = fname
+            if elem.text and 'binary' in elem.tag and elem.get('id', ''):
+                ct = elem.get('content-type', '').lower()
+                fname = sanitize_file_name(elem.get('id'))
+                if ct.startswith('image/'):
+                    ext = guess_extension(ct)
+                    if ext:
+                        fname += ext
+                        fname = sanitize_file_name(fname)
+                        self.image_map[elem.get('id')] = fname
                 raw = elem.text.strip()
                 try:
                     data = base64_decode(raw)
                 except TypeError:
-                    self.log.exception('Binary data with id=%s is corrupted, ignoring'%(
-                        elem.get('id')))
+                    self.log.exception('Binary data with id={} is corrupted, ignoring'.format(elem.get('id')))
                 else:
                     with open(fname, 'wb') as f:
                         f.write(data)

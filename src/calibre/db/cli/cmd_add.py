@@ -68,8 +68,8 @@ def do_adding(db, request_id, notify_changes, is_remote, mi, format_map, add_dup
                 input_formats = {q.upper():q for q in format_map}
                 common_formats = book_formats & set(input_formats)
                 if not common_formats:
-                    for x in input_formats:
-                        add_format(book_id, input_formats[x])
+                    for x, format in input_formats.items():
+                        add_format(book_id, format)
                 else:
                     new_formats = set(input_formats) - book_formats
                     if new_formats:
@@ -89,11 +89,10 @@ def do_adding(db, request_id, notify_changes, is_remote, mi, format_map, add_dup
                 duplicates.append((mi, {x: format_map[x] for x in duplicated_formats}))
         else:
             add_book()
+    elif identical_book_list:
+        duplicates.append((mi, format_map))
     else:
-        if identical_book_list:
-            duplicates.append((mi, format_map))
-        else:
-            add_book()
+        add_book()
     if added_ids and identical_books_data is not None:
         for book_id in added_ids:
             db.update_data_for_find_identical_books(book_id, identical_books_data)
@@ -154,7 +153,7 @@ def format_group(db, notify_changes, is_remote, args):
         if is_remote:
             paths = []
             for name, data in formats:
-                with open(os.path.join(tdir, os.path.basename(name)), 'wb') as f:
+                with open(os.path.join(tdir, os.path.basename(name.replace('\\', os.sep))), 'wb') as f:
                     f.write(data)
                 paths.append(f.name)
         else:
@@ -163,7 +162,7 @@ def format_group(db, notify_changes, is_remote, args):
         mi = metadata_from_formats(paths)
         if mi.title is None:
             return None, set(), set(), False
-        if cover_data and not mi.cover_data or not mi.cover_data[1]:
+        if cover_data and (not mi.cover_data or not mi.cover_data[1]):
             mi.cover_data = 'jpeg', cover_data
         format_map = create_format_map(paths)
         added_ids, updated_ids, duplicates = do_adding(
@@ -221,11 +220,10 @@ def do_add(
             path = os.path.abspath(path)
             if os.path.isdir(path):
                 dirs.append(path)
+            elif os.path.exists(path):
+                files.append(path)
             else:
-                if os.path.exists(path):
-                    files.append(path)
-                else:
-                    prints(path, 'not found')
+                prints(path, 'not found')
 
         file_duplicates, added_ids, merged_ids = [], set(), set()
         for book in files:
@@ -400,7 +398,7 @@ the folder related options below.
         try:
             getattr(parser.values, option.dest).append(compile_rule(rule))
         except Exception:
-            raise OptionValueError('%r is not a valid filename pattern' % value)
+            raise OptionValueError(f'{value!r} is not a valid filename pattern')
 
     g.add_option(
         '-1',

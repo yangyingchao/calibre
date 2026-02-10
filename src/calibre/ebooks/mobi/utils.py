@@ -8,8 +8,8 @@ __docformat__ = 'restructuredtext en'
 import os
 import string
 import struct
-import zlib
 from collections import OrderedDict
+from compression import zlib
 from io import BytesIO
 
 from tinycss.color3 import parse_color_string
@@ -80,7 +80,7 @@ def encode_number_as_hex(num):
     The bytes that follow are simply the hexadecimal representation of the
     number.
     '''
-    num = hex(num)[2:].upper().encode('ascii')
+    num = f'{num:X}'.encode('ascii')
     nlen = len(num)
     if nlen % 2 != 0:
         num = b'0'+num
@@ -156,8 +156,7 @@ def test_decint(num):
         raw = encint(num, forward=d)
         sz = len(raw)
         if (num, sz) != decint(raw, forward=d):
-            raise ValueError('Failed for num %d, forward=%r: %r != %r' % (
-                num, d, (num, sz), decint(raw, forward=d)))
+            raise ValueError(f'Failed for num {num}, forward={d!r}: {num, sz!r} != {decint(raw, forward=d)!r}')
 
 
 def rescale_image(data, maxsizeb=IMAGE_MAX_SIZE, dimen=None):
@@ -424,8 +423,8 @@ def mobify_image(data):
         data = png_data_to_gif_data(data)
     return data
 
-# Font records {{{
 
+# Font records {{{
 
 def read_font_record(data, extent=1040):
     '''
@@ -463,7 +462,7 @@ def read_font_record(data, extent=1040):
     try:
         usize, flags, dstart, xor_len, xor_start = struct.unpack_from(
                 b'>LLLLL', data, 4)
-    except:
+    except Exception:
         ans['err'] = 'Failed to read font record header fields'
         return ans
     font_data = data[dstart:]
@@ -488,7 +487,7 @@ def read_font_record(data, extent=1040):
         try:
             font_data = zlib.decompress(font_data)
         except Exception as e:
-            ans['err'] = 'Failed to zlib decompress font data (%s)'%e
+            ans['err'] = f'Failed to zlib decompress font data ({e})'
             return ans
 
         if len(font_data) != usize:
@@ -647,4 +646,4 @@ def convert_color_for_font_tag(val):
     def clamp(x):
         return min(x, max(0, x), 1)
     rgb = map(clamp, rgba[:3])
-    return '#' + ''.join(map(lambda x:'%02x' % int(x * 255), rgb))
+    return '#' + ''.join(f'{int(x * 255):02x}' for x in rgb)

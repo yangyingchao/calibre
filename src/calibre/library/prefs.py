@@ -11,7 +11,6 @@ import os
 from calibre import prints
 from calibre.constants import preferred_encoding
 from calibre.utils.config import from_json, to_json
-from polyglot.builtins import iteritems
 
 
 class DBPrefs(dict):
@@ -24,7 +23,7 @@ class DBPrefs(dict):
         for key, val in self.db.conn.get('SELECT key,val FROM preferences'):
             try:
                 val = self.raw_to_object(val)
-            except:
+            except Exception:
                 prints('Failed to read value for:', key, 'from db')
                 continue
             dict.__setitem__(self, key, val)
@@ -64,7 +63,7 @@ class DBPrefs(dict):
         self.__setitem__(key, val)
 
     def get_namespaced(self, namespace, key, default=None):
-        key = 'namespaced:%s:%s'%(namespace, key)
+        key = f'namespaced:{namespace}:{key}'
         try:
             return dict.__getitem__(self, key)
         except KeyError:
@@ -76,7 +75,7 @@ class DBPrefs(dict):
         if ':' in namespace:
             raise KeyError('Colons are not allowed in'
                 ' the namespace')
-        key = 'namespaced:%s:%s'%(namespace, key)
+        key = f'namespaced:{namespace}:{key}'
         self[key] = val
 
     def write_serialized(self, library_path):
@@ -85,9 +84,9 @@ class DBPrefs(dict):
             data = json.dumps(self, indent=2, default=to_json)
             if not isinstance(data, bytes):
                 data = data.encode('utf-8')
-            with open(to_filename, "wb") as f:
+            with open(to_filename, 'wb') as f:
                 f.write(data)
-        except:
+        except Exception:
             import traceback
             traceback.print_exc()
 
@@ -96,13 +95,13 @@ class DBPrefs(dict):
         try:
             from_filename = os.path.join(library_path,
                     'metadata_db_prefs_backup.json')
-            with open(from_filename, "rb") as f:
+            with open(from_filename, 'rb') as f:
                 d = json.load(f, object_hook=from_json)
                 if not recreate_prefs:
                     return d
                 cls.clear()
                 cls.db.conn.execute('DELETE FROM preferences')
-                for k,v in iteritems(d):
+                for k,v in d.items():
                     raw = cls.to_raw(v)
                     cls.db.conn.execute(
                         'INSERT INTO preferences (key,val) VALUES (?,?)', (k, raw))
@@ -110,7 +109,7 @@ class DBPrefs(dict):
                 cls.clear()
                 cls.update(d)
                 return d
-        except:
+        except Exception:
             import traceback
             traceback.print_exc()
             raise

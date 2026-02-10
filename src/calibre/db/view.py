@@ -14,7 +14,6 @@ from functools import partial
 from calibre.db.write import uniq
 from calibre.ebooks.metadata import title_sort
 from calibre.utils.config_base import prefs, tweaks
-from polyglot.builtins import iteritems, itervalues
 
 
 def sanitize_sort_field_name(field_metadata, field):
@@ -95,11 +94,10 @@ def format_is_multiple(x, sep=',', repl=None):
 def format_identifiers(x):
     if not x:
         return None
-    return ','.join('%s:%s'%(k, v) for k, v in iteritems(x))
+    return ','.join(f'{k}:{v}' for k, v in x.items())
 
 
 class View:
-
     ''' A table view of the database, with rows and columns. Also supports
     filtering and sorting.  '''
 
@@ -113,7 +111,7 @@ class View:
         self.search_restriction_name = self.base_restriction_name = ''
         self._field_getters = {}
         self.column_count = len(cache.backend.FIELD_MAP)
-        for col, idx in iteritems(cache.backend.FIELD_MAP):
+        for col, idx in cache.backend.FIELD_MAP.items():
             label, fmt = col, lambda x:x
             func = {
                     'id': self._get_id,
@@ -191,7 +189,7 @@ class View:
 
     def _get_id(self, idx, index_is_id=True):
         if index_is_id and not self.cache.has_id(idx):
-            raise IndexError('No book with id %s present'%idx)
+            raise IndexError(f'No book with id {idx} present')
         return idx if index_is_id else self.index_to_id(idx)
 
     def has_id(self, book_id):
@@ -228,11 +226,21 @@ class View:
     def index_to_id(self, idx):
         return self._map_filtered[idx]
 
+    def index_to_id_map(self) -> tuple[int, ...]:
+        return self._map_filtered
+
     def id_to_index(self, book_id):
         try:
             return self._real_map_filtered_id_to_row[book_id]
         except KeyError:
-            raise ValueError(f'No such book_id {book_id}')
+            raise ValueError(f'No such book_id {book_id} in current view')
+
+    def safe_id_to_index(self, book_id):
+        try:
+            return self._real_map_filtered_id_to_row[book_id]
+        except Exception:
+            return -1
+
     row = index_to_id
 
     def index(self, book_id, cache=False):
@@ -243,7 +251,7 @@ class View:
     def _get(self, field, idx, index_is_id=True, default_value=None, fmt=lambda x:x):
         id_ = idx if index_is_id else self.index_to_id(idx)
         if index_is_id and not self.cache.has_id(id_):
-            raise IndexError('No book with id %s present'%idx)
+            raise IndexError(f'No book with id {idx} present')
         return fmt(self.cache.field_for(field, id_, default_value=default_value))
 
     def get_series_sort(self, idx, index_is_id=True, default_value=''):
@@ -333,7 +341,7 @@ class View:
             return restriction
 
     def search_getting_ids(self, query, search_restriction,
-                           set_restriction_count=False, use_virtual_library=True, sort_results=True):
+                           set_restriction_count=False, use_virtual_library=True, sort_results=True, allow_templates=True):
         if use_virtual_library:
             search_restriction = self._build_restriction_string(search_restriction)
         q = ''
@@ -353,8 +361,10 @@ class View:
                 self.full_map_is_sorted = True
             return rv
         matches = self.cache.search(
-            query, search_restriction, virtual_fields={'marked':MarkedVirtualField(self.marked_ids),
-                                           'in_tag_browser': InTagBrowserVirtualField(self.tag_browser_ids)})
+            query, search_restriction, virtual_fields={
+                'marked':MarkedVirtualField(self.marked_ids),
+                'in_tag_browser': InTagBrowserVirtualField(self.tag_browser_ids)
+            }, allow_templates=allow_templates)
         if len(matches) == len(self._map):
             rv = list(self._map)
         else:
@@ -430,7 +440,7 @@ class View:
                                for k in id_dict}
         else:
             # Ensure that all the items in the dict are text
-            self.marked_ids = {k: str(v) for k, v in iteritems(id_dict)}
+            self.marked_ids = {k: str(v) for k, v in id_dict.items()}
         # This invalidates all searches in the cache even though the cache may
         # be shared by multiple views. This is not ideal, but...
         cmids = set(self.marked_ids)
@@ -439,7 +449,7 @@ class View:
         self.cache.clear_caches(book_ids=changed_ids)
         # Always call the listener because the labels might have changed even
         # if the ids haven't.
-        for funcref in itervalues(self.marked_listeners):
+        for funcref in self.marked_listeners.values():
             func = funcref()
             if func is not None:
                 func(old_marked_ids, cmids)

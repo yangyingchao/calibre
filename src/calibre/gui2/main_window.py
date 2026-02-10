@@ -26,7 +26,6 @@ Launch the Graphical User Interface
 
 
 class GarbageCollector(QObject):
-
     '''
     Disable automatic garbage collection and instead collect manually
     every INTERVAL milliseconds.
@@ -118,7 +117,7 @@ class MainWindow(QMainWindow):
     def native_menubar(self):
         return self.___menu_bar
 
-    def __init__(self, opts, parent=None, disable_automatic_gc=False):
+    def __init__(self, opts=None, parent=None, disable_automatic_gc=False):
         QMainWindow.__init__(self, parent)
         self.display_unhandled_exception.connect(self.unhandled_exception, type=Qt.ConnectionType.QueuedConnection)
         if disable_automatic_gc:
@@ -154,11 +153,10 @@ class MainWindow(QMainWindow):
                         dmsg = _('The folder "{}" is opened in another program, so calibre cannot access it.').format(fname)
                     else:
                         dmsg = _('The file "{}" is opened in another program, so calibre cannot access it.').format(fname)
+                elif is_folder:
+                    dmsg = _('A folder is open in another program so calibre cannot access it.')
                 else:
-                    if is_folder:
-                        dmsg = _('A folder is open in another program so calibre cannot access it.')
-                    else:
-                        dmsg = _('A file is open in another program so calibre cannot access it.')
+                    dmsg = _('A file is open in another program so calibre cannot access it.')
                 if is_folder:
                     dmsg += _('This is usually caused by leaving Windows explorer or a similar file manager open'
                               ' to a folder in the calibre library. Close Windows explorer and retry.')
@@ -222,7 +220,7 @@ class MainWindow(QMainWindow):
             try:
                 from calibre.debug import print_basic_debug_info
                 print_basic_debug_info(out=sio)
-            except:
+            except Exception:
                 pass
             traceback.print_exception(exc_type, value, tb, file=sio)
             if getattr(value, 'locking_debug_msg', None):
@@ -234,12 +232,12 @@ class MainWindow(QMainWindow):
                     return
             except Exception:
                 traceback.print_exc()
-            msg = '<b>%s</b>:'%exc_type.__name__ + prepare_string_for_xml(as_unicode(value))
+            msg = f'<b>{exc_type.__name__}</b>:' + prepare_string_for_xml(as_unicode(value))
             error_dialog(self, _('Unhandled exception'), msg, det_msg=fe,
                     show=True)
         except BaseException:
             pass
-        except:
+        except Exception:
             pass
 
 
@@ -263,6 +261,8 @@ def clone_menu(menu):
         ans.setEnabled(ac.isEnabled())
         ans.setStatusTip(ac.statusTip())
         ans.setVisible(ac.isVisible())
+        ans.setCheckable(ac.isCheckable())
+        ans.setChecked(ac.isChecked())
         return ans
 
     def clone_one_menu(m):

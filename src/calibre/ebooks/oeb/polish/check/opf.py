@@ -11,7 +11,6 @@ from calibre.ebooks.oeb.base import DC, DC11_NS, OPF, OPF2_NS, XHTML_MIME
 from calibre.ebooks.oeb.polish.check.base import WARN, BaseError
 from calibre.ebooks.oeb.polish.toc import find_existing_nav_toc, parse_nav
 from calibre.ebooks.oeb.polish.utils import guess_type
-from polyglot.builtins import iteritems
 
 
 class MissingSection(BaseError):
@@ -214,7 +213,7 @@ class MultipleCovers(BaseError):
         self.all_locations = [(name, lnum, None) for lnum in sorted(locs)]
 
     def __call__(self, container):
-        items = [e for e in container.opf_xpath('/opf:package/opf:metadata/opf:meta[@name="cover"]')]
+        items = list(container.opf_xpath('/opf:package/opf:metadata/opf:meta[@name="cover"]'))
         [container.remove_from_xml(e) for e in items[1:]]
         container.dirty(self.name)
         return True
@@ -279,7 +278,7 @@ class BadSpineMime(BaseError):
             self.iid = iid
 
     def __call__(self, container):
-        container.opf_xpath('/opf:package/opf:manifest/opf:item[@id=%r]' % self.iid)[0].set(
+        container.opf_xpath(f'/opf:package/opf:manifest/opf:item[@id={self.iid!r}]')[0].set(
             'media-type', XHTML_MIME)
         container.dirty(container.opf_name)
         container.refresh_mime_map()
@@ -334,7 +333,7 @@ def check_opf(container):
                 dups[href].append(item.sourceline)
             else:
                 seen[href] = item.sourceline
-    errors.extend(DuplicateHref(container.opf_name, eid, locs) for eid, locs in iteritems(dups))
+    errors.extend(DuplicateHref(container.opf_name, eid, locs) for eid, locs in dups.items())
 
     seen, dups = {}, {}
     for item in container.opf_xpath('/opf:package/opf:spine/opf:itemref[@idref]'):
@@ -345,7 +344,7 @@ def check_opf(container):
             dups[ref].append(item.sourceline)
         else:
             seen[ref] = item.sourceline
-    errors.extend(DuplicateHref(container.opf_name, eid, locs, for_spine=True) for eid, locs in iteritems(dups))
+    errors.extend(DuplicateHref(container.opf_name, eid, locs, for_spine=True) for eid, locs in dups.items())
 
     spine = container.opf_xpath('/opf:package/opf:spine[@toc]')
     if spine:
@@ -364,7 +363,7 @@ def check_opf(container):
             ncx = container.manifest_type_map.get(guess_type('a.ncx'))
             if ncx:
                 ncx_name = ncx[0]
-                rmap = {v:k for k, v in iteritems(container.manifest_id_map)}
+                rmap = {v:k for k, v in container.manifest_id_map.items()}
                 ncx_id = rmap.get(ncx_name)
                 if ncx_id:
                     errors.append(MissingNCXRef(container.opf_name, spine.sourceline, ncx_id))
@@ -398,7 +397,7 @@ def check_opf(container):
     if uid is None:
         errors.append(NoUID(container.opf_name))
     else:
-        dcid = container.opf_xpath('/opf:package/opf:metadata/dc:identifier[@id=%r]' % uid)
+        dcid = container.opf_xpath(f'/opf:package/opf:metadata/dc:identifier[@id={uid!r}]')
         if not dcid or not dcid[0].text or not dcid[0].text.strip():
             errors.append(NoUID(container.opf_name))
     for elem in container.opf_xpath('/opf:package/opf:metadata/dc:identifier'):
@@ -411,7 +410,7 @@ def check_opf(container):
             iid = item.get('idref', None)
             lnum = None
             if iid:
-                mitem = container.opf_xpath('/opf:package/opf:manifest/opf:item[@id=%r]' % iid)
+                mitem = container.opf_xpath(f'/opf:package/opf:manifest/opf:item[@id={iid!r}]')
                 if mitem:
                     lnum = mitem[0].sourceline
                 else:

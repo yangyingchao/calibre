@@ -5,8 +5,9 @@ __license__   = 'GPL v3'
 __copyright__ = '2011, Kovid Goyal <kovid@kovidgoyal.net>'
 __docformat__ = 'restructuredtext en'
 
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from functools import partial
+from operator import itemgetter
 
 from qt.core import (
     QAbstractItemDelegate,
@@ -20,6 +21,7 @@ from qt.core import (
     QIcon,
     QItemSelectionModel,
     QKeyCombination,
+    QKeyEvent,
     QKeySequence,
     QLabel,
     QMenu,
@@ -49,7 +51,6 @@ from calibre.utils.config import JSONConfig
 from calibre.utils.icu import lower, sort_key
 from calibre.utils.localization import pgettext
 from calibre.utils.search_query_parser import ParseException, SearchQueryParser
-from polyglot.builtins import iteritems, itervalues
 
 ROOT = QModelIndex()
 
@@ -74,7 +75,7 @@ def keysequence_from_event(ev):  # {{{
 # }}}
 
 
-def finalize(shortcuts, custom_keys_map={}):  # {{{
+def finalize(shortcuts, custom_keys_map={}) -> dict[str, tuple[QKeySequence, ...]]:  # {{{
     '''
     Resolve conflicts and assign keys to every action in shortcuts, which must
     be a OrderedDict. User specified mappings of unique names to keys (as a
@@ -82,8 +83,11 @@ def finalize(shortcuts, custom_keys_map={}):  # {{{
     of unique names to resolved keys. Also sets the set_to_default member
     correctly for each shortcut.
     '''
-    seen, keys_map = {}, {}
-    for unique_name, shortcut in iteritems(shortcuts):
+    for unique_name, shortcut in shortcuts.items():
+        shortcut['set_to_default'] = unique_name in custom_keys_map
+    keys_map = defaultdict(list)
+    # First pass map key sequences to shortcuts
+    for unique_name, shortcut in shortcuts.items():
         custom_keys = custom_keys_map.get(unique_name, None)
         if custom_keys is None:
             candidates = shortcut['default_keys']
@@ -91,30 +95,31 @@ def finalize(shortcuts, custom_keys_map={}):  # {{{
         else:
             candidates = custom_keys
             shortcut['set_to_default'] = False
-        keys = []
+        shortcut['resolved_keys'] = []
         for x in candidates:
             ks = QKeySequence(x, QKeySequence.SequenceFormat.PortableText)
             x = str(ks.toString(QKeySequence.SequenceFormat.PortableText))
-            if x in seen:
-                if DEBUG:
-                    prints('Key %r for shortcut %s is already used by'
-                            ' %s, ignoring'%(x, shortcut['name'], seen[x]['name']))
-                keys_map[unique_name] = ()
-                continue
-            seen[x] = shortcut
-            keys.append(ks)
-        keys = tuple(keys)
-
-        keys_map[unique_name] = keys
+            keys_map[x].append(shortcut)
+    # Pick a shortcut for each key
+    for key, shortcuts_with_key in keys_map.items():
+        if len(shortcuts_with_key) > 1:
+            shortcuts_with_key.sort(key=itemgetter('set_to_default'))  # prefer user defined mappings
+            if DEBUG:
+                prints(
+                    'Key {!r} is assigned to multiple shortcuts: {}. Using shortcut: {}'.format(key, ', '.join(
+                        s['name'] for s in shortcuts_with_key), shortcuts_with_key[0]['name']))
+        shortcuts_with_key[0]['resolved_keys'].append(QKeySequence(key, QKeySequence.SequenceFormat.PortableText))
+    # Second pass, assign resolved keys to actions.
+    unique_name_to_keys = {}
+    for unique_name, shortcut in shortcuts.items():
         ac = shortcut['action']
+        rkeys = unique_name_to_keys[unique_name] = tuple(shortcut.pop('resolved_keys'))
         if ac is None or sip.isdeleted(ac):
             if ac is not None and DEBUG:
-                prints('Shortcut %r has a deleted action' % unique_name)
-            continue
-        ac.setShortcuts(list(keys))
-
-    return keys_map
-
+                prints(f'Shortcut {unique_name!r} has a deleted action')
+        else:
+            ac.setShortcuts(rkeys)
+    return unique_name_to_keys
 # }}}
 
 
@@ -155,13 +160,12 @@ class Manager(QObject):  # {{{
         '''
         if unique_name in self.shortcuts:
             name = self.shortcuts[unique_name]['name']
-            raise NameConflict('Shortcut for %r already registered by %s'%(
-                    unique_name, name))
+            raise NameConflict(f'Shortcut for {unique_name!r} already registered by {name}')
         shortcut = {'name':name, 'desc':description, 'action': action,
                 'default_keys':tuple(default_keys),
                 'persist_shortcut':persist_shortcut}
         self.shortcuts[unique_name] = shortcut
-        group = group if group else pgettext('keyboard shortcuts', _('Miscellaneous'))
+        group = group if group else pgettext('keyboard shortcuts', 'Miscellaneous')
         self.groups[group] = self.groups.get(group, []) + [unique_name]
 
     def unregister_shortcut(self, unique_name):
@@ -170,15 +174,14 @@ class Manager(QObject):  # {{{
         done unregistering.
         '''
         self.shortcuts.pop(unique_name, None)
-        for group in itervalues(self.groups):
+        for group in self.groups.values():
             try:
                 group.remove(unique_name)
             except ValueError:
                 pass
 
     def finalize(self):
-        custom_keys_map = {un:tuple(keys) for un, keys in iteritems(self.config.get(
-            'map', {}))}
+        custom_keys_map = {un:tuple(keys) for un, keys in self.config.get('map', {}).items()}
         self.keys_map = finalize(self.shortcuts, custom_keys_map=custom_keys_map)
 
     def replace_action(self, unique_name, new_action):
@@ -193,8 +196,8 @@ class Manager(QObject):  # {{{
 
 # }}}
 
-# Model {{{
 
+# Model {{{
 
 class Node:
 
@@ -224,17 +227,15 @@ class ConfigModel(SearchQueryParser, QAbstractItemModel):
 
         self.keyboard = keyboard
         groups = sorted(keyboard.groups, key=sort_key)
-        shortcut_map = {k:v.copy() for k, v in
-                iteritems(self.keyboard.shortcuts)}
-        for un, s in iteritems(shortcut_map):
+        shortcut_map = {k:v.copy() for k, v in self.keyboard.shortcuts.items()}
+        for un, s in shortcut_map.items():
             s['keys'] = tuple(self.keyboard.keys_map.get(un, ()))
             s['unique_name'] = un
-            s['group'] = [g for g, names in iteritems(self.keyboard.groups) if un in
+            s['group'] = [g for g, names in self.keyboard.groups.items() if un in
                     names][0]
 
         group_map = {group:sorted(names, key=lambda x:
-                sort_key(shortcut_map[x]['name'])) for group, names in
-                iteritems(self.keyboard.groups)}
+                sort_key(shortcut_map[x]['name'])) for group, names in self.keyboard.groups.items()}
 
         self.data = [Node(group_map, shortcut_map, group) for group in groups]
 
@@ -258,7 +259,7 @@ class ConfigModel(SearchQueryParser, QAbstractItemModel):
             ip = self.data
         try:
             return self.createIndex(row, column, ip[row])
-        except:
+        except Exception:
             pass
         return ROOT
 
@@ -310,17 +311,15 @@ class ConfigModel(SearchQueryParser, QAbstractItemModel):
         options_map = {}
         options_map.update(self.keyboard.config.get('options_map', {}))
         # keep mapped keys that are marked persistent.
-        for un, keys in iteritems(self.keyboard.config.get('map', {})):
+        for un, keys in self.keyboard.config.get('map', {}).items():
             if options_map.get(un, {}).get('persist_shortcut',False):
                 kmap[un] = keys
         for node in self.all_shortcuts:
             sc = node.data
             un = sc['unique_name']
             if sc['set_to_default']:
-                if un in kmap:
-                    del kmap[un]
-                if un in options_map:
-                    del options_map[un]
+                kmap.pop(un, None)
+                options_map.pop(un, None)
             else:
                 if sc['persist_shortcut']:
                     options_map[un] = options_map.get(un, {})
@@ -353,10 +352,15 @@ class ConfigModel(SearchQueryParser, QAbstractItemModel):
             else:
                 try:
                     sc = self.data[c].children[p].data
-                except:
+                except Exception:
                     continue
-                if query in lower(sc['name']):
+                if query in lower(sc['name']) or query in lower(sc.get('desc') or ''):
                     ans.add((c, p))
+                else:
+                    for key in sc['keys']:
+                        if query in lower(key.toString(QKeySequence.SequenceFormat.NativeText)):
+                            ans.add((c, p))
+                            break
         return ans
 
     def find(self, query):
@@ -445,28 +449,29 @@ class Editor(QFrame):  # {{{
             la = QLabel(text)
             la.setStyleSheet('QLabel { margin-left: 1.5em }')
             l.addWidget(la, off+which, 0, 1, 3)
-            setattr(self, 'label%d'%which, la)
+            setattr(self, f'label{which}', la)
             button = QPushButton(_('None'), self)
+            button.setObjectName(_('None'))
             button.clicked.connect(partial(self.capture_clicked, which=which))
             button.installEventFilter(self)
-            setattr(self, 'button%d'%which, button)
+            setattr(self, f'button{which}', button)
             clear = QToolButton(self)
             clear.setIcon(QIcon.ic('clear_left.png'))
             clear.clicked.connect(partial(self.clear_clicked, which=which))
-            setattr(self, 'clear%d'%which, clear)
+            setattr(self, f'clear{which}', clear)
             l.addWidget(button, off+which, 1, 1, 1)
             l.addWidget(clear, off+which, 2, 1, 1)
             la.setBuddy(button)
 
         self.done_button = doneb = QPushButton(_('Done'), self)
         l.addWidget(doneb, 0, 2, 1, 1)
-        doneb.clicked.connect(lambda : self.editing_done.emit(self))
+        doneb.clicked.connect(lambda: self.editing_done.emit(self))
         l.setColumnStretch(0, 100)
 
         self.custom_toggled(False)
 
     def initialize(self, shortcut, all_shortcuts):
-        self.header.setText('<b>%s: %s</b>'%(_('Customize'), shortcut['name']))
+        self.header.setText('<b>{}: {}</b>'.format(_('Customize'), shortcut['name']))
         self.all_shortcuts = all_shortcuts
         self.shortcut = shortcut
 
@@ -490,8 +495,10 @@ class Editor(QFrame):  # {{{
         else:
             self.use_custom.setChecked(True)
             for key, which in zip(self.current_keys, [1,2]):
-                button = getattr(self, 'button%d'%which)
-                button.setText(key.toString(QKeySequence.SequenceFormat.NativeText))
+                button = getattr(self, f'button{which}')
+                ns = key.toString(QKeySequence.SequenceFormat.NativeText)
+                button.setText(ns.replace('&', '&&'))
+                button.setObjectName(ns)
 
     def custom_toggled(self, checked):
         for w in ('1', '2'):
@@ -500,14 +507,15 @@ class Editor(QFrame):  # {{{
 
     def capture_clicked(self, which=1):
         self.capture = which
-        button = getattr(self, 'button%d'%which)
+        button = getattr(self, f'button{which}')
         button.setText(_('Press a key...'))
         button.setFocus(Qt.FocusReason.OtherFocusReason)
         button.setStyleSheet('QPushButton { font-weight: bold}')
 
     def clear_clicked(self, which=0):
-        button = getattr(self, 'button%d'%which)
+        button = getattr(self, f'button{which}')
         button.setText(_('None'))
+        button.setObjectName(_('None'))
 
     def eventFilter(self, obj, event):
         if self.capture and obj in (self.button1, self.button2):
@@ -515,7 +523,7 @@ class Editor(QFrame):  # {{{
             if t == QEvent.Type.ShortcutOverride:
                 event.accept()
                 return True
-            if t == QEvent.Type.KeyPress:
+            if t == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
                 self.key_press_event(event, 1 if obj is self.button1 else 2)
                 return True
         return QFrame.eventFilter(self, obj, event)
@@ -528,9 +536,11 @@ class Editor(QFrame):  # {{{
             return QWidget.keyPressEvent(self, ev)
         ev.accept()
 
-        button = getattr(self, 'button%d'%which)
+        button = getattr(self, f'button{which}')
         button.setStyleSheet('QPushButton { font-weight: normal}')
-        button.setText(sequence.toString(QKeySequence.SequenceFormat.NativeText))
+        ns = sequence.toString(QKeySequence.SequenceFormat.NativeText)
+        button.setText(ns.replace('&', '&&'))
+        button.setObjectName(ns)
         self.capture = 0
         dup_desc = self.dup_check(sequence)
         if dup_desc is not None:
@@ -553,17 +563,17 @@ class Editor(QFrame):  # {{{
             return None
         ans = []
         for which in (1, 2):
-            button = getattr(self, 'button%d'%which)
-            t = str(button.text())
-            if t == _('None'):
+            button = getattr(self, f'button{which}')
+            t = button.objectName()
+            if not t or t == _('None'):
                 continue
             ks = QKeySequence(t, QKeySequence.SequenceFormat.NativeText)
             if not ks.isEmpty():
                 ans.append(ks)
         return tuple(ans)
 
-
 # }}}
+
 
 class Delegate(QStyledItemDelegate):  # {{{
 
@@ -586,12 +596,12 @@ class Delegate(QStyledItemDelegate):  # {{{
                 keys = _('None')
             else:
                 keys = ', '.join(keys)
-            html = '<b>%s</b><br>%s: %s'%(
+            html = '<b>{}</b><br>{}: {}'.format(
                 prepare_string_for_xml(shortcut['name']), _('Shortcuts'), prepare_string_for_xml(keys))
         else:
             # Group
             html = data.data
-        doc =  QTextDocument()
+        doc = QTextDocument()
         doc.setHtml(html)
         return doc
 
@@ -694,7 +704,7 @@ class ShortcutConfig(QWidget):  # {{{
         self.delegate.changed_signal.connect(self.changed_signal)
         self.search = SearchBox2(self)
         self.search.initialize('shortcuts_search_history',
-                help_text=_('Search for a shortcut by name'))
+                help_text=_('Search for a shortcut by name or key combination'))
         self.search.search.connect(self.find)
         self._h = h = QHBoxLayout()
         l.addLayout(h)

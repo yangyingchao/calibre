@@ -16,7 +16,6 @@ from calibre.gui2.widgets2 import to_plain_text
 from calibre.ptempfile import TemporaryFile
 from calibre.utils.icu import utf16_length
 from calibre.utils.ipc.simple_worker import WorkerError, fork_job
-from polyglot.builtins import native_string_type
 
 
 class RegexBuilder(QDialog, Ui_RegexBuilder):
@@ -40,11 +39,10 @@ class RegexBuilder(QDialog, Ui_RegexBuilder):
 
         self.cancelled = False
         self.button_box.accepted.connect(self.accept)
-        self.regex.textChanged[native_string_type].connect(self.regex_valid)
+        self.regex.textChanged[str].connect(self.regex_valid)
         for src, slot in (('test', 'do'), ('previous', 'goto'), ('next',
             'goto')):
-            getattr(self, src).clicked.connect(getattr(self, '%s_%s'%(slot,
-                src)))
+            getattr(self, src).clicked.connect(getattr(self, f'{slot}_{src}'))
         self.test.setDefault(True)
 
         self.match_locs = []
@@ -61,7 +59,7 @@ class RegexBuilder(QDialog, Ui_RegexBuilder):
                 compile_regular_expression(regex)
                 self.regex.setStyleSheet('QLineEdit { color: black; background-color: rgba(0,255,0,20%); }')
                 return True
-            except:
+            except Exception:
                 self.regex.setStyleSheet('QLineEdit { color: black; background-color: rgba(255,0,0,20%); }')
         else:
             self.regex.setStyleSheet('QLineEdit { color: black; background-color: white; }')
@@ -174,7 +172,7 @@ class RegexBuilder(QDialog, Ui_RegexBuilder):
         finally:
             try:
                 os.remove(fpath)
-            except:
+            except Exception:
                 # Fails on windows if the input plugin for this format keeps the file open
                 # Happens for LIT files
                 pass
@@ -189,8 +187,8 @@ class RegexBuilder(QDialog, Ui_RegexBuilder):
                     (pathtoebook, tf))
             except WorkerError as e:
                 return error_dialog(self, _('Failed to generate preview'),
-                        err_msg, det_msg=e.orig_tb, show=True)
-            except:
+                        err_msg, det_msg=str(e) + '\n\n' + e.orig_tb, show=True)
+            except Exception:
                 import traceback
                 return error_dialog(self, _('Failed to generate preview'),
                         err_msg, det_msg=traceback.format_exc(), show=True)

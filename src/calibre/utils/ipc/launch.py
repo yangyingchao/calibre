@@ -14,12 +14,12 @@ from calibre.ptempfile import PersistentTemporaryFile, base_dir
 from calibre.utils.config import prefs
 from calibre.utils.serialize import msgpack_dumps
 from polyglot.binary import as_hex_unicode
-from polyglot.builtins import environ_item, native_string_type, string_or_bytes
+from polyglot.builtins import environ_item
 
 if iswindows:
     try:
         windows_null_file = open(os.devnull, 'wb')
-    except:
+    except Exception:
         raise RuntimeError('NUL file missing in windows. This indicates a'
                 ' corrupted windows. You should contact Microsoft'
                 ' for assistance and/or follow the steps described here: https://bytes.com/topic/net/answers/264804-compile-error-null-device-missing')
@@ -28,7 +28,7 @@ if iswindows:
 def renice(niceness):
     try:
         os.nice(niceness)
-    except:
+    except Exception:
         pass
 
 
@@ -55,7 +55,7 @@ def exe_path(exe_name):
     e = exe_name
     if iswindows:
         return os.path.join(os.path.dirname(sys.executable),
-                e+'.exe' if isfrozen else 'Scripts\\%s.exe'%e)
+                e+'.exe' if isfrozen else f'Scripts\\{e}.exe')
     if ismacos:
         return os.path.join(sys.executables_location, e)
 
@@ -67,6 +67,20 @@ def exe_path(exe_name):
         if os.access(c, os.X_OK):
             return c
     return e
+
+
+def headless_exe_path(exe_name='calibre-parallel'):
+    if ismacos and not hasattr(sys, 'running_from_setup'):
+        return os.path.join(macos_headless_bundle_path(), exe_name)
+    return exe_path(exe_name)
+
+
+def windows_creationflags_for_worker_process(priority: str = 'normal') -> int:
+    return {
+        'high'  : subprocess.HIGH_PRIORITY_CLASS,
+        'normal': subprocess.NORMAL_PRIORITY_CLASS,
+        'low'   : subprocess.IDLE_PRIORITY_CLASS
+    }[priority] | subprocess.DETACHED_PROCESS
 
 
 class Worker:
@@ -86,9 +100,7 @@ class Worker:
 
     @property
     def executable(self):
-        if ismacos and not hasattr(sys, 'running_from_setup'):
-            return os.path.join(macos_headless_bundle_path(), self.exe_name)
-        return exe_path(self.exe_name)
+        return headless_exe_path(self.exe_name)
 
     @property
     def gui_executable(self):
@@ -105,9 +117,9 @@ class Worker:
     @property
     def env(self):
         env = os.environ.copy()
-        env[native_string_type('CALIBRE_WORKER')] = environ_item('1')
+        env['CALIBRE_WORKER'] = environ_item('1')
         td = as_hex_unicode(msgpack_dumps(base_dir()))
-        env[native_string_type('CALIBRE_WORKER_TEMP_DIR')] = environ_item(td)
+        env['CALIBRE_WORKER_TEMP_DIR'] = environ_item(td)
         env.update(self._env)
         return env
 
@@ -131,7 +143,7 @@ class Worker:
     def close_log_file(self):
         try:
             self._file.close()
-        except:
+        except Exception:
             pass
 
     def kill(self):
@@ -148,7 +160,7 @@ class Worker:
                 finally:
                     if self.is_alive:
                         self.child.kill()
-        except:
+        except Exception:
             pass
 
     def __init__(self, env=None, gui=False, job_name=None):
@@ -168,26 +180,22 @@ class Worker:
         except OSError:
             # cwd no longer exists
             origwd = cwd or os.path.expanduser('~')
-        env[native_string_type('ORIGWD')] = environ_item(as_hex_unicode(msgpack_dumps(origwd)))
+        env['ORIGWD'] = environ_item(as_hex_unicode(msgpack_dumps(origwd)))
         _cwd = cwd
         if priority is None:
             priority = prefs['worker_process_priority']
-        cmd = [exe] if isinstance(exe, string_or_bytes) else exe
+        cmd = [exe] if isinstance(exe, (str, bytes)) else exe
         args = {
-                'env' : env,
-                'cwd' : _cwd,
+                'env': env,
+                'cwd': _cwd,
                 }
         if iswindows:
-            priority = {
-                    'high'   : subprocess.HIGH_PRIORITY_CLASS,
-                    'normal' : subprocess.NORMAL_PRIORITY_CLASS,
-                    'low'    : subprocess.IDLE_PRIORITY_CLASS}[priority]
-            args['creationflags'] = subprocess.CREATE_NO_WINDOW|priority
+            args['creationflags'] = windows_creationflags_for_worker_process(priority)
         else:
             niceness = {
-                    'normal' : 0,
-                    'low'    : 10,
-                    'high'   : 20,
+                    'normal': 0,
+                    'low'   : 10,
+                    'high'  : 20,
             }[priority]
             args['env']['CALIBRE_WORKER_NICENESS'] = str(niceness)
         ret = None

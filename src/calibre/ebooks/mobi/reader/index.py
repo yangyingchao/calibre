@@ -9,14 +9,13 @@ import struct
 from collections import OrderedDict, namedtuple
 
 from calibre.ebooks.mobi.utils import count_set_bits, decint, decode_string
-from polyglot.builtins import iteritems
 
 TagX = namedtuple('TagX', 'tag num_of_values bitmask eof')
 PTagX = namedtuple('PTagX', 'tag value_count value_bytes num_of_values')
 INDEX_HEADER_FIELDS = (
             'len', 'nul1', 'type', 'gen', 'start', 'count', 'code',
             'lng', 'total', 'ordt', 'ligt', 'nligt', 'ncncx'
-    ) + tuple('unknown%d'%i for i in range(27)) + ('ocnt', 'oentries',
+    ) + tuple(f'unknown{i}' for i in range(27)) + ('ocnt', 'oentries',
             'ordt1', 'ordt2', 'tagx')
 
 
@@ -26,7 +25,7 @@ class InvalidFile(ValueError):
 
 def check_signature(data, signature):
     if data[:len(signature)] != signature:
-        raise InvalidFile('Not a valid %r section'%signature)
+        raise InvalidFile(f'Not a valid {signature!r} section')
 
 
 class NotAnINDXRecord(InvalidFile):
@@ -39,7 +38,7 @@ class NotATAGXSection(InvalidFile):
 
 def format_bytes(byts):
     byts = bytearray(byts)
-    byts = [hex(b)[2:] for b in byts]
+    byts = [f'{b:x}' for b in byts]
     return ' '.join(byts)
 
 
@@ -47,7 +46,7 @@ def parse_indx_header(data):
     check_signature(data, b'INDX')
     words = INDEX_HEADER_FIELDS
     num = len(words)
-    values = struct.unpack('>%dL' % num, data[4:4*(num+1)])
+    values = struct.unpack(f'>{num}L', data[4:4*(num+1)])
     ans = dict(zip(words, values))
     ans['idx_header_end_pos'] = 4 * (num+1)
     ordt1, ordt2 = ans['ordt1'], ans['ordt2']
@@ -55,7 +54,7 @@ def parse_indx_header(data):
     ans['ordt_map'] = ''
 
     if ordt1 > 0 and data[ordt1:ordt1+4] == b'ORDT':
-        # I dont know what this is, but using it seems to be unnecessary, so
+        # I don't know what this is, but using it seems to be unnecessary, so
         # just leave it as the raw bytestring
         ans['ordt1_raw'] = data[ordt1+4:ordt1+4+ans['oentries']]
     if ordt2 > 0 and data[ordt2:ordt2+4] == b'ORDT':
@@ -100,11 +99,10 @@ class CNCX:  # {{{
                     try:
                         self.records[pos+record_offset] = raw[
                             pos+consumed:pos+consumed+length].decode(codec)
-                    except:
+                    except Exception:
                         byts = raw[pos:]
                         r = format_bytes(byts)
-                        print('CNCX entry at offset %d has unknown format %s'%(
-                            pos+record_offset, r))
+                        print(f'CNCX entry at offset {pos + record_offset} has unknown format {r}')
                         self.records[pos+record_offset] = r
                         pos = len(raw)
                 pos += consumed+length
@@ -121,10 +119,10 @@ class CNCX:  # {{{
     __nonzero__ = __bool__
 
     def iteritems(self):
-        return iteritems(self.records)
+        return iter(self.records.items())
 
     def items(self):
-        return iteritems(self.records)
+        return self.records.items()
 # }}}
 
 
@@ -193,8 +191,7 @@ def get_tag_map(control_byte_count, tagx, data, strict=False):
                 total_consumed += consumed
                 values.append(byts)
             if total_consumed != x.value_bytes:
-                err = ("Error: Should consume %s bytes, but consumed %s" %
-                        (x.value_bytes, total_consumed))
+                err = (f'Error: Should consume {x.value_bytes} bytes, but consumed {total_consumed}')
                 if strict:
                     raise ValueError(err)
                 else:
@@ -202,8 +199,7 @@ def get_tag_map(control_byte_count, tagx, data, strict=False):
         ans[x.tag] = values
     # Test that all bytes have been processed
     if data.replace(b'\0', b''):
-        err = ("Warning: There are unprocessed index bytes left: %s" %
-                format_bytes(data))
+        err = (f'Warning: There are unprocessed index bytes left: {format_bytes(data)}')
         if strict:
             raise ValueError(err)
         else:

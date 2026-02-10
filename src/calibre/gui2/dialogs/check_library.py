@@ -64,6 +64,13 @@ class DBCheck(QDialog):  # {{{
         la.setWordWrap(True)
         l.addWidget(la)
 
+        self.annots = a = QCheckBox(_('Also rebuild the annotations search index'))
+        l.addWidget(a)
+        la = QLabel('<p style="margin-left: 20px; font-style: italic">' + _(
+            'This can be a slow operation, depending on the number of annotations you have.'))
+        la.setWordWrap(True)
+        l.addWidget(la)
+
         self.fts = f = QCheckBox(_('Also compact the Full text search database'))
         l.addWidget(f)
         la = QLabel('<p style="margin-left: 20px; font-style: italic">' + _(
@@ -106,12 +113,13 @@ class DBCheck(QDialog):  # {{{
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
         self.vacuum_started = True
         db = self.db()
-        t = self.thread = Thread(target=self.vacuum, args=(db, self.fts.isChecked(), self.notes.isChecked()), daemon=True, name='VacuumDB')
+        t = self.thread = Thread(target=self.vacuum, args=(
+            db, self.fts.isChecked(), self.notes.isChecked(), self.annots.isChecked()), daemon=True, name='VacuumDB')
         t.start()
 
-    def vacuum(self, db, include_fts_db, include_notes_db):
+    def vacuum(self, db, include_fts_db, include_notes_db, rebuild_annotations_fts):
         try:
-            db.vacuum(include_fts_db, include_notes_db)
+            db.vacuum(include_fts_db, include_notes_db, rebuild_annotations_fts)
         except Exception as e:
             import traceback
             self.error = (as_unicode(e), traceback.format_exc())
@@ -421,22 +429,22 @@ class CheckLibraryDialog(QDialog):
             self.log.blockSignals(True)
             if col:
                 node.setCheckState(col, to_what)
-            for i in range(0, node.childCount()):
+            for i in range(node.childCount()):
                 node.child(i).setCheckState(2, to_what)
             self.log.blockSignals(False)
 
         def is_child_delete_checked(node):
             checked = False
             all_checked = True
-            for i in range(0, node.childCount()):
+            for i in range(node.childCount()):
                 c = node.child(i).checkState(2)
                 checked = checked or c == Qt.CheckState.Checked
                 all_checked = all_checked and c == Qt.CheckState.Checked
-            return (checked, all_checked)
+            return checked, all_checked
 
         def any_child_delete_checked():
             for parent in self.top_level_items.values():
-                (c, _) = is_child_delete_checked(parent)
+                c, _ = is_child_delete_checked(parent)
                 if c:
                     return True
             return False
@@ -464,7 +472,7 @@ class CheckLibraryDialog(QDialog):
         else:
             for parent in self.top_level_items.values():
                 if parent.data(2, Qt.ItemDataRole.UserRole) == self.is_deletable:
-                    (child_chkd, all_chkd) = is_child_delete_checked(parent)
+                    child_chkd, all_chkd = is_child_delete_checked(parent)
                     if all_chkd and child_chkd:
                         check_state = Qt.CheckState.Checked
                     elif child_chkd:
@@ -513,7 +521,7 @@ class CheckLibraryDialog(QDialog):
                         delete_tree(p)
                     else:
                         delete_file(p)
-                except:
+                except Exception:
                     prints('failed to delete',
                             os.path.join(self.db.library_path,
                                 str(it.text(2))))
@@ -522,7 +530,7 @@ class CheckLibraryDialog(QDialog):
     def fix_missing_formats(self):
         tl = self.top_level_items['missing_formats']
         child_count = tl.childCount()
-        for i in range(0, child_count):
+        for i in range(child_count):
             item = tl.child(i)
             id = int(item.data(0, Qt.ItemDataRole.UserRole))
             all = self.db.formats(id, index_is_id=True, verify_formats=False)
@@ -535,7 +543,7 @@ class CheckLibraryDialog(QDialog):
     def fix_missing_covers(self):
         tl = self.top_level_items['missing_covers']
         child_count = tl.childCount()
-        for i in range(0, child_count):
+        for i in range(child_count):
             item = tl.child(i)
             id = int(item.data(0, Qt.ItemDataRole.UserRole))
             self.db.set_has_cover(id, False)
@@ -543,10 +551,40 @@ class CheckLibraryDialog(QDialog):
     def fix_extra_covers(self):
         tl = self.top_level_items['extra_covers']
         child_count = tl.childCount()
-        for i in range(0, child_count):
+        for i in range(child_count):
             item = tl.child(i)
             id = int(item.data(0, Qt.ItemDataRole.UserRole))
             self.db.set_has_cover(id, True)
+
+    def fix_malformed_paths(self):
+        tl = self.top_level_items['malformed_paths']
+        child_count = tl.childCount()
+        for i in range(child_count):
+            item = tl.child(i)
+            id_ = int(item.data(0, Qt.ItemDataRole.UserRole))
+            lib_path = item.text(2)
+            db_path = self.db.path(id_, index_is_id=True)
+            path_ath_lib = os.path.join(self.db.library_path, lib_path.split(os.sep)[0])
+            path_ath_db = os.path.join(self.db.library_path, db_path.split(os.sep)[0])
+            path_lib = os.path.join(self.db.library_path, lib_path)
+            path_db = os.path.join(self.db.library_path, db_path)
+            os.makedirs(path_ath_db, exist_ok=True)
+            os.rename(path_lib, path_db)
+            dirpath, dirnames, filenames = next(os.walk(path_ath_lib))
+            if not dirnames and not filenames:
+                os.rmdir(path_ath_lib)
+
+    def fix_malformed_formats(self):
+        tl = self.top_level_items['malformed_formats']
+        child_count = tl.childCount()
+        for i in range(child_count):
+            item = tl.child(i)
+            id_ = int(item.data(0, Qt.ItemDataRole.UserRole))
+            lib_path = item.text(2)
+            book_path = os.path.join(*lib_path.split(os.sep)[:-1])
+            ext = os.path.splitext(lib_path)[1].strip('.')
+            filename = self.db.new_api.format_files(id_)[ext.upper()] +'.'+ ext.lower()
+            os.rename(os.path.join(self.db.library_path, lib_path), os.path.join(self.db.library_path, book_path, filename))
 
     def fix_items(self):
         for check in CHECKS:

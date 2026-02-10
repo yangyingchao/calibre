@@ -9,7 +9,6 @@ import numbers
 from collections import Counter
 
 from calibre.ebooks.oeb.base import XPath, barename
-from polyglot.builtins import iteritems
 
 
 class RemoveAdobeMargins:
@@ -40,7 +39,6 @@ class NegativeTextIndent(Exception):
 
 
 class RemoveFakeMargins:
-
     '''
     Remove left and right margins from paragraph/divs if the same margin is specified
     on almost all the elements at that level.
@@ -76,7 +74,7 @@ class RemoveFakeMargins:
                 self.process_level(level)
             except NegativeTextIndent:
                 self.log.debug('Negative text indent detected at level '
-                        ' %s, ignoring this level'%level)
+                        f' {level}, ignoring this level')
 
     def get_margins(self, elem):
         cls = elem.get('class', None)
@@ -85,11 +83,10 @@ class RemoveFakeMargins:
             if style:
                 try:
                     ti = style['text-indent']
-                except:
+                except Exception:
                     pass
                 else:
-                    if ((hasattr(ti, 'startswith') and ti.startswith('-')) or
-                            isinstance(ti, numbers.Number) and ti < 0):
+                    if ((hasattr(ti, 'startswith') and ti.startswith('-')) or (isinstance(ti, numbers.Number) and ti < 0)):
                         raise NegativeTextIndent()
                 return style.marginLeft, style.marginRight, style
         return '', '', None
@@ -112,11 +109,11 @@ class RemoveFakeMargins:
 
         if remove_left:
             mcl = self.stats[level+'_left'].most_common(1)[0][0]
-            self.log('Removing level %s left margin of:'%level, mcl)
+            self.log(f'Removing level {level} left margin of:', mcl)
 
         if remove_right:
             mcr = self.stats[level+'_right'].most_common(1)[0][0]
-            self.log('Removing level %s right margin of:'%level, mcr)
+            self.log(f'Removing level {level} right margin of:', mcr)
 
         if remove_left or remove_right:
             for elem in elems:
@@ -145,15 +142,15 @@ class RemoveFakeMargins:
 
             for p in paras(body):
                 level = level_of(p, body)
-                level = '%s_%d'%(barename(p.tag), level)
+                level = f'{barename(p.tag)}_{level}'
                 if level not in self.levels:
                     self.levels[level] = []
                 self.levels[level].append(p)
 
         remove = set()
-        for k, v in iteritems(self.levels):
+        for k, v in self.levels.items():
             num = len(v)
-            self.log.debug('Found %d items of level:'%num, k)
+            self.log.debug(f'Found {num} items of level:', k)
             level = int(k.split('_')[-1])
             tag = k.split('_')[0]
             if tag == 'p' and num < 25:

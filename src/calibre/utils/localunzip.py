@@ -15,12 +15,11 @@ Tries to only use the local headers to extract data from the damaged zip file.
 import os
 import shutil
 import sys
-import zlib
 from collections import OrderedDict, namedtuple
+from compression import zlib
 from struct import calcsize, pack, unpack
 
 from calibre.ptempfile import SpooledTemporaryFile
-from polyglot.builtins import itervalues
 
 HEADER_SIG = 0x04034b50
 HEADER_BYTE_SIG = pack(b'<L', HEADER_SIG)
@@ -37,8 +36,8 @@ LocalHeader = namedtuple('LocalHeader',
 
 if hasattr(sys, 'getwindowsversion'):
     windows_reserved_filenames = (
-        'CON', 'PRN', 'AUX', 'CLOCK$', 'NUL' 'COM0', 'COM1', 'COM2', 'COM3',
-        'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9' 'LPT0', 'LPT1', 'LPT2',
+        'CON', 'PRN', 'AUX', 'CLOCK$', 'NUL', 'COM0', 'COM1', 'COM2', 'COM3',
+        'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9', 'LPT0', 'LPT1', 'LPT2',
         'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9')
 
     def is_reserved_filename(x):
@@ -54,12 +53,12 @@ def decode_arcname(name):
         from calibre.ebooks.chardet import detect
         try:
             name = name.decode('utf-8')
-        except:
+        except Exception:
             res = detect(name)
             encoding = res['encoding']
             try:
                 name = name.decode(encoding)
-            except:
+            except Exception:
                 name = name.decode('utf-8', 'replace')
     return name
 
@@ -186,8 +185,7 @@ def copy_compressed_file(src, size, dest):
             dest.write(d.decompress(d.unconsumed_tail, 200*1024))
 
             if count > 100:
-                raise ValueError('This ZIP file contains a ZIP bomb in %s'%
-                        os.path.basename(dest.name))
+                raise ValueError(f'This ZIP file contains a ZIP bomb in {os.path.basename(dest.name)}')
 
 
 def _extractall(f, path=None, file_info=None):
@@ -203,7 +201,7 @@ def _extractall(f, path=None, file_info=None):
         # .
         fname = header.filename.replace(os.sep, '/')
         fname = os.path.splitdrive(fname)[1]
-        parts = [x for x in fname.split('/') if x not in {'', os.path.pardir, os.path.curdir}]
+        parts = tuple(x for x in fname.split('/') if x not in {'', os.path.pardir, os.path.curdir})
         if not parts:
             continue
         if header.uncompressed_size == 0:
@@ -228,7 +226,7 @@ def _extractall(f, path=None, file_info=None):
             except OSError:
                 if is_reserved_filename(os.path.basename(dest)):
                     raise ValueError('This ZIP file contains a file with a reserved filename'
-                            ' that cannot be processed on Windows: {}'.format(os.path.basename(dest)))
+                            f' that cannot be processed on Windows: {os.path.basename(dest)}')
                 raise
             with df:
                 if header.compression_method == ZIP_STORED:
@@ -269,7 +267,7 @@ class LocalZipFile:
     def _get_file_info(self, name):
         fi = self.file_info.get(name)
         if fi is None:
-            raise ValueError('This ZIP container has no file named: %s'%name)
+            raise ValueError(f'This ZIP container has no file named: {name}')
         return fi
 
     def open(self, name, spool_size=5*1024*1024):
@@ -317,7 +315,7 @@ class LocalZipFile:
 
         with SpooledTemporaryFile(max_size=100*1024*1024) as temp:
             ztemp = ZipFile(temp, 'w')
-            for offset, header in itervalues(self.file_info):
+            for offset, header in self.file_info.values():
                 if header.filename in names:
                     zi = ZipInfo(header.filename)
                     zi.compress_type = header.compression_method

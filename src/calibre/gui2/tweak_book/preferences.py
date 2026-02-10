@@ -55,7 +55,6 @@ from calibre.gui2.tweak_book.widgets import Dialog
 from calibre.gui2.widgets2 import ColorButton
 from calibre.startup import connect_lambda
 from calibre.utils.localization import get_lang, ngettext
-from polyglot.builtins import iteritems, itervalues
 
 
 class BasicSettings(QWidget):  # {{{
@@ -84,10 +83,9 @@ class BasicSettings(QWidget):  # {{{
                 setter = setter or (lambda x, v:x.setValue(v))
                 widget.valueChanged.connect(self.emit_changed)
             else:
-                raise TypeError('Unknown setting type for setting: %s' % name)
-        else:
-            if getter is None or setter is None:
-                raise ValueError("getter or setter not provided for: %s" % name)
+                raise TypeError(f'Unknown setting type for setting: {name}')
+        elif getter is None or setter is None:
+            raise ValueError(f'getter or setter not provided for: {name}')
         self._prevent_changed = True
         setter(widget, inval)
         self._prevent_changed = False
@@ -99,7 +97,7 @@ class BasicSettings(QWidget):  # {{{
         prefs = prefs or tprefs
         widget = QComboBox(self)
         widget.currentIndexChanged.connect(self.emit_changed)
-        for key, human in sorted(iteritems(choices), key=lambda key_human: key_human[1] or key_human[0]):
+        for key, human in sorted(choices.items(), key=lambda key_human: key_human[1] or key_human[0]):
             widget.addItem(human or key, key)
 
         def getter(w):
@@ -136,7 +134,7 @@ class BasicSettings(QWidget):  # {{{
             order_map = {x:i for i, x in enumerate(val)}
             items = list(w.defaults)
             limit = len(items)
-            items.sort(key=lambda x:order_map.get(x, limit))
+            items.sort(key=lambda x: order_map.get(x, limit))
             w.clear()
             for x in items:
                 i = QListWidgetItem(w)
@@ -161,7 +159,7 @@ class BasicSettings(QWidget):  # {{{
                         prefs[name] = cv
 
     def restore_defaults(self):
-        for setting in itervalues(self.settings):
+        for setting in self.settings.values():
             setting.setter(setting.widget, self.default_value(setting.name))
 
     def initial_value(self, name):
@@ -294,7 +292,7 @@ class EditorSettings(BasicSettings):  # {{{
         s = self.settings['editor_theme']
         current_val = s.getter(s.widget)
         s.widget.clear()
-        for key, human in sorted(iteritems(choices), key=lambda key_human1: key_human1[1] or key_human1[0]):
+        for key, human in sorted(choices.items(), key=lambda key_human1: key_human1[1] or key_human1[0]):
             s.widget.addItem(human or key, key)
         s.setter(s.widget, current_val)
         if d.theme_name:
@@ -402,7 +400,7 @@ class PreviewSettings(BasicSettings):  # {{{
         for fam in sorted(families):
             text = families[fam]
             w = QFontComboBox(self)
-            self('engine_preview_%s_family' % fam, widget=w, getter=partial(family_getter, fam), setter=partial(family_setter, fam))
+            self(f'engine_preview_{fam}_family', widget=w, getter=partial(family_getter, fam), setter=partial(family_setter, fam))
             l.addRow(_('Font family for &%s:') % text, w)
 
         w = self.choices_widget('preview_standard_font_family', families, 'serif', 'serif')
@@ -470,8 +468,7 @@ class PreviewSettings(BasicSettings):  # {{{
 # }}}
 
 
-# ToolbarSettings  {{{
-
+# ToolbarSettings {{{
 
 class ToolbarList(QListWidget):
 
@@ -593,26 +590,25 @@ class ToolbarSettings(QWidget):
             ans.setToolTip(ac.toolTip())
             return ans
 
-        for key, ac in sorted(iteritems(all_items), key=lambda k_ac: str(k_ac[1].text())):
+        for key, ac in sorted(all_items.items(), key=lambda k_ac: str(k_ac[1].text())):
             if key not in applied:
                 to_item(key, ac, self.available)
         if name == 'global_book_toolbar' and 'donate' not in applied:
             QListWidgetItem(QIcon.ic('donate.png'), _('Donate'), self.available).setData(Qt.ItemDataRole.UserRole, 'donate')
 
-        QListWidgetItem(blank, '--- %s ---' % _('Separator'), self.available)
+        QListWidgetItem(blank, '--- {} ---'.format(_('Separator')), self.available)
         for key in items:
             if key is None:
-                QListWidgetItem(blank, '--- %s ---' % _('Separator'), self.current)
+                QListWidgetItem(blank, '--- {} ---'.format(_('Separator')), self.current)
+            elif key == 'donate':
+                QListWidgetItem(QIcon.ic('donate.png'), _('Donate'), self.current).setData(Qt.ItemDataRole.UserRole, 'donate')
             else:
-                if key == 'donate':
-                    QListWidgetItem(QIcon.ic('donate.png'), _('Donate'), self.current).setData(Qt.ItemDataRole.UserRole, 'donate')
+                try:
+                    ac = all_items[key]
+                except KeyError:
+                    pass
                 else:
-                    try:
-                        ac = all_items[key]
-                    except KeyError:
-                        pass
-                    else:
-                        to_item(key, ac, self.current)
+                    to_item(key, ac, self.current)
 
     def bar_changed(self):
         name = self.current_name
@@ -722,7 +718,7 @@ class TemplatesDialog(Dialog):  # {{{
         self.helpl = la = QLabel(_(
             'The variables {0} and {1} will be replaced with the title and author of the book. {2}'
             ' is where the cursor will be positioned. If you want to include braces in your template,'
-            ' for example for CSS rules, you have to escape them, like this: {3}').format(*('<code>%s</code>'%x for x in
+            ' for example for CSS rules, you have to escape them, like this: {3}').format(*(f'<code>{x}</code>' for x in
                 ['{TITLE}', '{AUTHOR}', '%CURSOR%', 'body {{ color: red }}'])))
         la.setWordWrap(True)
         l.addWidget(la)

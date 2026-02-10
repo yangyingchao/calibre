@@ -13,7 +13,7 @@ from qt.core import QEventLoop
 from calibre import force_unicode
 from calibre.constants import DEBUG, filesystem_encoding, preferred_encoding
 from calibre.utils.config import dynamic
-from polyglot.builtins import reraise, string_or_bytes
+from polyglot.builtins import reraise
 
 
 def dialog_name(name, title):
@@ -78,7 +78,7 @@ def get_initial_dir(name, title, default_dir, no_save_dir):
         return ensure_dir(process_path(default_dir))
     key = dialog_name(name, title)
     saved = dynamic.get(key)
-    if not isinstance(saved, string_or_bytes):
+    if not isinstance(saved, (str, bytes)):
         saved = None
     if saved and os.path.isdir(saved):
         return ensure_dir(process_path(saved))
@@ -233,7 +233,7 @@ def zenity_cmd(window, title, *rest):
     ans = ['zenity', '--modal', '--file-selection', '--title=' + title, '--separator=\n']
     winid = get_winid(window)
     if winid is not None:
-        ans += ['--attach=%d' % int(winid)]
+        ans += [f'--attach={int(winid)}']
     return ans + list(rest)
 
 
@@ -330,7 +330,7 @@ def linux_native_dialog(name):
             def r():
                 try:
                     ret[0] = func(window, *args, **kwargs)
-                except:
+                except Exception:
                     ret[1] = sys.exc_info()
                 while not loop.isRunning():
                     time.sleep(0.001)  # yield so that loop starts

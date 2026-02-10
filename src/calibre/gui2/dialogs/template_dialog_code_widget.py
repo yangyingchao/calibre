@@ -59,7 +59,7 @@ class CodeEditor(QPlainTextEdit):
     def line_number_area_width(self):
         # get largest width of digits
         fm = self.fontMetrics()
-        self.number_width = max(map(lambda x:fm.horizontalAdvance(str(x)), range(10)))
+        self.number_width = max(fm.horizontalAdvance(str(x)) for x in range(10))
         digits = 1
         limit = max(1, self.blockCount())
         while limit >= 10:
@@ -140,7 +140,7 @@ class CodeEditor(QPlainTextEdit):
             ev.accept()
             return
         key = ev.key()
-        if key == Qt.Key_Tab or key == Qt.Key_Backtab:
+        if key in (Qt.Key_Tab, Qt.Key_Backtab):
             '''
             Handle indenting usingTab and Shift Tab. This is remarkably
             difficult because of the way Qt represents the edit buffer.

@@ -7,9 +7,9 @@ import os
 import sys
 from contextlib import closing
 
-from qt.core import QIcon, QObject, Qt, QTimer, pyqtSignal
+from qt.core import QIcon, QObject, Qt, QTimer, pyqtSignal, sip
 
-from calibre.constants import VIEWER_APP_UID, islinux
+from calibre.constants import VIEWER_APP_UID, islinux, ismacos
 from calibre.gui2 import Application, error_dialog, setup_gui_option_parser
 from calibre.gui2.listener import send_message_in_process
 from calibre.gui2.viewer.config import get_session_pref, vprefs
@@ -146,15 +146,19 @@ View an e-book.
 
 
 def run_gui(app, opts, args, internal_book_data, listener=None):
+    from calibre.gui2.viewer.convert_book import initialize_worker
+    initialize_worker()
     acc = EventAccumulator(app)
     app.file_event_hook = acc
     app.load_builtin_fonts()
-    app.setWindowIcon(QIcon.ic('viewer.png'))
+    if not ismacos:
+        app.setWindowIcon(QIcon.ic('viewer.png'))
     migrate_previous_viewer_prefs()
     main = EbookViewer(
         open_at=opts.open_at, continue_reading=opts.continue_reading, force_reload=opts.force_reload,
         calibre_book_data=internal_book_data)
     main.set_exception_handler()
+    app.shutdown_signal_received.connect(main.request_close)
     if len(args) > 1:
         acc.events.append(os.path.abspath(args[-1]))
     acc.got_file.connect(main.handle_commandline_arg)
@@ -168,6 +172,12 @@ def run_gui(app, opts, args, internal_book_data, listener=None):
         main.set_full_screen(True)
 
     app.exec()
+    sip.delete(main)
+    sip.delete(app)
+    del main
+    del app
+    import gc
+    gc.collect(), gc.collect()
 
 
 def main(args=sys.argv):
@@ -202,9 +212,7 @@ def main(args=sys.argv):
     parser = option_parser()
     opts, args = parser.parse_args(args)
     oat = opts.open_at
-    if oat and not (
-            oat.startswith('toc:') or oat.startswith('toc-href:') or oat.startswith('toc-href-contains:') or
-            oat.startswith('epubcfi(/') or is_float(oat) or oat.startswith('ref:') or oat.startswith('search:') or oat.startswith('regex:')):
+    if oat and not (oat.startswith(('toc:', 'toc-href:', 'toc-href-contains:', 'epubcfi(/', 'ref:', 'search:', 'regex:')) or is_float(oat)):
         raise SystemExit(f'Not a valid --open-at value: {opts.open_at}')
 
     if not opts.new_instance and get_session_pref('singleinstance', False):

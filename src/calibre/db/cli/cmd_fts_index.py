@@ -104,7 +104,7 @@ def show_progress(left, total, rate):
     from calibre.db.utils import IndexingProgress
     ip = IndexingProgress()
     ip.update(left, total, rate)
-    print('\r\x1b[K' + _('{} of {} book files indexed, {}').format(total-left, total, ip.time_left), flush=True, end=' ...')
+    print('\r\x1b[K' + _('{0} of {1} book files indexed, {2}').format(total-left, total, ip.time_left), flush=True, end=' ...')
 
 
 def remote_wait_for_completion(dbctx, indexing_speed):
@@ -179,7 +179,7 @@ def main(opts, args, dbctx):
             parts = x.split(':', 1)
             book_id = int(parts[0])
             if len(parts) == 1:
-                return book_id,
+                return (book_id,)
             fmts = tuple(x.upper() for x in parts[1].split(','))
             return (book_id,) + fmts
 

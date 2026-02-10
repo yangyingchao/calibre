@@ -11,7 +11,6 @@ from calibre import replace_entities
 from calibre.ebooks.metadata.toc import TOC
 from calibre.ebooks.mobi.reader.headers import NULL_INDEX
 from calibre.ebooks.mobi.reader.index import read_index
-from polyglot.builtins import iteritems
 
 tag_fieldname_map = {
         1:  ['pos',0],
@@ -24,10 +23,10 @@ tag_fieldname_map = {
         22: ['child1',0],
         23: ['childn',0],
         69: ['image_index',0],
-        70 : ['desc_offset', 0],  # 'Description offset in cncx'
-        71 : ['author_offset', 0],  # 'Author offset in cncx'
-        72 : ['image_caption_offset', 0],  # 'Image caption offset in cncx',
-        73 : ['image_attr_offset', 0],  # 'Image attribution offset in cncx',
+        70: ['desc_offset', 0],  # 'Description offset in cncx'
+        71: ['author_offset', 0],  # 'Author offset in cncx'
+        72: ['image_caption_offset', 0],  # 'Image caption offset in cncx',
+        73: ['image_attr_offset', 0],  # 'Image attribution offset in cncx',
 
 }
 
@@ -35,13 +34,13 @@ default_entry = {
                     'pos':  -1,
                     'len':  0,
                     'noffs': -1,
-                    'text' : "Unknown Text",
-                    'hlvl' : -1,
-                    'kind' : "Unknown Class",
-                    'pos_fid' : None,
-                    'parent' : -1,
-                    'child1' : -1,
-                    'childn' : -1,
+                    'text': 'Unknown Text',
+                    'hlvl': -1,
+                    'kind': 'Unknown Class',
+                    'pos_fid': None,
+                    'parent': -1,
+                    'child1': -1,
+                    'childn': -1,
                     'description': None,
                     'author': None,
                     'image_caption': None,
@@ -55,14 +54,13 @@ def read_ncx(sections, index, codec):
     if index != NULL_INDEX:
         table, cncx = read_index(sections, index, codec)
 
-        for num, x in enumerate(iteritems(table)):
+        for num, x in enumerate(table.items()):
             text, tag_map = x
             entry = default_entry.copy()
             entry['name'] = text
             entry['num'] = num
 
-            for tag in tag_fieldname_map:
-                fieldname, i = tag_fieldname_map[tag]
+            for tag, (fieldname, i) in tag_fieldname_map.items():
                 if tag in tag_map:
                     fieldvalue = tag_map[tag][i]
                     if tag == 6:
@@ -70,9 +68,9 @@ def read_ncx(sections, index, codec):
                         # offset
                         fieldvalue = tuple(tag_map[tag])
                     entry[fieldname] = fieldvalue
-                    for which, name in iteritems({3:'text', 5:'kind', 70:'description',
+                    for which, name in {3:'text', 5:'kind', 70:'description',
                             71:'author', 72:'image_caption',
-                            73:'image_attribution'}):
+                            73:'image_attribution'}.items():
                         if tag == which:
                             entry[name] = cncx.get(fieldvalue,
                                     default_entry[name])

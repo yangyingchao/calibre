@@ -16,6 +16,7 @@ from qt.core import (
     QImage,
     QKeySequence,
     QLabel,
+    QMenu,
     QPainter,
     QPalette,
     QPixmap,
@@ -31,6 +32,7 @@ from qt.core import (
 
 from calibre import fit_image
 from calibre.gui2 import NO_URL_FORMATTING, choose_save_file, gprefs, max_available_height
+from calibre.gui2.palette import dark_palette
 
 
 def render_svg(widget, path):
@@ -60,7 +62,7 @@ class Label(QLabel):
     def __init__(self, scrollarea):
         super().__init__(scrollarea)
         scrollarea.zoom_requested.connect(self.zoom_requested)
-        self.setBackgroundRole(QPalette.ColorRole.Text if QApplication.instance().is_dark_theme else QPalette.ColorRole.Base)
+        self.setBackgroundRole(QPalette.ColorRole.NoRole)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.setScaledContents(True)
         self.default_cursor = self.cursor()
@@ -132,24 +134,41 @@ class ImageView(QDialog):
         QDialog.__init__(self)
         self.prefs = prefs
         self.current_image_name = ''
+        self.current_image_is_svg = False
         self.maximized_at_last_fullscreen = False
         self.setWindowFlag(Qt.WindowType.WindowMinimizeButtonHint)
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint)
         self.avail_geom = self.screen().availableGeometry()
         self.current_img = current_img
         self.current_url = current_url
+        self.transformed = False
         self.factor = 1.0
         self.geom_name = geom_name
-        self.zoom_in_action = ac = QAction(self)
+        self.zoom_in_action = ac = QAction(QIcon.ic('plus.png'), _('Zoom &in'), self)
         ac.triggered.connect(self.zoom_in)
         ac.setShortcuts([QKeySequence(QKeySequence.StandardKey.ZoomIn), QKeySequence('+', QKeySequence.SequenceFormat.PortableText)])
         self.addAction(ac)
-        self.zoom_out_action = ac = QAction(self)
+        self.zoom_out_action = ac = QAction(QIcon.ic('minus.png'), _('Zoom &out'), self)
         ac.triggered.connect(self.zoom_out)
         ac.setShortcuts([QKeySequence(QKeySequence.StandardKey.ZoomOut), QKeySequence('-', QKeySequence.SequenceFormat.PortableText)])
         self.addAction(ac)
+        self.reset_zoom_action = ac = QAction(QIcon.ic('edit-undo.png'), _('Reset &zoom'), self)
+        ac.triggered.connect(self.reset_zoom)
+        ac.setShortcuts([QKeySequence('=', QKeySequence.SequenceFormat.PortableText)])
+        self.addAction(ac)
+        self.copy_action = ac = QAction(QIcon.ic('edit-copy.png'), _('&Copy'), self)
+        ac.setShortcuts([QKeySequence(QKeySequence.StandardKey.Copy)])
+        self.addAction(ac)
+        ac.triggered.connect(self.copy_image)
+        self.rotate_action = ac = QAction(QIcon.ic('rotate-right.png'), _('&Rotate'), self)
+        self.addAction(ac)
+        ac.triggered.connect(self.rotate_image)
 
         self.scrollarea = sa = ScrollArea()
+        pal = sa.palette()
+        pal.setColor(QPalette.ColorRole.Dark,
+                     dark_palette().color(QPalette.ColorRole.Base) if QApplication.instance().is_dark_theme else Qt.GlobalColor.darkGray)
+        sa.setPalette(pal)
         sa.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
         sa.setBackgroundRole(QPalette.ColorRole.Dark)
         self.label = l = Label(sa)
@@ -160,26 +179,22 @@ class ImageView(QDialog):
         self.bb = bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
-        self.zi_button = zi = bb.addButton(_('Zoom &in'), QDialogButtonBox.ButtonRole.ActionRole)
-        self.zo_button = zo = bb.addButton(_('Zoom &out'), QDialogButtonBox.ButtonRole.ActionRole)
+        self.zi_button = zi = bb.addButton(self.zoom_in_action.text(), QDialogButtonBox.ButtonRole.ActionRole)
+        self.zo_button = zo = bb.addButton(self.zoom_out_action.text(), QDialogButtonBox.ButtonRole.ActionRole)
         self.save_button = so = bb.addButton(_('&Save as'), QDialogButtonBox.ButtonRole.ActionRole)
-        self.copy_button = co = bb.addButton(_('&Copy'), QDialogButtonBox.ButtonRole.ActionRole)
-        self.rotate_button = ro = bb.addButton(_('&Rotate'), QDialogButtonBox.ButtonRole.ActionRole)
+        self.copy_button = co = bb.addButton(self.copy_action.text(), QDialogButtonBox.ButtonRole.ActionRole)
+        self.rotate_button = ro = bb.addButton(self.rotate_action.text(), QDialogButtonBox.ButtonRole.ActionRole)
         self.fullscreen_button = fo = bb.addButton(_('F&ull screen'), QDialogButtonBox.ButtonRole.ActionRole)
-        zi.setIcon(QIcon.ic('plus.png'))
-        zo.setIcon(QIcon.ic('minus.png'))
+        zi.setIcon(self.zoom_in_action.icon())
+        zo.setIcon(self.zoom_out_action.icon())
         so.setIcon(QIcon.ic('save.png'))
-        co.setIcon(QIcon.ic('edit-copy.png'))
-        ro.setIcon(QIcon.ic('rotate-right.png'))
+        co.setIcon(self.copy_action.icon())
+        ro.setIcon(self.rotate_action.icon())
         fo.setIcon(QIcon.ic('page.png'))
-        zi.clicked.connect(self.zoom_in)
-        zo.clicked.connect(self.zoom_out)
+        zi.clicked.connect(self.zoom_in_action.trigger)
+        zo.clicked.connect(self.zoom_out_action.trigger)
         so.clicked.connect(self.save_image)
-        co.clicked.connect(self.copy_image)
-        self.copy_action = QAction(self)
-        self.addAction(self.copy_action)
-        self.copy_action.triggered.connect(self.copy_button.click)
-        self.copy_action.setShortcut(QKeySequence.StandardKey.Copy)
+        co.clicked.connect(self.copy_action.trigger)
         ro.clicked.connect(self.rotate_image)
         fo.setCheckable(True)
 
@@ -205,6 +220,22 @@ class ImageView(QDialog):
         self.restore_geometry(self.prefs, self.geom_name)
         fo.setChecked(self.isFullScreen())
         fo.toggled.connect(self.toggle_fullscreen)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.context_menu)
+
+    def context_menu(self, pos):
+        m = QMenu(self)
+        m.addAction(self.reset_zoom_action)
+        m.addAction(self.zoom_in_action)
+        m.addAction(self.zoom_out_action)
+        m.addAction(self.copy_action)
+        m.addAction(self.rotate_action)
+        ac = QAction(self.fit_image.text())
+        ac.setCheckable(True)
+        ac.setChecked(self.fit_image.isChecked())
+        ac.toggled.connect(self.toggle_fit)
+        m.addAction(ac)
+        m.exec(self.mapToGlobal(pos))
 
     def set_to_viewport_size(self):
         page_size = self.scrollarea.size()
@@ -224,11 +255,18 @@ class ImageView(QDialog):
     def factor_from_fit(self):
         scaled_height = self.label.size().height()
         actual_height = self.current_img.size().height()
-        return scaled_height / actual_height
+        if actual_height:
+            return scaled_height / actual_height
+        return 1.0
 
     def zoom_requested(self, zoom_out):
         if (zoom_out and self.zo_button.isEnabled()) or (not zoom_out and self.zi_button.isEnabled()):
             (self.zoom_out if zoom_out else self.zoom_in)()
+
+    def reset_zoom(self):
+        self.factor = 1.0
+        self.prefs.set('image_popup_zoom_factor', self.factor)
+        self.adjust_image(1.0)
 
     def zoom_in(self):
         if self.fit_image.isChecked():
@@ -249,13 +287,18 @@ class ImageView(QDialog):
         self.adjust_image(0.8)
 
     def save_image(self):
-        filters=[('Images', ['png', 'jpeg', 'jpg'])]
+        is_svg = self.current_image_is_svg and hasattr(self, 'current_url') and self.current_url.isLocalFile()
+        filters=[('Images', ['svg'] if is_svg else ['png', 'jpeg', 'jpg'])]
         f = choose_save_file(self, 'viewer image view save dialog',
                 _('Choose a file to save to'), filters=filters,
                 all_files=False, initial_filename=self.current_image_name or None)
         if f:
-            from calibre.utils.img import save_image
-            save_image(self.current_img.toImage(), f)
+            if is_svg:
+                import shutil
+                shutil.copyfile(self.current_url.toLocalFile(), f)
+            else:
+                from calibre.utils.img import save_image
+                save_image(self.current_img.toImage(), f)
 
     def copy_image(self):
         if self.current_img and not self.current_img.isNull():
@@ -286,6 +329,9 @@ class ImageView(QDialog):
         self.label.resize(self.factor * self.current_img.size())
         self.zi_button.setEnabled(self.factor <= 3)
         self.zo_button.setEnabled(self.factor >= 0.3333)
+        self.zoom_in_action.setEnabled(self.zi_button.isEnabled())
+        self.zoom_out_action.setEnabled(self.zo_button.isEnabled())
+        self.reset_zoom_action.setEnabled(self.factor != 1)
         self.adjust_scrollbars(factor)
 
     def adjust_scrollbars(self, factor):
@@ -298,18 +344,12 @@ class ImageView(QDialog):
         t = QTransform()
         t.rotate(90)
         pm = self.current_img = pm.transformed(t)
+        self.transformed = True
         self.label.setPixmap(pm)
-        self.label.adjustSize()
-        if self.fit_image.isChecked():
-            self.set_to_viewport_size()
-        else:
-            self.factor = 1
-            self.prefs.set('image_popup_zoom_factor', self.factor)
-            for sb in (self.scrollarea.horizontalScrollBar(),
-                    self.scrollarea.verticalScrollBar()):
-                sb.setValue(0)
+        self.adjust_image(self.factor)
 
     def __call__(self, use_exec=False):
+        self.transformed = False
         geom = self.avail_geom
         self.label.setPixmap(self.current_img)
         self.label.adjustSize()
@@ -321,8 +361,7 @@ class ImageView(QDialog):
             self.current_image_name = self.current_url
         reso = ''
         if self.current_img and not self.current_img.isNull():
-            if self.factor != 1:
-                self.adjust_image(self.factor)
+            self.adjust_image(self.factor)
             reso = f'[{self.current_img.width()}x{self.current_img.height()}]'
         title = _('Image: {name} {resolution}').format(name=self.current_image_name, resolution=reso)
         self.setWindowTitle(title)
@@ -340,11 +379,10 @@ class ImageView(QDialog):
         if on:
             self.maximized_at_last_fullscreen = self.isMaximized()
             self.showFullScreen()
+        elif self.maximized_at_last_fullscreen:
+            self.showMaximized()
         else:
-            if self.maximized_at_last_fullscreen:
-                self.showMaximized()
-            else:
-                self.showNormal()
+            self.showNormal()
 
 
 class ImagePopup:
@@ -352,6 +390,7 @@ class ImagePopup:
     def __init__(self, parent, prefs=gprefs):
         self.current_img = QPixmap()
         self.current_url = QUrl()
+        self.current_image_is_svg = False
         self.parent = parent
         self.dialogs = []
         self.prefs = prefs
@@ -360,6 +399,7 @@ class ImagePopup:
         if self.current_img.isNull():
             return
         d = ImageView(self.parent, self.current_img, self.current_url, prefs=self.prefs)
+        d.current_image_is_svg = self.current_image_is_svg
         self.dialogs.append(d)
         d.finished.connect(self.cleanup, type=Qt.ConnectionType.QueuedConnection)
         d()
@@ -382,6 +422,7 @@ def show_image(path=None):
     d = ImageView(None, p, u)
     d()
     app.exec()
+
 
 if __name__ == '__main__':
     show_image()

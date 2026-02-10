@@ -134,10 +134,12 @@ Read aloud
 
 The viewer can read book text aloud. To use it you can simply click the
 :guilabel:`Read aloud` button in the viewer controls to start reading book text
-aloud. The word being currently read is highlighted. Speech is synthesized from
-the text using your operating system services for text-to-speech. You can
-change the voice being used by clicking the gear icon in the bar that is
-displayed while :guilabel:`Read aloud` is active.
+aloud. The word or sentence being currently read is highlighted. Speech is
+synthesized from the text using either the `Piper
+<https://github.com/rhasspy/piper>`__ neural text-to-speech engine or your
+operating system services for text-to-speech. You can change the backend and
+the voice being used by clicking the gear icon in the bar that is displayed
+while :guilabel:`Read aloud` is active.
 
 You can also read aloud highlighted passages by adding the :guilabel:`Read aloud` button to
 the selection bar in the viewer preferences under :guilabel:`Selection
@@ -147,17 +149,7 @@ behavior`.
 .. note:: Support for text-to-speech in browsers is very incomplete and
    bug-ridden so how well :guilabel:`Read aloud` will work in the in-browser
    viewer is dependent on how well the underlying browser supports
-   text-to-speech. In particular, highlighting of current word does not work,
-   and changing speed or voice will cause reading to start again from the
-   beginning.
-
-.. note:: On Linux, :guilabel:`Read aloud` requires `Speech Dispatcher
-   <https://freebsoft.org/speechd>`_ to be installed and working.
-
-.. note:: On Windows, not all installed voices may be visible to the SAPI
-   sub-system that is used for text-to-speech. There are `instructions to
-   make all voices visible
-   <https://www.mobileread.com/forums/showpost.php?p=4084051&postcount=108>`_.
+   text-to-speech.
 
 Searching the text
 --------------------------
@@ -254,6 +246,18 @@ You can zoom in to show an image at full size in a separate window by either
 double clicking or long tapping on it. You can also right click on it and
 choose :guilabel:`View image`.
 
+
+Syncing with a paper edition of the current book
+----------------------------------------------------
+
+Some e-books, that have corresponding print editions, include metadata that
+marks the start of each paper page. For such e-books, the viewer allows you to
+jump to a particular paper edition page via the :guilabel:`Go to` button in the
+viewer controls. You can also optionally display the paper page corresponding
+to the current location in the book's headers or footers via the viewer
+settings, by adding :guilabel:`Pages from paper edition` to either the header
+or the footer.
+
 .. _viewer_shortcuts:
 
 Keyboard shortcuts
@@ -263,7 +267,7 @@ The viewer has extensive keyboard shortcuts, like the rest of calibre. They can
 be customised in the viewer :guilabel:`Preferences`. The default shortcuts are listed below:
 
 
-.. list-table:: Keyboard shortcuts for the calibre viewer
+.. list-table:: Keyboard shortcuts for the calibre E-book viewer
     :widths: 10 100
     :header-rows: 1
 
@@ -407,10 +411,10 @@ viewer preferences to force the viewer to break up lines of text in
     code, pre { white-space: pre-wrap }
 
 
-Designing your book to work well with the calibre viewer
-------------------------------------------------------------
+Designing your book to work well with the calibre E-book viewer
+-----------------------------------------------------------------
 
-The calibre viewer will set the ``is-calibre-viewer`` class on the root
+The calibre E-book viewer will set the ``is-calibre-viewer`` class on the root
 element. So you can write CSS rules that apply only for it. Additionally,
 the viewer will set the following classes on the ``body`` element:
 
@@ -431,7 +435,7 @@ the viewer will set the following classes on the ``body`` element:
 
 Finally, you can use the calibre color scheme colors via `CSS variables
 <https://developer.mozilla.org/en-US/docs/Web/CSS/Using_CSS_custom_properties>`_.
-The calibre viewer defines the following variables:
+The calibre E-book viewer defines the following variables:
 ``--calibre-viewer-background-color``, ``--calibre-viewer-foreground-color``
 and optionally ``--calibre-viewer-link-color`` in color themes that define
 a link color.

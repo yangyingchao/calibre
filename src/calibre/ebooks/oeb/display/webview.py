@@ -8,7 +8,6 @@ __docformat__ = 'restructuredtext en'
 import re
 
 from calibre import guess_type
-from polyglot.builtins import iteritems
 
 
 class EntityDeclarationProcessor:  # {{{
@@ -20,8 +19,8 @@ class EntityDeclarationProcessor:  # {{{
             if len(tokens) > 1:
                 self.declared_entities[tokens[0].strip()] = tokens[1].strip().replace('"', '')
         self.processed_html = html
-        for key, val in iteritems(self.declared_entities):
-            self.processed_html = self.processed_html.replace('&%s;'%key, val)
+        for key, val in self.declared_entities.items():
+            self.processed_html = self.processed_html.replace(f'&{key};', val)
 # }}}
 
 
@@ -29,7 +28,7 @@ def self_closing_sub(match):
     tag = match.group(1)
     if tag.lower().strip() == 'br':
         return match.group()
-    return '<%s%s></%s>'%(match.group(1), match.group(2), match.group(1))
+    return f'<{match.group(1)}{match.group(2)}></{match.group(1)}>'
 
 
 def cleanup_html(html):

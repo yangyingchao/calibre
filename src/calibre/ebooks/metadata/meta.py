@@ -32,7 +32,7 @@ def path_to_ext(path):
 def metadata_from_formats(formats, force_read_metadata=False, pattern=None):
     try:
         return _metadata_from_formats(formats, force_read_metadata, pattern)
-    except:
+    except Exception:
         mi = metadata_from_filename(list(iter(formats))[0], pat=pattern)
         if not mi.authors:
             mi.authors = [_('Unknown')]
@@ -139,7 +139,7 @@ def metadata_from_filename(name, pat=None, fallback_pat=None):
             try:
                 pat = regex.compile(prefs.get('filename_pattern'), flags=regex.UNICODE | regex.VERSION0 | regex.FULLCASE)
             except Exception:
-                pat = regex.compile('(?P<title>.+) - (?P<author>[^_]+)', flags=regex.UNICODE | regex.VERSION0 | regex.FULLCASE)
+                pat = regex.compile(r'(?P<title>.+) - (?P<author>[^_]+)', flags=regex.UNICODE | regex.VERSION0 | regex.FULLCASE)
 
     name = name.replace('_', ' ')
     match = pat.search(name)
@@ -193,7 +193,7 @@ def metadata_from_filename(name, pat=None, fallback_pat=None):
             if pubdate:
                 from calibre.utils.date import parse_only_date
                 mi.pubdate = parse_only_date(pubdate)
-        except:
+        except Exception:
             pass
         try:
             comments = match.group('comments')
@@ -227,7 +227,6 @@ def opf_metadata(opfpath):
     except Exception:
         import traceback
         traceback.print_exc()
-        pass
 
 
 def forked_read_metadata(original_path, tdir):

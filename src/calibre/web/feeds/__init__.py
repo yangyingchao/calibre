@@ -12,11 +12,10 @@ import time
 import traceback
 from builtins import _
 
-from calibre import entity_to_unicode, force_unicode, strftime
+from calibre import force_unicode, replace_entities, strftime
 from calibre.utils.cleantext import clean_ascii_chars, clean_xml_chars
 from calibre.utils.date import dt_factory, local_tz, utcnow
 from calibre.utils.logging import default_log
-from polyglot.builtins import string_or_bytes
 
 
 class Article:
@@ -25,14 +24,13 @@ class Article:
         from lxml import html
         self.downloaded = False
         self.id = id
-        if not title or not isinstance(title, string_or_bytes):
+        if not title or not isinstance(title, (str, bytes)):
             title = _('Unknown')
         title = force_unicode(title, 'utf-8')
         self._title = clean_xml_chars(title).strip()
         try:
-            self._title = re.sub(r'&(\S+?);',
-                entity_to_unicode, self._title)
-        except:
+            self._title = replace_entities(self._title)
+        except Exception:
             pass
         self._title = clean_ascii_chars(self._title)
         self.url = url
@@ -49,7 +47,7 @@ class Article:
             try:
                 s = html.fragment_fromstring(summary, create_parent=True)
                 summary = html.tostring(s, method='text', encoding='unicode')
-            except:
+            except Exception:
                 print('Failed to process article summary, deleting:')
                 print(summary.encode('utf-8'))
                 traceback.print_exc()
@@ -66,7 +64,7 @@ class Article:
     def formatted_date(self):
 
         if self._formatted_date is None:
-            self._formatted_date = strftime(" [%a, %d %b %H:%M]",
+            self._formatted_date = strftime(' [%a, %d %b %H:%M]',
                     t=self.localtime.timetuple())
         return self._formatted_date
 
@@ -89,14 +87,14 @@ class Article:
     def __repr__(self):
         return \
 ('''\
-Title       : %s
-URL         : %s
-Author      : %s
-Summary     : %s
-Date        : %s
-TOC thumb   : %s
-Has content : %s
-'''%(self.title, self.url, self.author, self.summary[:20]+'...',
+Title       : {}
+URL         : {}
+Author      : {}
+Summary     : {}
+Date        : {}
+TOC thumb   : {}
+Has content : {}
+'''.format(self.title, self.url, self.author, self.summary[:20]+'...',
      self.localtime.strftime('%a, %d %b, %Y %H:%M'), self.toc_thumbnail,
      bool(self.content)))
 
@@ -105,7 +103,7 @@ Has content : %s
 
     def is_same_as(self, other_article):
         # if self.title != getattr(other_article, 'title', False):
-        #    return False
+        #     return False
         if self.url:
             return self.url == getattr(other_article, 'url', False)
         return self.content == getattr(other_article, 'content', False)
@@ -161,7 +159,7 @@ class Feed:
             self.id_counter += 1
             id = item.get('id', None)
             if not id:
-                id = 'internal id#%s'%self.id_counter
+                id = f'internal id#{self.id_counter}'
             if id in self.added_articles:
                 return
             self.added_articles.append(id)
@@ -177,8 +175,7 @@ class Feed:
                 self.articles.append(article)
             else:
                 t = strftime('%a, %d %b, %Y %H:%M', article.localtime.timetuple())
-                self.logger.debug('Skipping article %s (%s) from feed %s as it is too old.'%
-                        (title, t, self.title))
+                self.logger.debug(f'Skipping article {title} ({t}) from feed {self.title} as it is too old.')
             d = item.get('date', '')
             article.formatted_date = d
 
@@ -186,7 +183,7 @@ class Feed:
         self.id_counter += 1
         id = item.get('id', None)
         if not id:
-            id = 'internal id#%s'%self.id_counter
+            id = f'internal id#{self.id_counter}'
         if id in self.added_articles:
             return
         published = None
@@ -212,8 +209,8 @@ class Feed:
             title = re.sub(r'<.+?>', '', title)
         try:
             link  = self.get_article_url(item)
-        except:
-            self.logger.warning('Failed to get link for %s'%title)
+        except Exception:
+            self.logger.warning(f'Failed to get link for {title}')
             self.logger.debug(traceback.format_exc())
             link = None
 
@@ -234,12 +231,13 @@ class Feed:
             self.articles.append(article)
         else:
             try:
-                self.logger.debug('Skipping article %s (%s) from feed %s as it is too old.'%
-                                  (title, article.localtime.strftime('%a, %d %b, %Y %H:%M'), self.title))
+                self.logger.debug(
+                    'Skipping article {} ({}) from feed {} as it is too old.'.format(
+                        title, article.localtime.strftime('%a, %d %b, %Y %H:%M'), self.title))
             except UnicodeDecodeError:
                 if not isinstance(title, str):
                     title = title.decode('utf-8', 'replace')
-                self.logger.debug('Skipping article %s as it is too old'%title)
+                self.logger.debug(f'Skipping article {title} as it is too old')
 
     def reverse(self):
         self.articles.reverse()
@@ -251,7 +249,7 @@ class Feed:
         return len(self.articles)
 
     def __repr__(self):
-        res = [('%20s\n'%'').replace(' ', '_')+repr(art) for art in self]
+        res = ['_'*20 + f'\n{art!r}' for art in self]
 
         return '\n'+'\n'.join(res)+'\n'
 
@@ -327,14 +325,14 @@ class FeedCollection(list):
         for j, f in enumerate(self):
             for i, a in enumerate(f):
                 if a is article:
-                    return (j, i)
+                    return j, i
 
     def restore_duplicates(self):
         temp = []
         for article, feed in self.duplicates:
             art = copy.deepcopy(article)
             j, i = self.find_article(article)
-            art.url = '../feed_%d/article_%d/index.html'%(j, i)
+            art.url = f'../feed_{j}/article_{i}/index.html'
             temp.append((feed, art))
         for feed, art in temp:
             feed.articles.append(art)

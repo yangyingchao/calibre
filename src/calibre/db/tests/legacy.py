@@ -6,6 +6,7 @@ __copyright__ = '2013, Kovid Goyal <kovid at kovidgoyal.net>'
 
 import inspect
 import numbers
+import reprlib
 import time
 from functools import partial
 from io import BytesIO
@@ -14,8 +15,6 @@ from operator import itemgetter
 from calibre.db.constants import NOTES_DIR_NAME
 from calibre.db.tests.base import BaseTest
 from calibre.library.field_metadata import fm_as_dict
-from polyglot import reprlib
-from polyglot.builtins import iteritems
 
 # Utils {{{
 
@@ -32,8 +31,8 @@ class ET:
         legacy = self.legacy or test.init_legacy(test.cloned_library)
         oldres = getattr(old, self.func_name)(*self.args, **self.kwargs)
         newres = getattr(legacy, self.func_name)(*self.args, **self.kwargs)
-        test.assertEqual(oldres, newres, 'Equivalence test for {} with args: {} and kwargs: {} failed'.format(
-            self.func_name, reprlib.repr(self.args), reprlib.repr(self.kwargs)))
+        test.assertEqual(oldres, newres,
+            f'Equivalence test for {self.func_name} with args: {reprlib.repr(self.args)} and kwargs: {reprlib.repr(self.kwargs)} failed')
         self.retval = newres
         return newres
 
@@ -46,8 +45,8 @@ def get_defaults(spec):
 
 
 def compare_argspecs(old, new, attr):
-    # We dont compare the names of the non-keyword arguments as they are often
-    # different and they dont affect the usage of the API.
+    # We don't compare the names of the non-keyword arguments as they are often
+    # different and they don't affect the usage of the API.
 
     ok = len(old.args) == len(new.args) and get_defaults(old) == get_defaults(new)
     if not ok:
@@ -78,7 +77,6 @@ def run_funcs(self, db, ndb, funcs):
 
 
 class LegacyTest(BaseTest):
-
     ''' Test the emulation of the legacy interface. '''
 
     def test_library_wide_properties(self):  # {{{
@@ -90,7 +88,7 @@ class LegacyTest(BaseTest):
                 # We ignore the key rec_index, since it is not stable for
                 # custom columns (it is created by iterating over a dict)
                 return {k.decode('utf-8') if isinstance(k, bytes) else k:to_unicode(v)
-                        for k, v in iteritems(x) if k != 'rec_index'}
+                        for k, v in x.items() if k != 'rec_index'}
             return x
 
         def get_props(db):
@@ -117,7 +115,7 @@ class LegacyTest(BaseTest):
         'Test the get_property interface for reading data'
         def get_values(db):
             ans = {}
-            for label, loc in iteritems(db.FIELD_MAP):
+            for label, loc in db.FIELD_MAP.items():
                 if isinstance(label, numbers.Integral):
                     label = '#'+db.custom_column_num_map[label]['label']
                 label = str(label)
@@ -196,7 +194,7 @@ class LegacyTest(BaseTest):
 
         self.assertEqual(dict(db.prefs), dict(ndb.prefs))
 
-        for meth, args in iteritems({
+        for meth, args in {
             'find_identical_books': [(Metadata('title one', ['author one']),), (Metadata('unknown'),), (Metadata('xxxx'),)],
             'get_books_for_category': [('tags', newstag), ('#formats', 'FMT1')],
             'get_next_series_num_for': [('A Series One',)],
@@ -261,7 +259,7 @@ class LegacyTest(BaseTest):
             'book_on_device_string':[(1,), (2,), (3,)],
             'books_in_series_of':[(0,), (1,), (2,)],
             'books_with_same_title':[(Metadata(db.title(0)),), (Metadata(db.title(1)),), (Metadata('1234'),)],
-        }):
+        }.items():
             if meth[0] in {'!', '@'}:
                 fmt = {'!':dict, '@':frozenset}[meth[0]]
                 meth = meth[1:]
@@ -293,8 +291,8 @@ class LegacyTest(BaseTest):
         old = db.get_data_as_dict(prefix='test-prefix')
         new = ndb.get_data_as_dict(prefix='test-prefix')
         for o, n in zip(old, new):
-            o = {str(k) if isinstance(k, bytes) else k:set(v) if isinstance(v, list) else v for k, v in iteritems(o)}
-            n = {k:set(v) if isinstance(v, list) else v for k, v in iteritems(n)}
+            o = {str(k) if isinstance(k, bytes) else k:set(v) if isinstance(v, list) else v for k, v in o.items()}
+            n = {k:set(v) if isinstance(v, list) else v for k, v in n.items()}
             self.assertEqual(o, n)
 
         ndb.search('title:Unknown')
@@ -356,9 +354,9 @@ class LegacyTest(BaseTest):
     def test_legacy_adding_books(self):  # {{{
         'Test various adding/deleting books methods'
         import sqlite3
-        con = sqlite3.connect(":memory:")
+        con = sqlite3.connect(':memory:')
         try:
-            con.execute("create virtual table recipe using fts5(name, ingredients)")
+            con.execute('create virtual table recipe using fts5(name, ingredients)')
         except Exception:
             self.skipTest('python sqlite3 module does not have FTS5 support')
         con.close()
@@ -463,7 +461,7 @@ class LegacyTest(BaseTest):
             'find_books_in_directory', 'import_book_directory', 'import_book_directory_multiple', 'recursive_import',
 
             # Internal API
-            'clean_user_categories',  'cleanup_tags',  'books_list_filter', 'conn', 'connect', 'construct_file_name',
+            'clean_user_categories', 'cleanup_tags', 'books_list_filter', 'conn', 'connect', 'construct_file_name',
             'construct_path_name', 'clear_dirtied', 'initialize_database', 'initialize_dynamic',
             'run_import_plugins', 'vacuum', 'set_path', 'row_factory', 'rows', 'rmtree', 'series_index_pat',
             'import_old_database', 'dirtied_lock', 'dirtied_cache', 'dirty_books_referencing',
@@ -545,7 +543,7 @@ class LegacyTest(BaseTest):
         n = now()
         ndb = self.init_legacy(self.cloned_library)
         amap = ndb.new_api.get_id_map('authors')
-        sorts = [(aid, 's%d' % aid) for aid in amap]
+        sorts = [(aid, f's{aid}') for aid in amap]
         db = self.init_old(self.cloned_library)
         run_funcs(self, db, ndb, (
             ('+format_metadata', 1, 'FMT1', itemgetter('size')),
@@ -678,10 +676,10 @@ class LegacyTest(BaseTest):
 
         ndb = self.init_legacy(self.cloned_library)
         db = self.init_old(self.cloned_library)
-        a = {v:k for k, v in iteritems(ndb.new_api.get_id_map('authors'))}['Author One']
-        t = {v:k for k, v in iteritems(ndb.new_api.get_id_map('tags'))}['Tag One']
-        s = {v:k for k, v in iteritems(ndb.new_api.get_id_map('series'))}['A Series One']
-        p = {v:k for k, v in iteritems(ndb.new_api.get_id_map('publisher'))}['Publisher One']
+        a = {v:k for k, v in ndb.new_api.get_id_map('authors').items()}['Author One']
+        t = {v:k for k, v in ndb.new_api.get_id_map('tags').items()}['Tag One']
+        s = {v:k for k, v in ndb.new_api.get_id_map('series').items()}['A Series One']
+        p = {v:k for k, v in ndb.new_api.get_id_map('publisher').items()}['Publisher One']
         run_funcs(self, db, ndb, (
             ('rename_author', a, 'Author Two'),
             ('rename_tag', t, 'News'),
@@ -719,11 +717,11 @@ class LegacyTest(BaseTest):
                 run_funcs(self, db, ndb, [(func, idx, label) for idx in range(3)])
 
         # Test renaming/deleting
-        t = {v:k for k, v in iteritems(ndb.new_api.get_id_map('#tags'))}['My Tag One']
-        t2 = {v:k for k, v in iteritems(ndb.new_api.get_id_map('#tags'))}['My Tag Two']
-        a = {v:k for k, v in iteritems(ndb.new_api.get_id_map('#authors'))}['My Author Two']
-        a2 = {v:k for k, v in iteritems(ndb.new_api.get_id_map('#authors'))}['Custom One']
-        s = {v:k for k, v in iteritems(ndb.new_api.get_id_map('#series'))}['My Series One']
+        t = {v:k for k, v in ndb.new_api.get_id_map('#tags').items()}['My Tag One']
+        t2 = {v:k for k, v in ndb.new_api.get_id_map('#tags').items()}['My Tag Two']
+        a = {v:k for k, v in ndb.new_api.get_id_map('#authors').items()}['My Author Two']
+        a2 = {v:k for k, v in ndb.new_api.get_id_map('#authors').items()}['Custom One']
+        s = {v:k for k, v in ndb.new_api.get_id_map('#series').items()}['My Series One']
         run_funcs(self, db, ndb, (
             ('delete_custom_item_using_id', t, 'tags'),
             ('delete_custom_item_using_id', a, 'authors'),

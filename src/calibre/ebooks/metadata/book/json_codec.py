@@ -13,7 +13,7 @@ from calibre.constants import filesystem_encoding, preferred_encoding
 from calibre.ebooks.metadata.book import SERIALIZABLE_FIELDS
 from calibre.library.field_metadata import FieldMetadata
 from polyglot.binary import as_base64_unicode, from_base64_bytes
-from polyglot.builtins import as_bytes, iteritems, itervalues
+from polyglot.builtins import as_bytes
 
 # Translate datetimes to and from strings. The string form is the datetime in
 # UTC. The returned date is also UTC
@@ -21,7 +21,7 @@ from polyglot.builtins import as_bytes, iteritems, itervalues
 
 def string_to_datetime(src):
     from calibre.utils.iso8601 import parse_iso8601
-    if src != "None":
+    if src != 'None':
         try:
             return parse_iso8601(src)
         except Exception:
@@ -32,13 +32,13 @@ def string_to_datetime(src):
 def datetime_to_string(dateval):
     from calibre.utils.date import UNDEFINED_DATE, isoformat, local_tz
     if dateval is None:
-        return "None"
+        return 'None'
     if not isinstance(dateval, datetime):
         dateval = datetime.combine(dateval, time())
     if hasattr(dateval, 'tzinfo') and dateval.tzinfo is None:
         dateval = dateval.replace(tzinfo=local_tz)
     if dateval <= UNDEFINED_DATE:
-        return "None"
+        return 'None'
     return isoformat(dateval)
 
 
@@ -96,20 +96,20 @@ def encode_is_multiple(fm):
         if dt == 'composite':
             fm['is_multiple'] = ','
         else:
-            fm['is_multiple'] =  '|'
+            fm['is_multiple'] = '|'
     else:
         fm['is_multiple'] = None
         fm['is_multiple2'] = {}
 
 
 def decode_is_multiple(fm):
-    im = fm.get('is_multiple2',  None)
+    im = fm.get('is_multiple2', None)
     if im:
         fm['is_multiple'] = im
         del fm['is_multiple2']
     else:
         # Must migrate the is_multiple from char to dict
-        im = fm.get('is_multiple',  {})
+        im = fm.get('is_multiple', {})
         if im:
             dt = fm.get('datatype', None)
             if dt == 'composite':
@@ -152,7 +152,7 @@ class JsonCodec:
     def encode_metadata_attr(self, book, key):
         if key == 'user_metadata':
             meta = book.get_all_user_metadata(make_copy=True)
-            for fm in itervalues(meta):
+            for fm in meta.values():
                 if fm['datatype'] == 'datetime':
                     fm['#value#'] = datetime_to_string(fm['#value#'])
                 encode_is_multiple(fm)
@@ -180,14 +180,14 @@ class JsonCodec:
                 entry = self.raw_to_book(item, book_class, prefix)
                 if entry is not None:
                     booklist.append(entry)
-        except:
+        except Exception:
             print('exception during JSON decode_from_file')
             traceback.print_exc()
 
     def raw_to_book(self, json_book, book_class, prefix):
         try:
             book = book_class(prefix, json_book.get('lpath', None))
-            for key,val in iteritems(json_book):
+            for key,val in json_book.items():
                 meta = self.decode_metadata(key, val)
                 if key == 'user_metadata':
                     book.set_all_user_metadata(meta)
@@ -196,7 +196,7 @@ class JsonCodec:
                         key = 'identifiers'
                     setattr(book, key, meta)
             return book
-        except:
+        except Exception:
             print('exception during JSON decoding')
             traceback.print_exc()
 
@@ -204,7 +204,7 @@ class JsonCodec:
         if key == 'classifiers':
             key = 'identifiers'
         if key == 'user_metadata':
-            for fm in itervalues(value):
+            for fm in value.values():
                 if fm['datatype'] == 'datetime':
                     fm['#value#'] = string_to_datetime(fm['#value#'])
                 decode_is_multiple(fm)

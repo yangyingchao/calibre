@@ -45,7 +45,6 @@ from calibre.gui2.widgets2 import HistoryLineEdit2
 from calibre.startup import connect_lambda
 from calibre.utils.filenames import samefile
 from calibre.utils.icu import numeric_sort_key
-from polyglot.builtins import iteritems
 
 
 class BusyWidget(QWidget):  # {{{
@@ -101,11 +100,11 @@ def changed_files(list_of_names1, list_of_names2, get_data1, get_data2):
     removals = list_of_names1 - common_names
     adds = set(list_of_names2 - common_names)
     adata, rdata = {a:get_data2(a) for a in adds}, {r:get_data1(r) for r in removals}
-    ahash = {a:hash(d) for a, d in iteritems(adata)}
-    rhash = {r:hash(d) for r, d in iteritems(rdata)}
+    ahash = {a:hash(d) for a, d in adata.items()}
+    rhash = {r:hash(d) for r, d in rdata.items()}
     renamed_names, removed_names, added_names = {}, set(), set()
-    for name, rh in iteritems(rhash):
-        for n, ah in iteritems(ahash):
+    for name, rh in rhash.items():
+        for n, ah in ahash.items():
             if ah == rh:
                 renamed_names[name] = n
                 adds.discard(n)
@@ -133,7 +132,7 @@ def get_decoded_raw(name):
         if syntax in {'html', 'xml'}:
             raw = xml_to_unicode(raw, verbose=True)[0]
         else:
-            m = re.search(br"coding[:=]\s*([-\w.]+)", raw[:1024], flags=re.I)
+            m = re.search(br'coding[:=]\s*([-\w.]+)', raw[:1024], flags=re.I)
             if m is not None and m.group(1) != '8bit':
                 enc = m.group(1)
                 if enc == b'unicode':
@@ -344,7 +343,7 @@ class Diff(Dialog):
         for x in ('revert_requested', 'line_activated'):
             try:
                 getattr(self, x).disconnect()
-            except:
+            except Exception:
                 pass
 
     def do_search(self, reverse):
@@ -394,7 +393,7 @@ class Diff(Dialog):
     def set_names(self, names):
         t = ''
         if isinstance(names, tuple):
-            t = '%s <--> %s' % names
+            t = '{} <--> {}'.format(*names)
         self.names.setText(t)
 
     def ebook_diff(self, path1, path2, names=None):
@@ -452,7 +451,7 @@ class Diff(Dialog):
             return {'context': self.context, 'beautify': self.beautify, 'syntax': syntax_map.get(name, None)}
 
         if isinstance(changed_names, dict):
-            for name, other_name in sorted(iteritems(changed_names), key=lambda x:numeric_sort_key(x[0])):
+            for name, other_name in sorted(changed_names.items(), key=lambda x: numeric_sort_key(x[0])):
                 args = (name, other_name, cache.left(name), cache.right(other_name))
                 add(args, kwargs(name))
         else:
@@ -468,7 +467,7 @@ class Diff(Dialog):
             args = (name, _('[%s was removed]') % name, cache.left(name), None)
             add(args, kwargs(name))
 
-        for name, new_name in sorted(iteritems(renamed_names), key=lambda x:numeric_sort_key(x[0])):
+        for name, new_name in sorted(renamed_names.items(), key=lambda x: numeric_sort_key(x[0])):
             args = (name, new_name, None, None)
             add(args, kwargs(name))
 
@@ -500,7 +499,7 @@ def compare_books(path1, path2, revert_msg=None, revert_callback=None, parent=No
     d.exec()
     try:
         d.revert_requested.disconnect()
-    except:
+    except Exception:
         pass
     d.break_cycles()
 
@@ -519,10 +518,10 @@ def main(args=sys.argv):
         attr = 'ebook_diff'
     else:
         attr = 'file_diff'
-    app = Application([])  # noqa
+    app = Application([])  # noqa: F841
     d = Diff(show_as_window=True)
     func = getattr(d, attr)
-    QTimer.singleShot(0, lambda : func(left, right))
+    QTimer.singleShot(0, lambda: func(left, right))
     d.show()
     app.exec()
     return 0

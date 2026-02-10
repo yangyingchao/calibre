@@ -34,7 +34,6 @@ from calibre.constants import ismacos
 from calibre.gui2 import config, gprefs, native_menubar_defaults
 from calibre.gui2.throbber import ThrobbingButton
 from calibre.gui2.widgets2 import RightClickButton
-from polyglot.builtins import itervalues
 
 
 class RevealBar(QWidget):  # {{{
@@ -92,31 +91,28 @@ def wrap_button_text(text, max_len=MAX_TEXT_LENGTH):
     for word in parts:
         if broken:
             ans += ' ' + word
-        else:
-            if len(ans) + len(word) < max_len:
-                if ans:
-                    ans += ' ' + word
-                else:
-                    ans = word
+        elif len(ans) + len(word) < max_len:
+            if ans:
+                ans += ' ' + word
             else:
-                if ans:
-                    ans += '\n' + word
-                    broken = True
-                else:
-                    ans = word
+                ans = word
+        elif ans:
+            ans += '\n' + word
+            broken = True
+        else:
+            ans = word
     if broken:
         prefix, suffix = ans.split('\n', 1)
         if len(suffix) > len(prefix) and len(suffix) > MAX_TEXT_LENGTH and len(prefix) < MAX_TEXT_LENGTH and suffix.count(' ') > 1:
             word, rest = suffix.split(' ', 1)
             if len(word) + len(prefix) <= len(rest):
                 ans = prefix + ' ' + word + '\n' + rest
+    elif ' ' in ans:
+        ans = '\n'.join(ans.split(' ', 1))
+    elif '/' in ans:
+        ans = '/\n'.join(ans.split('/', 1))
     else:
-        if ' ' in ans:
-            ans = '\n'.join(ans.split(' ', 1))
-        elif '/' in ans:
-            ans = '/\n'.join(ans.split('/', 1))
-        else:
-            ans += '\n\xa0'
+        ans += '\n\xa0'
     return ans
 
 
@@ -260,7 +256,7 @@ class ToolBar(QToolBar):  # {{{
     def check_iactions_for_drag(self, event, md, func):
         if self.added_actions:
             pos = event.position().toPoint()
-            for iac in itervalues(self.gui.iactions):
+            for iac in self.gui.iactions.values():
                 if iac.accepts_drops:
                     aa = iac.qaction
                     w = self.widgetForAction(aa)
@@ -273,8 +269,8 @@ class ToolBar(QToolBar):  # {{{
 
     def dragEnterEvent(self, event):
         md = event.mimeData()
-        if md.hasFormat("application/calibre+from_library") or \
-           md.hasFormat("application/calibre+from_device"):
+        if md.hasFormat('application/calibre+from_library') or \
+           md.hasFormat('application/calibre+from_device'):
             event.setDropAction(Qt.DropAction.CopyAction)
             event.accept()
             return
@@ -292,8 +288,8 @@ class ToolBar(QToolBar):  # {{{
             w = self.widgetForAction(ac)
             if w is not None:
                 if (md.hasFormat(
-                    "application/calibre+from_library") or md.hasFormat(
-                    "application/calibre+from_device")) and \
+                    'application/calibre+from_library') or md.hasFormat(
+                    'application/calibre+from_device')) and \
                         w.geometry().contains(event.pos()) and \
                         isinstance(w, QToolButton) and not w.isChecked():
                     allowed = True
@@ -353,8 +349,8 @@ class MenuAction(QAction):  # {{{
         self.setText(self.clone.text())
 # }}}
 
-# MenuBar {{{
 
+# MenuBar {{{
 
 if ismacos:
     # On OS X we need special handling for the application global menu bar and
@@ -482,9 +478,9 @@ if ismacos:
                 self.edit_menu = QMenu()
                 self.edit_action = QAction(_('Edit'), self)
                 self.edit_action.setMenu(self.edit_menu)
-                ac(_('Copy'), QKeySequence.StandardKey.Copy),
-                ac(_('Paste'), QKeySequence.StandardKey.Paste),
-                ac(_('Select all'), QKeySequence.StandardKey.SelectAll),
+                ac(_('Copy'), QKeySequence.StandardKey.Copy)
+                ac(_('Paste'), QKeySequence.StandardKey.Paste)
+                ac(_('Select all'), QKeySequence.StandardKey.SelectAll)
                 mb.addAction(self.edit_action)
                 self.added_actions = [self.edit_action]
             else:
@@ -654,6 +650,7 @@ class SearchToolBar(QHBoxLayout):
         QHBoxLayout.__init__(self)
         self.search_tool_bar_widgets = []
         self.gui = gui
+        self.has_sort_by_button = False
         self.donate_button = None
 
     def init_bar(self, actions):
@@ -665,6 +662,7 @@ class SearchToolBar(QHBoxLayout):
 
         self.search_tool_bar_widgets = []
         self.search_tool_bar_actions = []
+        self.has_sort_by_button = False
         for what in gprefs['action-layout-searchbar']:
             if what is None:
                 frame = QFrame()
@@ -676,6 +674,8 @@ class SearchToolBar(QHBoxLayout):
                 self.search_tool_bar_widgets.append(frame)
                 self.search_tool_bar_actions.append(None)
             elif what in self.gui.iactions:
+                if what == 'Sort By':
+                    self.has_sort_by_button = True
                 act = self.gui.iactions[what]
                 qact = act.qaction
                 tb = RightClickButton()
@@ -820,7 +820,7 @@ class BarsManager(QObject):
 
     def apply_settings(self):
         sz = gprefs['toolbar_icon_size']
-        sz = {'off':0, 'small':24, 'medium':48, 'large':64}[sz]
+        sz = {'off':0, 'small':24, 'mid-small':30, 'medium':48, 'large':64}[sz]
         style = Qt.ToolButtonStyle.ToolButtonTextUnderIcon
         if sz > 0 and gprefs['toolbar_text'] == 'never':
             style = Qt.ToolButtonStyle.ToolButtonIconOnly

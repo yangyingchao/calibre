@@ -7,7 +7,6 @@ __copyright__ = '2013, Kovid Goyal <kovid at kovidgoyal.net>'
 import re
 
 from calibre.ebooks.docx.index import polish_index_markup, process_index
-from polyglot.builtins import iteritems, native_string_type
 
 
 class Field:
@@ -74,7 +73,7 @@ def parser(name, field_map, default_field_name=None):
         ans.pop(null, None)
         return ans
 
-    parse.__name__ = native_string_type('parse_' + name)
+    parse.__name__ = str('parse_' + name)
 
     return parse
 
@@ -110,7 +109,7 @@ class Fields:
         c = 0
         while self.index_bookmark_prefix in all_ids:
             c += 1
-            self.index_bookmark_prefix = self.index_bookmark_prefix.replace('-', '%d-' % c)
+            self.index_bookmark_prefix = self.index_bookmark_prefix.replace('-', f'{c}-')
         stack = []
         for elem in self.namespace.XPath(
             '//*[name()="w:p" or name()="w:r" or'
@@ -138,18 +137,17 @@ class Fields:
                     self.fields.append(field)
                     for r in self.namespace.XPath('descendant::w:r')(elem):
                         field.contents.append(r)
-            else:
-                if stack:
-                    stack[-1].contents.append(elem)
+            elif stack:
+                stack[-1].contents.append(elem)
 
         field_types = ('hyperlink', 'xe', 'index', 'ref', 'noteref')
         parsers = {x.upper():getattr(self, 'parse_'+x) for x in field_types}
         parsers.update({x:getattr(self, 'parse_'+x) for x in field_types})
-        field_parsers = {f.upper():globals()['parse_%s' % f] for f in field_types}
-        field_parsers.update({f:globals()['parse_%s' % f] for f in field_types})
+        field_parsers = {f.upper():globals()[f'parse_{f}'] for f in field_types}
+        field_parsers.update({f:globals()[f'parse_{f}'] for f in field_types})
 
         for f in field_types:
-            setattr(self, '%s_fields' % f, [])
+            setattr(self, f'{f}_fields', [])
         unknown_fields = {'TOC', 'toc', 'PAGEREF', 'pageref'}  # The TOC and PAGEREF fields are handled separately
 
         for field in self.fields:
@@ -159,7 +157,7 @@ class Fields:
                 if func is not None:
                     func(field, field_parsers[field.name], log)
                 elif field.name not in unknown_fields:
-                    log.warn('Encountered unknown field: %s, ignoring it.' % field.name)
+                    log.warn(f'Encountered unknown field: {field.name}, ignoring it.')
                     unknown_fields.add(field.name)
 
     def get_runs(self, field):
@@ -209,7 +207,7 @@ class Fields:
             def WORD(x):
                 return self.namespace.expand('w:' + x)
             self.index_bookmark_counter += 1
-            bmark = xe['anchor'] = '%s%d' % (self.index_bookmark_prefix, self.index_bookmark_counter)
+            bmark = xe['anchor'] = f'{self.index_bookmark_prefix}{self.index_bookmark_counter}'
             p = field.start.getparent()
             bm = p.makeelement(WORD('bookmarkStart'))
             bm.set(WORD('id'), bmark), bm.set(WORD('name'), bmark)
@@ -236,7 +234,7 @@ class Fields:
     def polish_markup(self, object_map):
         if not self.index_fields:
             return
-        rmap = {v:k for k, v in iteritems(object_map)}
+        rmap = {v:k for k, v in object_map.items()}
         for idx, blocks in self.index_fields:
             polish_index_markup(idx, [rmap[b] for b in blocks])
 

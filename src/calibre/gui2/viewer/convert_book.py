@@ -2,6 +2,7 @@
 # License: GPL v3 Copyright: 2018, Kovid Goyal <kovid at kovidgoyal.net>
 
 
+import atexit
 import errno
 import json
 import os
@@ -12,14 +13,16 @@ from itertools import count
 
 from calibre import walk
 from calibre.constants import cache_dir, iswindows
-from calibre.ptempfile import TemporaryFile
 from calibre.srv.render_book import RENDER_VERSION
 from calibre.utils.filenames import rmtree
 from calibre.utils.ipc.simple_worker import start_pipe_worker
 from calibre.utils.lock import ExclusiveFile
 from calibre.utils.serialize import msgpack_dumps
 from calibre.utils.short_uuid import uuid4
-from polyglot.builtins import as_bytes, as_unicode, iteritems
+from polyglot.builtins import as_bytes, as_unicode
+
+if iswindows:
+    from calibre_extensions import winutil
 
 DAY = 24 * 3600
 VIEWER_VERSION = 1
@@ -60,8 +63,9 @@ def robust_rmtree(x):
             except UnicodeDecodeError:
                 rmtree(as_bytes(x))
             return True
-        except OSError:
-            time.sleep(0.1)
+        except OSError as e:
+            if iswindows and e.winerror == winutil.ERROR_SHARING_VIOLATION:
+                time.sleep(0.1)
     return False
 
 
@@ -71,8 +75,9 @@ def robust_rename(a, b):
         try:
             os.rename(a, b)
             return True
-        except OSError:
-            time.sleep(0.1)
+        except OSError as e:
+            if iswindows and e.winerror == winutil.ERROR_SHARING_VIOLATION:
+                time.sleep(0.1)
     return False
 
 
@@ -163,32 +168,48 @@ class ConversionFailure(ValueError):
                 self, f'Failed to convert book: {book_path} with error:\n{worker_output}')
 
 
+preloaded_worker = None
 running_workers = []
 
 
+def create_worker():
+    import subprocess
+    return start_pipe_worker('from calibre.srv.render_book import viewer_main; viewer_main()', stderr=subprocess.STDOUT)
+
+
 def clean_running_workers():
+    global preloaded_worker
+    if preloaded_worker is not None:
+        preloaded_worker.kill()
+        preloaded_worker.wait()
+        preloaded_worker = None
     for p in running_workers:
         if p.poll() is None:
             p.kill()
+            p.wait()
     del running_workers[:]
 
 
+def initialize_worker():
+    global preloaded_worker
+    if preloaded_worker is None:
+        preloaded_worker = create_worker()
+        atexit.register(clean_running_workers)
+
+
 def do_convert(path, temp_path, key, instance):
+    global preloaded_worker
     tdir = os.path.join(temp_path, instance['path'])
-    p = None
+    p = preloaded_worker or create_worker()
+    preloaded_worker = create_worker()
+    running_workers.append(p)
+    data = msgpack_dumps((
+        path, tdir, {'size': instance['file_size'], 'mtime': instance['file_mtime'], 'hash': key},
+    ))
     try:
-        with TemporaryFile('log.txt') as logpath:
-            with open(logpath, 'w+b') as logf:
-                p = start_pipe_worker('from calibre.srv.render_book import viewer_main; viewer_main()', stdout=logf, stderr=logf)
-                running_workers.append(p)
-                p.stdin.write(msgpack_dumps((
-                    path, tdir, {'size': instance['file_size'], 'mtime': instance['file_mtime'], 'hash': key},
-                    )))
-                p.stdin.close()
-            if p.wait() != 0:
-                with open(logpath, 'rb') as logf:
-                    worker_output = logf.read().decode('utf-8', 'replace')
-                raise ConversionFailure(path, worker_output)
+        stdout, _ = p.communicate(data)
+        if p.returncode != 0:
+            raise ConversionFailure(path, stdout.decode('utf-8', 'replace'))
     finally:
         try:
             running_workers.remove(p)
@@ -244,10 +265,10 @@ def prepare_book(path, convert_func=do_convert, max_age=30 * DAY, force=False, p
         instances = entries.setdefault(key, [])
         os.rmdir(ans)
         if not robust_rename(src_path, ans):
-            raise Exception((
-                'Failed to rename: "{}" to "{}" probably some software such as an antivirus or file sync program'
+            raise Exception(
+                f'Failed to rename: "{src_path}" to "{ans}" probably some software such as an antivirus or file sync program'
                 ' running on your computer has locked the files'
-            ).format(src_path, ans))
+            )
 
         instance['status'] = 'finished'
         for q in instances:
@@ -285,7 +306,7 @@ def update_book(path, old_stat, name_data_map=None):
                 instance['file_mtime'] = st.st_mtime
                 instance['file_size'] = st.st_size
                 if name_data_map:
-                    for name, data in iteritems(name_data_map):
+                    for name, data in name_data_map.items():
                         with open(os.path.join(finished_path, instance['path'], name), 'wb') as f2:
                             f2.write(data)
                 save_metadata(metadata, f)

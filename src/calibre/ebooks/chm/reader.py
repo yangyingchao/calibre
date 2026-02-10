@@ -1,7 +1,7 @@
 ''' CHM File decoding support '''
 __license__ = 'GPL v3'
-__copyright__  = '2008, Kovid Goyal <kovid at kovidgoyal.net>,' \
-                 ' and Alex Bramley <a.bramley at gmail.com>.'
+__copyright__  = ('2008, Kovid Goyal <kovid at kovidgoyal.net>,'
+                  ' and Alex Bramley <a.bramley at gmail.com>.')
 
 import codecs
 import os
@@ -15,6 +15,7 @@ from calibre.constants import filesystem_encoding, iswindows
 from calibre.ebooks.BeautifulSoup import BeautifulSoup, NavigableString
 from calibre.ebooks.chardet import xml_to_unicode
 from calibre.ebooks.metadata.toc import TOC
+from calibre.utils.filenames import make_long_path_useable
 from polyglot.builtins import as_unicode
 
 
@@ -55,7 +56,7 @@ class CHMReader(CHMFile):
                     t.write(open(input, 'rb').read())
                 input = t.name
         if not self.LoadCHM(input):
-            raise CHMError("Unable to open CHM file '%s'"%(input,))
+            raise CHMError(f"Unable to open CHM file '{input}'")
         self.log = log
         self.input_encoding = input_encoding
         self._sourcechm = input
@@ -73,7 +74,7 @@ class CHMReader(CHMFile):
         # location of '.hhc' file, which is the CHM TOC.
         base = self.topics or self.home
         self.root = os.path.splitext(base.lstrip('/'))[0]
-        self.hhc_path = self.root + ".hhc"
+        self.hhc_path = self.root + '.hhc'
 
     def relpath_to_first_html_file(self):
         # See https://www.nongnu.org/chmspec/latest/Internal.html#SYSTEM
@@ -141,14 +142,14 @@ class CHMReader(CHMFile):
             else:
                 frag = None
             name = self._deentity(li.object('param', {'name': 'Name'})[0]['value'])
-            # print "========>", name
+            # print('========>', name)
             toc.add_item(href, frag, name, play_order=self._playorder)
             self._playorder += 1
             if li.ul:
                 child = self._parse_toc(li.ul)
                 child.parent = toc
                 toc.append(child)
-        # print toc
+        # print(toc)
         return toc
 
     def ResolveObject(self, path):
@@ -170,10 +171,10 @@ class CHMReader(CHMFile):
             path = '/' + path
         res, ui = self.ResolveObject(path)
         if res != chmlib.CHM_RESOLVE_SUCCESS:
-            raise CHMError(f"Unable to locate {path!r} within CHM file {self.filename!r}")
+            raise CHMError(f'Unable to locate {path!r} within CHM file {self.filename!r}')
         size, data = self.RetrieveObject(ui)
         if size == 0:
-            raise CHMError(f"{path!r} is zero bytes in length!")
+            raise CHMError(f'{path!r} is zero bytes in length!')
         return data
 
     def get_home(self):
@@ -181,37 +182,35 @@ class CHMReader(CHMFile):
 
     def ExtractFiles(self, output_dir=os.getcwd(), debug_dump=False):
         html_files = set()
+        base = output_dir = os.path.abspath(output_dir)
+        if not base.endswith(os.sep):
+            base += os.sep
         for path in self.Contents():
-            fpath = path
-            lpath = os.path.join(output_dir, fpath)
-            self._ensure_dir(lpath)
+            fpath = path.partition(';')[0]  # fix file names with ";<junk>" at the end, see _reformat()
+            fpath = fpath.replace('/', os.sep)
+            lpath = os.path.abspath(os.path.join(output_dir, fpath))
+            if os.path.commonprefix((lpath, base)) != base:
+                self.log.warn(f'{path!r} outside container, skipping')
+                continue
             try:
                 data = self.GetFile(path)
-            except:
-                self.log.exception('Failed to extract %s from CHM, ignoring'%path)
+            except Exception:
+                self.log.exception(f'Failed to extract {path} from CHM, ignoring')
                 continue
-            if lpath.find(';') != -1:
-                # fix file names with ";<junk>" at the end, see _reformat()
-                lpath = lpath.split(';')[0]
+            self._ensure_dir(lpath)
+            with open(make_long_path_useable(lpath), 'wb') as f:
+                f.write(data)
             try:
-                with open(lpath, 'wb') as f:
-                    f.write(data)
-                try:
-                    if 'html' in guess_mimetype(path)[0]:
-                        html_files.add(lpath)
-                except:
-                    pass
-            except:
-                if iswindows and len(lpath) > 250:
-                    self.log.warn('%r filename too long, skipping'%path)
-                    continue
-                raise
+                if 'html' in guess_mimetype(os.path.basename(lpath))[0]:
+                    html_files.add(lpath)
+            except Exception:
+                pass
 
         if debug_dump:
             import shutil
             shutil.copytree(output_dir, os.path.join(debug_dump, 'debug_dump'))
         for lpath in html_files:
-            with open(lpath, 'r+b') as f:
+            with open(make_long_path_useable(lpath), 'r+b') as f:
                 data = f.read()
                 data = self._reformat(data, lpath)
                 if isinstance(data, str):
@@ -254,7 +253,7 @@ class CHMReader(CHMFile):
             soup = BeautifulSoup(data)
         except ValueError:
             # hit some strange encoding problems...
-            self.log.exception("Unable to parse html for cleaning, leaving it")
+            self.log.exception('Unable to parse html for cleaning, leaving it')
             return data
         # nuke javascript...
         [s.extract() for s in soup('script')]
@@ -278,14 +277,14 @@ class CHMReader(CHMFile):
                     alt = t[0].img['alt'].lower()
                     if alt.find('prev') != -1 or alt.find('next') != -1 or alt.find('team') != -1:
                         t[0].extract()
-                except:
+                except Exception:
                     pass
             if (t[-1].nextSibling is None or t[-1].nextSibling.nextSibling is None):
                 try:
                     alt = t[-1].img['alt'].lower()
                     if alt.find('prev') != -1 or alt.find('next') != -1 or alt.find('team') != -1:
                         t[-1].extract()
-                except:
+                except Exception:
                     pass
         # for some very odd reason each page's content appears to be in a table
         # too. and this table has sub-tables for random asides... grr.
@@ -325,7 +324,7 @@ class CHMReader(CHMFile):
                         tables[0].extract()
                         while tdContents:
                             soup.body.insert(tableIdx, tdContents.pop())
-        except:
+        except Exception:
             pass
         # do not prettify, it would reformat the <pre> tags!
         try:
@@ -355,8 +354,7 @@ class CHMReader(CHMFile):
 
     def _ensure_dir(self, path):
         dir = os.path.dirname(path)
-        if not os.path.isdir(dir):
-            os.makedirs(dir)
+        os.makedirs(make_long_path_useable(dir), exist_ok=True)
 
     def extract_content(self, output_dir=os.getcwd(), debug_dump=False):
         self.ExtractFiles(output_dir=output_dir, debug_dump=debug_dump)

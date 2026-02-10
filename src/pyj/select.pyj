@@ -124,17 +124,17 @@ def range_extents(q, in_flow_mode):
                 if boundary_node:
                     if boundary_node.nodeType is Node.TEXT_NODE:
                         if is_start:
-                            r.setStart(boundary_node, boundary_node.length - 1)
-                            r.setEnd(boundary_node, boundary_node.length)
-                        else:
                             r.setStart(boundary_node, 0)
-                            r.setEnd(boundary_node, 1)
+                            r.setEnd(boundary_node, 0)
+                        else:
+                            r.setStart(boundary_node, boundary_node.length)
+                            r.setEnd(boundary_node, boundary_node.length)
                         rect = r.getBoundingClientRect()
                     else:
                         rect = boundary_node.getBoundingClientRect()
                         if not is_start:
                             ans.selected_prev = True
-                # we cant use getBoundingClientRect as the node might be split
+                # we can't use getBoundingClientRect as the node might be split
                 # among multiple columns
                 else if node.getClientRects:
                     rects = node.getClientRects()

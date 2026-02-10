@@ -6,7 +6,7 @@ import os
 from struct import unpack
 
 
-class Bookmark():  # {{{
+class Bookmark:  # {{{
     '''
     A simple class fetching bookmark data
     Kindle-specific
@@ -27,13 +27,13 @@ class Bookmark():  # {{{
         self.get_book_length()
         try:
             self.percent_read = min(float(100*self.last_read / self.book_length),100)
-        except:
+        except Exception:
             self.percent_read = 0
 
     def record(self, n):
         from calibre.ebooks.metadata.mobi import StreamSlicer
         if n >= self.nrecs:
-            raise ValueError('non-existent record %r' % n)
+            raise ValueError(f'non-existent record {n!r}')
         offoff = 78 + (8 * n)
         start, = unpack('>I', self.data[offoff + 0:offoff + 4])
         stop = None
@@ -61,11 +61,11 @@ class Bookmark():  # {{{
                 bpl = bpar_offset + 4
                 bpar_len, = unpack('>I', data[bpl:bpl+4])
                 bpar_len += 8
-                # print "bpar_len: 0x%x" % bpar_len
+                # print('bpar_len: 0x%x' % bpar_len)
                 eo = bpar_offset + bpar_len
 
                 # Walk bookmark entries
-                # print " --- %s --- " % self.path
+                # print(' --- %s --- ' % self.path)
                 current_entry = 1
                 sig = data[eo:eo+4]
                 previous_block = None
@@ -75,14 +75,14 @@ class Bookmark():  # {{{
                     entry_type = None
                     rec_len, = unpack('>I', data[eo+4:eo+8])
                     if rec_len == 0:
-                        current_block = "empty_data"
-                    elif data[eo+8:eo+12] == b"EBAR":
-                        current_block = "data_header"
+                        current_block = 'empty_data'
+                    elif data[eo+8:eo+12] == b'EBAR':
+                        current_block = 'data_header'
                         # entry_type = "data_header"
                         location, = unpack('>I', data[eo+0x34:eo+0x38])
-                        # print "data_header location: %d" % location
+                        # print('data_header location: %d' % location)
                     else:
-                        current_block = "text_block"
+                        current_block = 'text_block'
                         if previous_block == 'empty_data':
                             entry_type = 'Note'
                         elif previous_block == 'data_header':
@@ -91,10 +91,10 @@ class Bookmark():  # {{{
 
                     if entry_type:
                         displayed_location = location // MAGIC_MOBI_CONSTANT + 1
-                        user_notes[location] = dict(id=self.id,
-                                                    displayed_location=displayed_location,
-                                                    type=entry_type,
-                                                    text=text)
+                        user_notes[location] = {'id': self.id,
+                                                'displayed_location': displayed_location,
+                                                'type': entry_type,
+                                                'text': text}
 
                     eo += rec_len + 8
                     current_entry += 1
@@ -111,26 +111,23 @@ class Bookmark():  # {{{
                         # Switch location to start (0x08:0x0c)
                         start, = unpack('>I', data[eo+8:eo+12])
                         user_notes[start] = user_notes[end_loc]
-                        '''
-                        print " %s: swapping 0x%x (%d) to 0x%x (%d)" % (user_notes[end_loc]['type'],
-                                                                    end_loc,
-                                                                    end_loc/MAGIC_MOBI_CONSTANT + 1,
-                                                                    start,
-                                                                    start//MAGIC_MOBI_CONSTANT + 1)
-                        '''
+                        # print(" %s: swapping 0x%x (%d) to 0x%x (%d)" % (user_notes[end_loc]['type'],
+                        #                                             end_loc,
+                        #                                             end_loc/MAGIC_MOBI_CONSTANT + 1,
+                        #                                             start,
+                        #                                             start//MAGIC_MOBI_CONSTANT + 1))
                         user_notes[start]['displayed_location'] = start // MAGIC_MOBI_CONSTANT + 1
                         user_notes.pop(end_loc)
-                    else:
-                        # If a bookmark coincides with a user annotation, the locs could
-                        # be the same - cheat by nudging -1
-                        # Skip bookmark for last_read_location
-                        if end_loc != self.last_read:
-                            # print " adding Bookmark at 0x%x (%d)" % (end_loc, end_loc/MAGIC_MOBI_CONSTANT + 1)
-                            displayed_location = end_loc // MAGIC_MOBI_CONSTANT + 1
-                            user_notes[end_loc - 1] = dict(id=self.id,
-                                                           displayed_location=displayed_location,
-                                                           type='Bookmark',
-                                                           text=None)
+                    # If a bookmark coincides with a user annotation, the locs could
+                    # be the same - cheat by nudging -1
+                    # Skip bookmark for last_read_location
+                    elif end_loc != self.last_read:
+                        # print(' adding Bookmark at 0x%x (%d)' % (end_loc, end_loc/MAGIC_MOBI_CONSTANT + 1))
+                        displayed_location = end_loc // MAGIC_MOBI_CONSTANT + 1
+                        user_notes[end_loc - 1] = {'id': self.id,
+                                                   'displayed_location': displayed_location,
+                                                   'type': 'Bookmark',
+                                                   'text': None}
                     rec_len, = unpack('>I', data[eo+4:eo+8])
                     eo += rec_len + 8
                     sig = data[eo:eo+4]
@@ -143,19 +140,19 @@ class Bookmark():  # {{{
                 # Search looks for book title match, highlight match, and location match
                 # Author is not matched
                 # This will find the first instance of a clipping only
-                book_fs = self.path.replace('.%s' % self.bookmark_extension,'.%s' % self.book_format)
+                book_fs = self.path.replace(f'.{self.bookmark_extension}',f'.{self.book_format}')
                 with open(book_fs,'rb') as f2:
                     stream = io.BytesIO(f2.read())
                     mi = get_topaz_metadata(stream)
                 my_clippings = self.path
                 split = my_clippings.find('documents') + len('documents/')
-                my_clippings = my_clippings[:split] + "My Clippings.txt"
+                my_clippings = my_clippings[:split] + 'My Clippings.txt'
                 try:
                     with open(my_clippings, encoding='utf-8', errors='replace') as f2:
                         marker_found = 0
                         text = ''
-                        search_str1 = '%s' % (mi.title)
-                        search_str2 = '- Highlight Loc. %d' % (displayed_location)
+                        search_str1 = f'{mi.title}'
+                        search_str2 = f'- Highlight Loc. {displayed_location}'
                         for line in f2:
                             if marker_found == 0:
                                 if line.startswith(search_str1):
@@ -169,7 +166,7 @@ class Bookmark():  # {{{
                                 text += line.strip()
                         else:
                             raise Exception('error')
-                except:
+                except Exception:
                     text = '(Unable to extract highlight text from My Clippings.txt)'
                 return text
 
@@ -200,10 +197,10 @@ class Bookmark():  # {{{
                         e_type = 'Unknown annotation type'
 
                     displayed_location = location/MAGIC_TOPAZ_CONSTANT + 1
-                    user_notes[location] = dict(id=self.id,
-                                                displayed_location=displayed_location,
-                                                type=e_type,
-                                                text=text)
+                    user_notes[location] = {'id': self.id,
+                                            'displayed_location': displayed_location,
+                                            'type': e_type,
+                                            'text': text}
                     if text_len == 0xFFFFFFFF:
                         e_base = e_base + 14
                     else:
@@ -225,37 +222,36 @@ class Bookmark():  # {{{
                 e_base = 0x0d
                 self.pdf_page_offset = 0
                 while current_entry < entries:
-                    '''
-                    location, = unpack('>I', data[e_base+2:e_base+6])
-                    text = None
-                    text_len, = unpack('>I', data[e_base+0xA:e_base+0xE])
-                    e_type, = unpack('>B', data[e_base+1])
-                    if e_type == 0:
-                        e_type = 'Bookmark'
-                    elif e_type == 1:
-                        e_type = 'Highlight'
-                        text = get_topaz_highlight(location/MAGIC_TOPAZ_CONSTANT + 1)
-                    elif e_type == 2:
-                        e_type = 'Note'
-                        text = data[e_base+0x10:e_base+0x10+text_len]
-                    else:
-                        e_type = 'Unknown annotation type'
+                    # location, = unpack('>I', data[e_base+2:e_base+6])
+                    # text = None
+                    # text_len, = unpack('>I', data[e_base+0xA:e_base+0xE])
+                    # e_type, = unpack('>B', data[e_base+1])
+                    # if e_type == 0:
+                    #     e_type = 'Bookmark'
+                    # elif e_type == 1:
+                    #     e_type = 'Highlight'
+                    #     text = get_topaz_highlight(location/MAGIC_TOPAZ_CONSTANT + 1)
+                    # elif e_type == 2:
+                    #     e_type = 'Note'
+                    #     text = data[e_base+0x10:e_base+0x10+text_len]
+                    # else:
+                    #     e_type = 'Unknown annotation type'
+                    #
+                    # if self.book_format in ['tpz','azw1']:
+                    #     displayed_location = location/MAGIC_TOPAZ_CONSTANT + 1
+                    # elif self.book_format == 'pdf':
+                    #     # *** This needs implementation
+                    #     displayed_location = location
+                    # user_notes[location] = dict(id=self.id,
+                    #                             displayed_location=displayed_location,
+                    #                             type=e_type,
+                    #                             text=text)
+                    # if text_len == 0xFFFFFFFF:
+                    #     e_base = e_base + 14
+                    # else:
+                    #     e_base = e_base + 14 + 2 + text_len
+                    # current_entry += 1
 
-                    if self.book_format in ['tpz','azw1']:
-                        displayed_location = location/MAGIC_TOPAZ_CONSTANT + 1
-                    elif self.book_format == 'pdf':
-                        # *** This needs implementation
-                        displayed_location = location
-                    user_notes[location] = dict(id=self.id,
-                                                displayed_location=displayed_location,
-                                                type=e_type,
-                                                text=text)
-                    if text_len == 0xFFFFFFFF:
-                        e_base = e_base + 14
-                    else:
-                        e_base = e_base + 14 + 2 + text_len
-                    current_entry += 1
-                    '''
                     # Use label as page number
                     pdf_location, = unpack('>I', data[e_base+1:e_base+5])
                     label_len, = unpack('>H', data[e_base+5:e_base+7])
@@ -263,10 +259,10 @@ class Bookmark():  # {{{
                     displayed_location = location
                     e_type = 'Bookmark'
                     text = None
-                    user_notes[location] = dict(id=self.id,
-                                                displayed_location=displayed_location,
-                                                type=e_type,
-                                                text=text)
+                    user_notes[location] = {'id': self.id,
+                                            'displayed_location': displayed_location,
+                                            'type': e_type,
+                                            'text': text}
                     self.pdf_page_offset = pdf_location - location
                     e_base += (7 + label_len)
                     current_entry += 1
@@ -274,12 +270,12 @@ class Bookmark():  # {{{
                 self.last_read_location = self.last_read - self.pdf_page_offset
 
         else:
-            print("unsupported bookmark_extension: %s" % self.bookmark_extension)
+            print(f'unsupported bookmark_extension: {self.bookmark_extension}')
         self.user_notes = user_notes
 
     def get_book_length(self):
         from calibre.ebooks.metadata.mobi import StreamSlicer
-        book_fs = self.path.replace('.%s' % self.bookmark_extension,'.%s' % self.book_format)
+        book_fs = self.path.replace(f'.{self.bookmark_extension}',f'.{self.book_format}')
 
         self.book_length = 0
         if self.bookmark_extension == 'mbp':
@@ -291,7 +287,7 @@ class Bookmark():  # {{{
                     self.nrecs, = unpack('>H', self.data[76:78])
                     record0 = self.record(0)
                     self.book_length = int(unpack('>I', record0[0x04:0x08])[0])
-            except:
+            except Exception:
                 pass
         elif self.bookmark_extension == 'tan':
             # Read bookLength from metadata
@@ -300,9 +296,9 @@ class Bookmark():  # {{{
                 with open(book_fs,'rb') as f:
                     mu = MetadataUpdater(f)
                     self.book_length = mu.book_length
-            except:
+            except Exception:
                 pass
         else:
-            print("unsupported bookmark_extension: %s" % self.bookmark_extension)
+            print(f'unsupported bookmark_extension: {self.bookmark_extension}')
 
 # }}}

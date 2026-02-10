@@ -3,6 +3,7 @@
 
 
 import weakref
+from functools import lru_cache
 
 from qt.core import (
     QApplication,
@@ -37,6 +38,7 @@ from qt.core import (
     QScrollArea,
     QSize,
     QSizePolicy,
+    QSplitter,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionToolButton,
@@ -51,6 +53,7 @@ from qt.core import (
     QUndoCommand,
     QUndoStack,
     QUrl,
+    QVBoxLayout,
     QWidget,
     pyqtSignal,
 )
@@ -64,7 +67,6 @@ from calibre.gui2.widgets import history
 from calibre.utils.config_base import tweaks
 from calibre.utils.date import UNDEFINED_DATE
 from calibre.utils.localization import _
-from polyglot.functools import lru_cache
 
 
 class HistoryMixin:
@@ -121,6 +123,10 @@ class HistoryLineEdit2(LineEdit, HistoryMixin):
         if hasattr(self.mcompleter, 'setUniformItemSizes'):
             self.mcompleter.setUniformItemSizes(on)
 
+    def add_items_to_context_menu(self, s, menu):
+        menu.addAction(QIcon.ic('trash.png'), _('Clear history')).triggered.connect(self.clear_history)
+        return menu
+
 
 class HistoryComboBox(EditWithComplete, HistoryMixin):
 
@@ -135,9 +141,10 @@ class ColorButton(QPushButton):
 
     color_changed = pyqtSignal(object)
 
-    def __init__(self, initial_color=None, parent=None, choose_text=None):
+    def __init__(self, initial_color=None, parent=None, choose_text=None, special_default_color=None):
         QPushButton.__init__(self, parent)
         self._color = None
+        self.special_default_color = special_default_color
         self.choose_text = choose_text or _('Choose &color')
         self.color = initial_color
         self.clicked.connect(self.choose_color)
@@ -151,21 +158,29 @@ class ColorButton(QPushButton):
         val = str(val or '')
         col = QColor(val)
         orig = self._color
-        if col.isValid():
-            self._color = val
-            self.setText(val)
+
+        def color_icon(col):
             p = QPixmap(self.iconSize())
             p.fill(col)
             self.setIcon(QIcon(p))
+
+        if col.isValid():
+            self._color = val
+            self.setText(val)
+            color_icon(col)
         else:
             self._color = None
-            self.setText(self.choose_text)
-            self.setIcon(QIcon())
+            if self.special_default_color:
+                self.setText(_('default: {}').format(self.special_default_color))
+                color_icon(QColor(self.special_default_color))
+            else:
+                self.setText(self.choose_text)
+                self.setIcon(QIcon())
         if orig != col:
             self.color_changed.emit(self._color)
 
     def choose_color(self):
-        col = QColorDialog.getColor(QColor(self._color or Qt.GlobalColor.white), self, _('Choose a color'))
+        col = QColorDialog.getColor(QColor(self._color or self.special_default_color or Qt.GlobalColor.white), self, _('Choose a color'))
         if col.isValid():
             self.color = str(col.name())
 
@@ -211,7 +226,7 @@ class CenteredToolButton(RightClickButton):
         self.setIcon(icon)
         self.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed))
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.text_flags =  Qt.TextFlag.TextSingleLine | Qt.AlignmentFlag.AlignCenter
+        self.text_flags = Qt.TextFlag.TextSingleLine | Qt.AlignmentFlag.AlignCenter
 
     def paintEvent(self, ev):
         painter = QStylePainter(self)
@@ -239,7 +254,6 @@ class CenteredToolButton(RightClickButton):
 
 
 class Dialog(QDialog):
-
     '''
     An improved version of Qt's QDialog class. This automatically remembers the
     last used size, automatically connects the signals for QDialogButtonBox,
@@ -383,7 +397,7 @@ class RatingEditor(QComboBox):
             self.redo()
             return ev.accept()
         k = ev.key()
-        num = {getattr(Qt, 'Key_%d'%i):i for i in range(6)}.get(k)
+        num = {getattr(Qt, f'Key_{i}'):i for i in range(6)}.get(k)
         if num is None:
             return QComboBox.keyPressEvent(self, ev)
         ev.accept()
@@ -405,9 +419,21 @@ class FlowLayout(QLayout):  # {{{
     def __init__(self, parent=None):
         QLayout.__init__(self, parent)
         self.items = []
+        self.height_for_width_cache = {}
+
+    def clear_caches(self):
+        self.height_for_width_cache.clear()
 
     def addItem(self, item):
+        self.clear_caches()
         self.items.append(item)
+
+    def isEmpty(self):
+        return not bool(self.items)
+
+    def invalidate(self):
+        self.clear_caches()
+        super().invalidate()
 
     def itemAt(self, idx):
         try:
@@ -429,7 +455,9 @@ class FlowLayout(QLayout):  # {{{
         return True
 
     def heightForWidth(self, width):
-        return self.do_layout(QRect(0, 0, width, 0), apply_geometry=False)
+        if (ans := self.height_for_width_cache.get(width)) is None:
+            ans = self.height_for_width_cache[width] = self.do_layout(QRect(0, 0, width, 0), apply_geometry=False)
+        return ans
 
     def setGeometry(self, rect):
         QLayout.setGeometry(self, rect)
@@ -507,7 +535,18 @@ class FlowLayout(QLayout):  # {{{
 
     @staticmethod
     def test():
+        s = QSplitter()
+        h = QSplitter()
+        h.setOrientation(Qt.Orientation.Vertical)
+        def filler():
+            la = QLabel(' filler')
+            la.sizeHint = lambda *a: QSize(10000, 10000)
+            la.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            return la
         w = QWidget()
+        h.addWidget(w), h.addWidget(filler())
+        s.addWidget(h)
+        s.addWidget(filler())
         l = FlowLayout(w)
         la = QLabel('Some text in a label')
         l.addWidget(la)
@@ -516,7 +555,7 @@ class FlowLayout(QLayout):  # {{{
         cb = QComboBox()
         cb.addItems(['Item one'])
         l.addWidget(cb)
-        return w
+        return s
 # }}}
 
 
@@ -601,7 +640,7 @@ class HTMLDisplay(QTextBrowser):
         if app.is_dark_theme:
             pal = app.palette()
             col = pal.color(QPalette.ColorRole.Link)
-            self.default_css = 'a { color: %s }\n\n' % col.name(QColor.NameFormat.HexRgb)
+            self.default_css = f'a {{ color: {col.name(QColor.NameFormat.HexRgb)} }}\n\n'
         else:
             self.default_css = ''
         self.document().setDefaultStyleSheet(self.default_css + self.process_external_css(self.external_css))
@@ -697,8 +736,13 @@ class ScrollingTabWidget(QTabWidget):
         sw.setWidget(page)
         sw.setWidgetResizable(True)
         page.setAutoFillBackground(False)
-        sw.setStyleSheet('#%s { background: transparent }' % name)
+        sw.setStyleSheet(f'#{name} {{ background: transparent }}')
         return sw
+
+    @property
+    def all_widgets(self):
+        for i in range(self.count()):
+            yield self.widget(i).widget()
 
     def indexOf(self, page):
         for i in range(self.count()):
@@ -876,11 +920,12 @@ class MessagePopup(QLabel):
         self.move((p.width() - self.width()) // 2, self.OFFSET_FROM_TOP)
 
 
-
 if __name__ == '__main__':
     from calibre.gui2 import Application
     app = Application([])
     app.load_builtin_fonts()
-    w = RatingEditor.test()
-    w.show()
-    app.exec()
+    d = QDialog()
+    l = QVBoxLayout(d)
+    w = FlowLayout.test()
+    l.addWidget(w)
+    d.exec()

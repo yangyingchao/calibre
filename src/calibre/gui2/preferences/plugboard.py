@@ -82,11 +82,12 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
 
         self.dest_fields = ['',
                             'authors', 'author_sort', 'language', 'publisher',
-                            'series', 'tags', 'title', 'title_sort', 'comments']
+                            'series', 'series_index', 'tags', 'title', 'title_sort',
+                            'comments']
 
         self.source_widgets = []
         self.dest_widgets = []
-        for i in range(0, len(self.dest_fields)-1):
+        for i in range(len(self.dest_fields)-1):
             w = TemplateLineEditor(self)
             self.source_widgets.append(w)
             self.fields_layout.addWidget(w, 5+i, 0, 1, 1)
@@ -289,7 +290,7 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
     def ok_clicked(self):
         pb = []
         comments_in_dests = False
-        for i in range(0, len(self.source_widgets)):
+        for i in range(len(self.source_widgets)):
             s = str(self.source_widgets[i].text())
             if s:
                 d = self.dest_widgets[i].currentIndex()
@@ -376,7 +377,7 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
                 ops = []
                 for op in self.current_plugboards[f][d]:
                     ops.append('([' + op[0] + '] -> ' + op[1] + ')')
-                txt = '%s:%s = %s\n'%(f, d, ', '.join(ops))
+                txt = '{}:{} = {}\n'.format(f, d, ', '.join(ops))
                 item = QListWidgetItem(txt)
                 item.setData(Qt.ItemDataRole.UserRole, (f, d))
                 if d in self.disabled_devices:

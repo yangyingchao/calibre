@@ -4,6 +4,7 @@
 __license__ = 'GPL v3'
 __copyright__ = '2015, Kovid Goyal <kovid at kovidgoyal.net>'
 
+import http.client
 import os
 import socket
 import ssl
@@ -18,7 +19,6 @@ from calibre.srv.pre_activated import has_preactivated_support
 from calibre.srv.tests.base import BaseTest, TestServer
 from calibre.utils.certgen import create_server_cert
 from calibre.utils.monotonic import monotonic
-from polyglot import http_client
 
 is_ci = os.environ.get('CI', '').lower() == 'true'
 
@@ -84,17 +84,16 @@ class LoopTest(BaseTest):
         self.ae(0, sum(int(w.is_alive()) for w in server.loop.pool.workers))
         # Test shutdown with hung worker
         block = Event()
-        with TestServer(lambda data:block.wait(), worker_count=3, shutdown_timeout=0.1, timeout=0.1) as server:
+        with TestServer(lambda data: block.wait(), worker_count=3, shutdown_timeout=0.1, timeout=0.1) as server:
             pool = server.loop.pool
             self.ae(3, sum(int(w.is_alive()) for w in pool.workers))
             conn = server.connect()
             conn.request('GET', '/')
             with self.assertRaises(socket.timeout):
                 res = conn.getresponse()
-                if int(res.status) == int(http_client.REQUEST_TIMEOUT):
-                    raise socket.timeout('Timeout')
-                raise Exception('Got unexpected response: code: {} {} headers: {!r} data: {!r}'.format(
-                    res.status, res.reason, res.getheaders(), res.read()))
+                if int(res.status) == int(http.client.REQUEST_TIMEOUT):
+                    raise TimeoutError('Timeout')
+                raise Exception(f'Got unexpected response: code: {res.status} {res.reason} headers: {res.getheaders()!r} data: {res.read()!r}')
             self.ae(pool.busy, 1)
         self.ae(1, sum(int(w.is_alive()) for w in pool.workers))
         block.set()
@@ -134,7 +133,7 @@ class LoopTest(BaseTest):
             conn = server.connect(interface='127.0.0.1')
             conn.request('GET', '/test', 'body')
             r = conn.getresponse()
-            self.ae(r.status, http_client.OK)
+            self.ae(r.status, http.client.OK)
             self.ae(r.read(), b'testbody')
 
     def test_ring_buffer(self):
@@ -198,16 +197,17 @@ class LoopTest(BaseTest):
         'Test serving over SSL'
         address = '127.0.0.1'
         with TemporaryDirectory('srv-test-ssl') as tdir:
-            cert_file, key_file, ca_file = map(lambda x:os.path.join(tdir, x), 'cka')
+            cert_file, key_file, ca_file = (os.path.join(tdir, x) for x in 'cka')
             create_server_cert(address, ca_file, cert_file, key_file, key_size=2048)
             ctx = ssl.create_default_context(cafile=ca_file)
+            ctx.verify_flags |= ssl.VERIFY_X509_STRICT
             with TestServer(
                     lambda data:(data.path[0] + data.read().decode('utf-8')),
                     ssl_certfile=cert_file, ssl_keyfile=key_file, listen_on=address, port=0) as server:
-                conn = http_client.HTTPSConnection(address, server.address[1], context=ctx)
+                conn = http.client.HTTPSConnection(address, server.address[1], context=ctx)
                 conn.request('GET', '/test', 'body')
                 r = conn.getresponse()
-                self.ae(r.status, http_client.OK)
+                self.ae(r.status, http.client.OK)
                 self.ae(r.read(), b'testbody')
                 cert = conn.sock.getpeercert()
                 subject = dict(x[0] for x in cert['subject'])
@@ -228,7 +228,7 @@ class LoopTest(BaseTest):
             conn = server.connect()
             conn.request('GET', '/test', 'body')
             r = conn.getresponse()
-            self.ae(r.status, http_client.OK)
+            self.ae(r.status, http.client.OK)
             self.ae(r.read(), b'testbody')
             self.ae(server.loop.bound_address[1], port)
 

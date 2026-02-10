@@ -282,8 +282,13 @@ def query_contains(haystack, needle):
     return haystack.toLowerCase().indexOf(needle) is not -1
 
 
-def query_startswitch(haystack, needle):
-    return haystack.toLowerCase().indexOf(needle) is 0
+def query_startswith(haystack, needle):
+    return haystack.toLowerCase().startsWith(needle)
+
+
+def query_startswith_hierarchical(haystack, needle):
+    haystack = haystack.toLowerCase()
+    return haystack.startsWith(needle) or haystack.indexOf('.' + needle) is not -1
 
 
 def update_removals(container_id):
@@ -337,7 +342,12 @@ def update_completions(container_id, ok, field, names):
     if needle:
         interface_data = get_interface_data()
         universe = update_completions.names if update_completions.prefix and needle.startswith(update_completions.prefix.toLowerCase()) else names
-        q = query_contains if interface_data.completion_mode is 'contains' else query_startswitch
+        if interface_data.completion_mode is 'contains':
+            q = query_contains
+        else:
+            q = query_startswith
+            if library_data.categories_using_hierarchy and library_data.categories_using_hierarchy.indexOf(field) is not -1:
+                q = query_startswith_hierarchical
         matching_names = [x for x in universe if q(x, needle) and x is not prefix]
     else:
         matching_names = []
@@ -367,7 +377,8 @@ def multiple_line_edit(list_to_ui, ui_to_list, container_id, book_id, field, fm,
     )
     val = (resolved_metadata(mi, field) or v'[]')
     if field is 'languages':
-        val = [mi.lang_names[l] or l for l in val]
+        ln = mi.lang_names or {}
+        val = [ln[l] or l for l in val]
     if list_to_ui:
         val = val.join(list_to_ui)
     le.value = val
@@ -852,7 +863,9 @@ def render_metadata(mi, table, container_id, book_id):  # {{{
             table.appendChild(E.tr(onclick=current_edit_action, E.td(name), E.td()))
             td = table.lastChild.lastChild
             for k in val:
-                lang = mi.lang_names[k] or k
+                lang = k
+                if mi.lang_names and mi.lang_names[k]:
+                    lang = mi.lang_names[k]
                 td.appendChild(document.createTextNode(lang))
                 if k is not val[-1]:
                     td.appendChild(document.createTextNode(', '))
@@ -956,7 +969,7 @@ def render_metadata(mi, table, container_id, book_id):  # {{{
         if changes.cover is '--remove--':
             img.removeAttribute('src')
             changes.cover = None
-        else:
+        elif jstype(changes.cover) is not 'string':
             r = FileReader()
             r.onload = def(evt):
                 img.src = evt.target.result

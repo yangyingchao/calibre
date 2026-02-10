@@ -15,7 +15,7 @@ from lxml import etree
 from calibre import my_unichr
 from calibre.ebooks.mobi.utils import PolyglotDict, to_base
 from calibre.ebooks.oeb.base import XHTML_NS, extract
-from polyglot.builtins import as_bytes, iteritems
+from polyglot.builtins import as_bytes
 
 CHUNK_SIZE = 8192
 
@@ -72,8 +72,8 @@ def tostring(raw, **kwargs):
     kwargs['xml_declaration'] = False
     ans = etree.tostring(raw, **kwargs)
     if xml_declaration:
-        ans = '<?xml version="1.0" encoding="%s"?>\n'%encoding + ans
-    return re.sub(r'&#x([0-9A-Fa-f]+);', lambda m:my_unichr(int(m.group(1), 16)),
+        ans = f'<?xml version="1.0" encoding="{encoding}"?>\n' + ans
+    return re.sub(r'&#x([0-9A-Fa-f]+);', lambda m: my_unichr(int(m.group(1), 16)),
             ans).encode(encoding)
 
 
@@ -85,7 +85,7 @@ class Chunk:
         self.ends_tags = []
         self.insert_pos = None
         self.is_first_chunk = False
-        self.selector = "%s-//*[@aid='%s']"%selector
+        self.selector = "{}-//*[@aid='{}']".format(*selector)
 
     def __len__(self):
         return len(self.raw)
@@ -95,8 +95,7 @@ class Chunk:
         self.ends_tags = chunk.ends_tags
 
     def __repr__(self):
-        return 'Chunk(len=%r insert_pos=%r starts_tags=%r ends_tags=%r)'%(
-                len(self.raw), self.insert_pos, self.starts_tags, self.ends_tags)
+        return f'Chunk(len={len(self.raw)!r} insert_pos={self.insert_pos!r} starts_tags={self.starts_tags!r} ends_tags={self.ends_tags!r})'
 
     __str__ = __repr__
 
@@ -115,7 +114,7 @@ class Skeleton:
 
     def render(self, root):
         raw = tostring(root, xml_declaration=True)
-        raw = raw.replace(b'<html', ('<html xmlns="%s"'%XHTML_NS).encode('ascii'), 1)
+        raw = raw.replace(b'<html', (f'<html xmlns="{XHTML_NS}"').encode('ascii'), 1)
         raw = close_self_closing_tags(raw)
         return raw
 
@@ -179,7 +178,7 @@ class Chunker:
                     with_tail=True))
                 orig_dumps[-1] = close_self_closing_tags(
                         orig_dumps[-1].replace(b'<html',
-                        ('<html xmlns="%s"'%XHTML_NS).encode('ascii'), 1))
+                        (f'<html xmlns="{XHTML_NS}"').encode('ascii'), 1))
 
             # First pass: break up document into rendered strings of length no
             # more than CHUNK_SIZE
@@ -209,7 +208,7 @@ class Chunker:
 
     def remove_namespaces(self, root):
         lang = None
-        for attr, val in iteritems(root.attrib):
+        for attr, val in root.attrib.items():
             if attr.rpartition('}')[-1] == 'lang':
                 lang = val
 
@@ -243,11 +242,11 @@ class Chunker:
                 tn = tag.tag
                 if tn is not None:
                     tn = tn.rpartition('}')[-1]
-                attrib = {k.rpartition('}')[-1]:v for k, v in iteritems(tag.attrib)}
+                attrib = {k.rpartition('}')[-1]:v for k, v in tag.attrib.items()}
                 try:
                     elem = nroot.makeelement(tn, attrib=attrib)
                 except ValueError:
-                    attrib = {k:v for k, v in iteritems(attrib) if ':' not in k}
+                    attrib = {k:v for k, v in attrib.items() if ':' not in k}
                     elem = nroot.makeelement(tn, attrib=attrib)
                 elem.text = tag.text
             elem.tail = tag.tail
@@ -283,8 +282,8 @@ class Chunker:
                     child.tail = None
             else:
                 if len(raw) > CHUNK_SIZE:
-                    self.log.warn('Tag %s has no aid and a too large chunk'
-                            ' size. Adding anyway.'%child.tag)
+                    self.log.warn(f'Tag {child.tag} has no aid and a too large chunk'
+                            ' size. Adding anyway.')
                 chunks.append(Chunk(raw, self.chunk_selector))
                 if child.tail:
                     chunks.extend(self.chunk_up_text(child.tail))
@@ -342,7 +341,7 @@ class Chunker:
         for s in self.skeletons:
             s.start_pos = sp
             sp += len(s)
-        self.skel_table = [Skel(s.file_number, 'SKEL%010d'%s.file_number,
+        self.skel_table = [Skel(s.file_number, f'SKEL{s.file_number:010}',
             len(s.chunks), s.start_pos, len(s.skeleton)) for s in self.skeletons]
 
         Chunk = namedtuple('Chunk',
@@ -385,8 +384,7 @@ class Chunker:
                     pos_fid = (chunk.sequence_number, offset-chunk.insert_pos,
                             offset)
             if pos_fid is None:
-                raise ValueError('Could not find chunk for aid: %r'%
-                        match.group(1))
+                raise ValueError(f'Could not find chunk for aid: {match.group(1)!r}')
             aid_map[match.group(1)] = pos_fid
 
         self.aid_offset_map = aid_map
@@ -396,8 +394,7 @@ class Chunker:
             pos, fid = to_base(pos, min_num_digits=4), to_href(fid)
             return ':off:'.join((pos, fid)).encode('utf-8')
 
-        placeholder_map = {as_bytes(k):to_placeholder(v) for k, v in
-                iteritems(self.placeholder_map)}
+        placeholder_map = {as_bytes(k):to_placeholder(v) for k, v in self.placeholder_map.items()}
 
         # Now update the links
         def sub(match):
@@ -428,13 +425,13 @@ class Chunker:
         error = False
         for i, skeleton in enumerate(self.skeletons):
             for j, chunk in enumerate(skeleton.chunks):
-                with open(os.path.join(chunks, 'file-%d-chunk-%d.html'%(i, j)),
+                with open(os.path.join(chunks, f'file-{i}-chunk-{j}.html'),
                         'wb') as f:
                     f.write(chunk.raw)
             oraw, rraw = orig_dumps[i], skeleton.rebuild()
-            with open(os.path.join(orig, '%04d.html'%i),  'wb') as f:
+            with open(os.path.join(orig, f'{i:04}.html'), 'wb') as f:
                 f.write(oraw)
-            with open(os.path.join(rebuilt, '%04d.html'%i),  'wb') as f:
+            with open(os.path.join(rebuilt, f'{i:04}.html'), 'wb') as f:
                 f.write(rraw)
             if oraw != rraw:
                 error = True

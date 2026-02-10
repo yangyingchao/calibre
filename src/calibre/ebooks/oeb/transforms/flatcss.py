@@ -23,7 +23,6 @@ from calibre.ebooks.oeb.base import CSS_MIME, OEB_STYLES, SVG, SVG_NS, XHTML, XH
 from calibre.ebooks.oeb.stylizer import Stylizer
 from calibre.utils.filenames import ascii_filename, ascii_text
 from calibre.utils.icu import numeric_sort_key
-from polyglot.builtins import iteritems, string_or_bytes
 
 COLLAPSE = re.compile(r'[ \t\r\n\v]+')
 STRIPNUM = re.compile(r'[-0-9]+$')
@@ -179,13 +178,12 @@ class CSSFlattener:
             try:
                 self.filter_css = {x.strip().lower() for x in
                     self.opts.filter_css.split(',')}
-            except:
+            except Exception:
                 self.oeb.log.warning('Failed to parse filter_css, ignoring')
             else:
                 from calibre.ebooks.oeb.normalize_css import normalize_filter_css
                 self.filter_css = frozenset(normalize_filter_css(self.filter_css))
-                self.oeb.log.debug('Filtering CSS properties: %s'%
-                    ', '.join(self.filter_css))
+                self.oeb.log.debug('Filtering CSS properties: {}'.format(', '.join(self.filter_css)))
 
         for item in oeb.manifest.values():
             # Make all links to resources absolute, as these sheets will be
@@ -211,7 +209,7 @@ class CSSFlattener:
 
     def store_page_margins(self):
         self.opts._stored_page_margins = {}
-        for item, stylizer in iteritems(self.stylizers):
+        for item, stylizer in self.stylizers.items():
             margins = self.opts._stored_page_margins[item.href] = {}
             for prop, val in stylizer.page_rule.items():
                 p, w = prop.partition('-')[::2]
@@ -230,42 +228,51 @@ class CSSFlattener:
         try:
             faces = font_scanner.fonts_for_family(family)
         except NoFonts:
-            msg = ('No embeddable fonts found for family: %r'%family)
+            msg = (f'No embeddable fonts found for family: {family!r}')
             if failure_critical:
                 raise ValueError(msg)
             self.oeb.log.warn(msg)
             return body_font_family, efi
         if not faces:
-            msg = ('No embeddable fonts found for family: %r'%family)
+            msg = (f'No embeddable fonts found for family: {family!r}')
             if failure_critical:
                 raise ValueError(msg)
             self.oeb.log.warn(msg)
             return body_font_family, efi
 
+        from calibre.ebooks.oeb.polish.utils import OEB_FONTS
         for i, font in enumerate(faces):
             ext = 'otf' if font['is_otf'] else 'ttf'
-            fid, href = self.oeb.manifest.generate(id='font',
-                href='fonts/%s.%s'%(ascii_filename(font['full_name']).replace(' ', '-'), ext))
-            item = self.oeb.manifest.add(fid, href,
-                    guess_type('dummy.'+ext)[0],
-                    data=font_scanner.get_font_data(font))
-            item.unload_data_from_memory()
+            font_data = font_scanner.get_font_data(font)
+            for x in self.oeb.manifest:
+                if x.media_type in OEB_FONTS:
+                    matches = x.data == font_data
+                    x.unload_data_from_memory()
+                    if matches:
+                        item = x
+                        href = item.href
+                        break
+            else:
+                fid, href = self.oeb.manifest.generate(id='font',
+                    href='fonts/{}.{}'.format(ascii_filename(font['full_name']).replace(' ', '-'), ext))
+                item = self.oeb.manifest.add(fid, href,
+                        guess_type('dummy.'+ext)[0],
+                        data=font_data)
+                item.unload_data_from_memory()
 
             cfont = {
-                    'font-family': '"%s"'%font['font-family'],
-                    'panose-1': ' '.join(map(str, font['panose'])),
-                    'src': 'url(%s)'%item.href,
+                'font-family': '"{}"'.format(font['font-family']),
+                'src': f'url({item.href})',
             }
 
             if i == 0:
                 generic_family = panose_to_css_generic_family(font['panose'])
-                body_font_family = "'%s',%s"%(font['font-family'], generic_family)
-                self.oeb.log('Embedding font: %s'%font['font-family'])
+                body_font_family = "'{}',{}".format(font['font-family'], generic_family)
+                self.oeb.log('Embedding font: {}'.format(font['font-family']))
             for k in ('font-weight', 'font-style', 'font-stretch'):
                 if font[k] != 'normal':
                     cfont[k] = font[k]
-            rule = '@font-face { %s }'%('; '.join('%s:%s'%(k, v) for k, v in
-                iteritems(cfont)))
+            rule = '@font-face {{ {} }}'.format('; '.join(f'{k}:{v}' for k, v in cfont.items()))
             rule = css_parser.parseString(rule)
             efi.append(rule)
 
@@ -280,17 +287,15 @@ class CSSFlattener:
             body = html.find(XHTML('body'))
             if 'style' in html.attrib:
                 b = body.attrib.get('style', '')
-                body.set('style',  html.get('style') + ';' + b)
+                body.set('style', html.get('style') + ';' + b)
                 del html.attrib['style']
             bs = body.get('style', '').split(';')
             bs.append('margin-top: 0pt')
             bs.append('margin-bottom: 0pt')
             if float(self.context.margin_left) >= 0:
-                bs.append('margin-left : %gpt'%
-                        float(self.context.margin_left))
+                bs.append(f'margin-left : {float(self.context.margin_left):g}pt')
             if float(self.context.margin_right) >= 0:
-                bs.append('margin-right : %gpt'%
-                        float(self.context.margin_right))
+                bs.append(f'margin-right : {float(self.context.margin_right):g}pt')
             bs.extend(['padding-left: 0pt', 'padding-right: 0pt'])
             if self.page_break_on_body:
                 bs.extend(['page-break-before: always'])
@@ -323,10 +328,10 @@ class CSSFlattener:
             self.baseline_node(body, stylizer, sizes, fsize)
         try:
             sbase = max(list(sizes.items()), key=operator.itemgetter(1))[0]
-        except:
+        except Exception:
             sbase = 12.0
         self.oeb.logger.info(
-            "Source base font size is %0.05fpt" % sbase)
+            f'Source base font size is {sbase:0.5f}pt')
         return sbase
 
     def clean_edges(self, cssdict, style, fsize):
@@ -334,7 +339,7 @@ class CSSFlattener:
         dlineh = self.lineh
         for kind in ('margin', 'padding'):
             for edge in ('bottom', 'top'):
-                property = f"{kind}-{edge}"
+                property = f'{kind}-{edge}'
                 if property not in cssdict:
                     continue
                 if '%' in cssdict[property]:
@@ -343,25 +348,25 @@ class CSSFlattener:
                 if value == 0 or not isinstance(value, numbers.Number):
                     continue
                 if value <= slineh:
-                    cssdict[property] = "%0.5fem" % (dlineh / fsize)
+                    cssdict[property] = f'{dlineh/fsize:0.5f}em'
                 else:
                     try:
                         value = round(value / slineh) * dlineh
-                    except:
+                    except Exception:
                         self.oeb.logger.warning(
                                 'Invalid length:', value)
                         value = 0.0
-                    cssdict[property] = "%0.5fem" % (value / fsize)
+                    cssdict[property] = f'{value/fsize:0.5f}em'
 
     def flatten_node(self, node, stylizer, names, styles, pseudo_styles, psize, item_id, recurse=True):
-        if not isinstance(node.tag, string_or_bytes) or namespace(node.tag) not in (XHTML_NS, SVG_NS):
+        if not isinstance(node.tag, (str, bytes)) or namespace(node.tag) not in (XHTML_NS, SVG_NS):
             return
         tag = barename(node.tag)
         style = stylizer.style(node)
         cssdict = style.cssdict()
         try:
             font_size = style['font-size']
-        except:
+        except Exception:
             font_size = self.sbase if self.sbase is not None else \
                 self.context.source.fbase
         if tag == 'body' and isinstance(font_size, numbers.Number):
@@ -378,7 +383,7 @@ class CSSFlattener:
                         if 'margin-left' not in cssdict and 'margin-right' not in cssdict:
                             cssdict['margin-left'] = cssdict['margin-right'] = 'auto'
                     else:
-                        for table in node.iterchildren(XHTML("table")):
+                        for table in node.iterchildren(XHTML('table')):
                             ts = stylizer.style(table)
                             if ts.get('margin-left') is None and ts.get('margin-right') is None:
                                 ts.set('margin-left', 'auto')
@@ -395,7 +400,7 @@ class CSSFlattener:
                 cssdict['vertical-align'] = node.attrib['valign']
             del node.attrib['valign']
         if node.tag == XHTML('font'):
-            tags = ['descendant::h:%s'%x for x in ('p', 'div', 'table', 'h1',
+            tags = [f'descendant::h:{x}' for x in ('p', 'div', 'table', 'h1',
                 'h2', 'h3', 'h4', 'h5', 'h6', 'ol', 'ul', 'dl', 'blockquote')]
             tag = 'div' if XPath('|'.join(tags))(node) else 'span'
             node.tag = XHTML(tag)
@@ -409,19 +414,16 @@ class CSSFlattener:
                         # Oh, the warcrimes
                         try:
                             esize = 3 + force_int(size)
-                        except:
+                        except Exception:
                             esize = 3
-                        if esize < 1:
-                            esize = 1
-                        if esize > 7:
-                            esize = 7
+                        esize = min(max(esize, 1), 7)
                         font_size = fnums[esize]
                     else:
                         try:
                             font_size = fnums[force_int(size)]
-                        except:
+                        except Exception:
                             font_size = fnums[3]
-                    cssdict['font-size'] = '%.1fpt'%font_size
+                    cssdict['font-size'] = f'{font_size:.1f}pt'
                 del node.attrib['size']
             if 'face' in node.attrib:
                 cssdict['font-family'] = node.attrib['face']
@@ -466,14 +468,14 @@ class CSSFlattener:
                     dyn_rescale = 1
                 fsize = self.fmap[_sbase]
                 fsize *= dyn_rescale
-                cssdict['font-size'] = '%0.5fem'%(fsize/psize)
+                cssdict['font-size'] = f'{fsize/psize:0.5f}em'
                 psize = fsize
             elif 'font-size' in cssdict or tag == 'body':
                 fsize = self.fmap[font_size]
                 try:
-                    cssdict['font-size'] = "%0.5fem" % (fsize / psize)
+                    cssdict['font-size'] = f'{fsize/psize:0.5f}em'
                 except ZeroDivisionError:
-                    cssdict['font-size'] = '%.1fpt'%fsize
+                    cssdict['font-size'] = f'{fsize:.1f}pt'
                 psize = fsize
 
         try:
@@ -511,27 +513,27 @@ class CSSFlattener:
                 cssdict['vertical-align'] = 'super'
         if self.lineh and 'line-height' not in cssdict and tag != 'html':
             lineh = self.lineh / psize
-            cssdict['line-height'] = "%0.5fem" % lineh
+            cssdict['line-height'] = f'{lineh:0.5f}em'
 
         if (self.context.remove_paragraph_spacing or self.context.insert_blank_line) and tag in ('p', 'div'):
             if item_id != 'calibre_jacket' or self.context.output_profile.name == 'Kindle':
                 for prop in ('margin', 'padding', 'border'):
                     for edge in ('top', 'bottom'):
-                        cssdict['%s-%s'%(prop, edge)] = '0pt'
+                        cssdict[f'{prop}-{edge}'] = '0pt'
             if self.context.insert_blank_line:
                 cssdict['margin-top'] = cssdict['margin-bottom'] = \
-                    '%fem'%self.context.insert_blank_line_size
+                    f'{self.context.insert_blank_line_size:f}em'
             indent_size = self.context.remove_paragraph_spacing_indent_size
             keep_indents = indent_size < 0.0
             if (self.context.remove_paragraph_spacing and not keep_indents and cssdict.get('text-align', None) not in ('center', 'right')):
-                cssdict['text-indent'] =  "%1.1fem" % indent_size
+                cssdict['text-indent'] = f'{indent_size:1.1f}em'
 
         pseudo_classes = style.pseudo_classes(self.filter_css)
         if cssdict or pseudo_classes:
             keep_classes = set()
 
             if cssdict:
-                items = sorted(iteritems(cssdict))
+                items = sorted(cssdict.items())
                 css = ';\n'.join(f'{key}: {val}' for key, val in items)
                 classes = node.get('class', '').strip() or 'calibre'
                 classes_list = classes.split()
@@ -548,8 +550,8 @@ class CSSFlattener:
                 node.attrib['class'] = match
                 keep_classes.add(match)
 
-            for psel, cssdict in iteritems(pseudo_classes):
-                items = sorted(iteritems(cssdict))
+            for psel, cssdict in pseudo_classes.items():
+                items = sorted(cssdict.items())
                 css = ';\n'.join(f'{key}: {val}' for key, val in items)
                 pstyles = pseudo_styles[psel]
                 if css in pstyles:
@@ -620,19 +622,36 @@ class CSSFlattener:
         return href
 
     def collect_global_css(self):
+        def rules_in(sheets):
+            for s in sheets:
+                yield from s.cssRules
+        def unique_font_face_rules(*rules):
+            seen = set()
+            for rule in rules:
+                try:
+                    ff = rule.style.getPropertyValue('font-family')
+                    src = rule.style.getPropertyValue('src')
+                    w = rule.style.getPropertyValue('font-weight')
+                    s = rule.style.getPropertyValue('font-style')
+                except Exception:
+                    yield rule
+                else:
+                    key = ff, src, w, s
+                    if key not in seen:
+                        seen.add(key)
+                        yield rule
+
         global_css = defaultdict(list)
         for item in self.items:
             stylizer = self.stylizers[item]
             if float(self.context.margin_top) >= 0:
-                stylizer.page_rule['margin-top'] = '%gpt'%\
-                        float(self.context.margin_top)
+                stylizer.page_rule['margin-top'] = f'{float(self.context.margin_top):g}pt'
             if float(self.context.margin_bottom) >= 0:
-                stylizer.page_rule['margin-bottom'] = '%gpt'%\
-                        float(self.context.margin_bottom)
+                stylizer.page_rule['margin-bottom'] = f'{float(self.context.margin_bottom):g}pt'
             items = sorted(stylizer.page_rule.items())
-            css = ';\n'.join(f"{key}: {val}" for key, val in items)
-            css = ('@page {\n%s\n}\n'%css) if items else ''
-            rules = [css_text(r) for r in stylizer.font_face_rules + self.embed_font_rules]
+            css = ';\n'.join(f'{key}: {val}' for key, val in items)
+            css = (f'@page {{\n{css}\n}}\n') if items else ''
+            rules = [css_text(r) for r in unique_font_face_rules(*stylizer.font_face_rules, *rules_in(self.embed_font_rules))]
             raw = '\n\n'.join(rules)
             css += '\n\n' + raw
             global_css[css].append(item)
@@ -651,7 +670,7 @@ class CSSFlattener:
             gc_map[css] = href
 
         ans = {}
-        for css, items in iteritems(global_css):
+        for css, items in global_css.items():
             for item in items:
                 ans[item] = gc_map[css]
         return ans
@@ -667,18 +686,18 @@ class CSSFlattener:
             fsize = self.context.dest.fbase
             self.flatten_node(html, stylizer, names, styles, pseudo_styles, fsize, item.id, recurse=False)
             self.flatten_node(html.find(XHTML('body')), stylizer, names, styles, pseudo_styles, fsize, item.id)
-        items = sorted(((key, val) for (val, key) in iteritems(styles)), key=lambda x:numeric_sort_key(x[0]))
+        items = sorted(((key, val) for (val, key) in styles.items()), key=lambda x: numeric_sort_key(x[0]))
         # :hover must come after link and :active must come after :hover
-        psels = sorted(pseudo_styles, key=lambda x :
+        psels = sorted(pseudo_styles, key=lambda x:
                 {'hover':1, 'active':2}.get(x, 0))
         for psel in psels:
             styles = pseudo_styles[psel]
             if not styles:
                 continue
-            x = sorted(((k+':'+psel, v) for v, k in iteritems(styles)))
+            x = sorted(((k+':'+psel, v) for v, k in styles.items()))
             items.extend(x)
 
-        css = ''.join(f".{key} {{\n{val};\n}}\n\n" for key, val in items)
+        css = ''.join(f'.{key} {{\n{val};\n}}\n\n' for key, val in items)
 
         href = self.replace_css(css)
         global_css = self.collect_global_css()

@@ -85,7 +85,7 @@ def run_pkgconfig(name, envvar, default, flag, prefix):
                 stdout=subprocess.PIPE).stdout.read().decode('utf-8')
             ans = [x.strip() for x in raw.split(prefix)]
             ans = [x for x in ans if x and (prefix=='-l' or os.path.exists(x))]
-        except:
+        except Exception:
             print('Failed to run pkg-config:', PKGCONFIG, 'for:', name)
 
     return ans or ([default] if default else [])
@@ -109,15 +109,19 @@ def consolidate(envvar, default):
     return [x for x in ans if x and os.path.exists(x)]
 
 
-qraw = subprocess.check_output([QMAKE, '-query']).decode('utf-8')
+qraw = None
 
 
 def readvar(name):
-    return re.search('^%s:(.+)$' % name, qraw, flags=re.M).group(1).strip()
+    global qraw
+    if qraw is None:
+        qraw = subprocess.check_output([QMAKE, '-query']).decode('utf-8')
+    return re.search(f'^{name}:(.+)$', qraw, flags=re.M).group(1).strip()
 
 
-qt = {x:readvar(y) for x, y in {'libs':'QT_INSTALL_LIBS', 'plugins':'QT_INSTALL_PLUGINS'}.items()}
+qt = {x:readvar(y) for x, y in {'libs':'QT_INSTALL_LIBS', 'plugins':'QT_INSTALL_PLUGINS', 'version_str': 'QT_VERSION'}.items()}
 qmakespec = readvar('QMAKE_SPEC') if iswindows else None
+qt['version'] = tuple(map(int, qt['version_str'].split('.')[:2]))
 freetype_lib_dirs = []
 freetype_libs = []
 freetype_inc_dirs = []
@@ -143,9 +147,14 @@ hunspell_lib_dirs = []
 hyphen_inc_dirs = []
 hyphen_lib_dirs = []
 
+ffmpeg_inc_dirs = []
+ffmpeg_lib_dirs = []
+
 uchardet_inc_dirs, uchardet_lib_dirs, uchardet_libs = [], [], ['uchardet']
 
 openssl_inc_dirs, openssl_lib_dirs = [], []
+
+piper_inc_dirs, piper_lib_dirs, piper_libs = [], [], []
 
 ICU = sw = ''
 
@@ -173,6 +182,9 @@ if iswindows:
     zlib_lib_dirs = [sw_lib_dir]
     podofo_inc = os.path.join(sw_inc_dir, 'podofo')
     podofo_lib = sw_lib_dir
+    piper_inc_dirs = [sw_inc_dir, os.path.join(sw_inc_dir, 'onnxruntime')]
+    piper_lib_dirs = [sw_lib_dir]
+    piper_libs = ['espeak-ng', 'onnxruntime']
 elif ismacos:
     sw = os.environ.get('SW', os.path.expanduser('~/sw'))
     sw_inc_dir  = os.path.join(sw, 'include')
@@ -189,6 +201,9 @@ elif ismacos:
     openssl_lib_dirs = [os.path.join(SSL, 'lib')]
     if os.path.exists(os.path.join(sw_bin_dir, 'cmake')):
         CMAKE = os.path.join(sw_bin_dir, 'cmake')
+    piper_inc_dirs = [sw_inc_dir, os.path.join(sw_inc_dir, 'onnxruntime')]
+    piper_lib_dirs = [sw_lib_dir]
+    piper_libs = ['espeak-ng', 'onnxruntime']
 else:
     freetype_inc_dirs = pkgconfig_include_dirs('freetype2', 'FT_INC_DIR',
             '/usr/include/freetype2')
@@ -205,6 +220,21 @@ else:
     uchardet_inc_dirs = pkgconfig_include_dirs('uchardet', '', '/usr/include/uchardet')
     uchardet_lib_dirs = pkgconfig_lib_dirs('uchardet', '', '/usr/lib')
     uchardet_libs = pkgconfig_libs('uchardet', '', '')
+    piper_inc_dirs = pkgconfig_include_dirs('espeak-ng', '', '/usr/include') + pkgconfig_include_dirs(
+            'libonnxruntime', '', '/usr/include/onnxruntime')
+    piper_lib_dirs = pkgconfig_lib_dirs('espeak-ng', '', '/usr/lib') + pkgconfig_lib_dirs('libonnxruntime', '', '/usr/lib')
+    piper_libs = pkgconfig_libs('espeak-ng', '', 'espeak-ng') + pkgconfig_libs('libonnxruntime', '', 'onnxruntime')
+    for x in ('libavcodec', 'libavformat', 'libavdevice', 'libavfilter', 'libavutil', 'libpostproc', 'libswresample', 'libswscale'):
+        for inc in pkgconfig_include_dirs(x, '', '/usr/include'):
+            if inc and inc not in ffmpeg_inc_dirs:
+                ffmpeg_inc_dirs.append(inc)
+        for lib in pkgconfig_lib_dirs(x, '', '/usr/lib'):
+            if lib and lib not in ffmpeg_lib_dirs:
+                ffmpeg_lib_dirs.append(lib)
+
+if os.path.exists(os.path.join(sw, 'ffmpeg')):
+    ffmpeg_inc_dirs = [os.path.join(sw, 'ffmpeg', 'include')] + ffmpeg_inc_dirs
+    ffmpeg_lib_dirs = [os.path.join(sw, 'ffmpeg', 'bin' if iswindows else 'lib')] + ffmpeg_lib_dirs
 
 
 if 'PODOFO_PREFIX' in os.environ:

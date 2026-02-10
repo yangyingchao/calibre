@@ -14,7 +14,6 @@ from calibre.ebooks.chardet import xml_to_unicode
 from calibre.ebooks.metadata import MetaInformation, string_to_authors
 from calibre.ptempfile import TemporaryFile
 from calibre.utils.logging import default_log
-from polyglot.builtins import iterkeys
 
 
 def _clean(s):
@@ -22,11 +21,11 @@ def _clean(s):
 
 
 def _detag(tag):
-    ans = ""
+    ans = ''
     if tag is None:
         return ans
     for elem in tag:
-        if hasattr(elem, "contents"):
+        if hasattr(elem, 'contents'):
             ans += _detag(elem)
         else:
             ans += _clean(elem)
@@ -42,7 +41,7 @@ def _metadata_from_table(soup, searchfor):
     # on the home page. cue some nasty special-case hacks...
     if re.match(r'^\s*'+searchfor+r'\s*$', td.decode_contents(), flags=re.I):
         meta = _detag(td.findNextSibling('td'))
-        return re.sub('^:', '', meta).strip()
+        return re.sub(r'^:', '', meta).strip()
     else:
         meta = _detag(td)
         return re.sub(r'^[^:]+:', '', meta).strip()
@@ -77,11 +76,11 @@ def _get_comments(soup):
     pages = (_metadata_from_span(soup, 'pages') or _metadata_from_table(soup, 'pages'))
     try:
         # date span can have copyright symbols in it...
-        date = date.replace('\u00a9', '').strip()
+        date = date.replace('©', '').strip()
         # and pages often comes as '(\d+ pages)'
         pages = re.search(r'\d+', pages).group(0)
         return f'Published {date}, {pages} pages.'
-    except:
+    except Exception:
         pass
     return None
 
@@ -89,7 +88,7 @@ def _get_comments(soup):
 def _get_cover(soup, rdr):
     ans = None
     try:
-        ans = soup.find('img', alt=re.compile('cover', flags=re.I))['src']
+        ans = soup.find('img', alt=re.compile(r'cover', flags=re.I))['src']
     except TypeError:
         # meeehh, no handy alt-tag goodness, try some hackery
         # the basic idea behind this is that in general, the cover image
@@ -108,21 +107,21 @@ def _get_cover(soup, rdr):
                 # interestingly, occasionally the only image without height
                 # or width attrs is the cover...
                 r[0] = img['src']
-            except:
+            except Exception:
                 # Probably invalid width, height aattributes, ignore
                 continue
         if r:
-            l = sorted(iterkeys(r))
+            l = sorted(r.keys())
             ans = r[l[0]]
     # this link comes from the internal html, which is in a subdir
     if ans is not None:
         try:
             ans = rdr.GetFile(ans)
-        except:
-            ans = rdr.root + "/" + ans
+        except Exception:
+            ans = rdr.root + '/' + ans
             try:
                 ans = rdr.GetFile(ans)
-            except:
+            except Exception:
                 ans = None
         if ans is not None:
             import io
@@ -132,7 +131,7 @@ def _get_cover(soup, rdr):
             try:
                 Image.open(io.BytesIO(ans)).convert('RGB').save(buf, 'JPEG')
                 ans = buf.getvalue()
-            except:
+            except Exception:
                 ans = None
     return ans
 
@@ -147,7 +146,7 @@ def get_metadata_from_reader(rdr):
         x = rdr.GetEncoding()
         codecs.lookup(x)
         enc = x
-    except:
+    except Exception:
         enc = 'cp1252'
     title = force_unicode(title, enc)
     authors = _get_authors(home)

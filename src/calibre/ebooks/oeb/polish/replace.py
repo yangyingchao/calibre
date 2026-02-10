@@ -11,14 +11,13 @@ import posixpath
 import shutil
 from collections import Counter, defaultdict
 from functools import partial
+from urllib.parse import urlparse, urlunparse
 
 from calibre import sanitize_file_name
 from calibre.ebooks.chardet import strip_encoding_declarations
 from calibre.ebooks.oeb.base import css_text
 from calibre.ebooks.oeb.polish.css import iter_declarations, remove_property_value
 from calibre.ebooks.oeb.polish.utils import extract
-from polyglot.builtins import iteritems, itervalues
-from polyglot.urllib import urlparse, urlunparse
 
 
 class LinkReplacer:
@@ -48,7 +47,7 @@ class LinkReplacer:
         if purl.fragment:
             nfrag = self.frag_map(name, purl.fragment)
             if nfrag:
-                href += '#%s'%nfrag
+                href += f'#{nfrag}'
         if href != url:
             self.replaced = True
         return href
@@ -120,7 +119,7 @@ def replace_links(container, link_map, frag_map=lambda name, frag:frag, replace_
     :param replace_in_opf: If False, links are not replaced in the OPF file.
 
     '''
-    for name, media_type in iteritems(container.mime_map):
+    for name, media_type in container.mime_map.items():
         if name == container.opf_name and not replace_in_opf:
             continue
         repl = LinkReplacer(name, container, link_map, frag_map)
@@ -136,7 +135,7 @@ def replace_ids(container, id_map):
 
     '''
     changed = False
-    for name, media_type in iteritems(container.mime_map):
+    for name, media_type in container.mime_map.items():
         repl = IdReplacer(name, container, id_map)
         container.replace_links(name, repl)
         if name == container.opf_name:
@@ -188,19 +187,19 @@ def rename_files(container, file_map):
     :param file_map: A mapping of old canonical name to new canonical name, for
         example: :code:`{'text/chapter1.html': 'chapter1.html'}`.
     '''
-    overlap = set(file_map).intersection(set(itervalues(file_map)))
+    overlap = set(file_map).intersection(set(file_map.values()))
     if overlap:
-        raise ValueError('Circular rename detected. The files %s are both rename targets and destinations' % ', '.join(overlap))
-    for name, dest in iteritems(file_map):
+        raise ValueError('Circular rename detected. The files {} are both rename targets and destinations'.format(', '.join(overlap)))
+    for name, dest in file_map.items():
         if container.exists(dest):
             if name != dest and name.lower() == dest.lower():
                 # A case change on an OS with a case insensitive file-system.
                 continue
-            raise ValueError('Cannot rename {0} to {1} as {1} already exists'.format(name, dest))
-    if len(tuple(itervalues(file_map))) != len(set(itervalues(file_map))):
+            raise ValueError(f'Cannot rename {name} to {dest} as {dest} already exists')
+    if len(tuple(file_map.values())) != len(set(file_map.values())):
         raise ValueError('Cannot rename, the set of destination files contains duplicates')
     link_map = {}
-    for current_name, new_name in iteritems(file_map):
+    for current_name, new_name in file_map.items():
         container.rename(current_name, new_name)
         if new_name != container.opf_name:  # OPF is handled by the container
             link_map[current_name] = new_name
@@ -218,13 +217,13 @@ def replace_file(container, name, path, basename, force_mt=None):
             b, e = nname.rpartition('.')[0::2]
             while container.exists(nname):
                 count += 1
-                nname = b + ('_%d.%s' % (count, e))
+                nname = b + f'_{count}.{e}'
             rename_files(container, {name:nname})
             mt = force_mt or container.guess_type(nname)
             container.mime_map[nname] = mt
-            for itemid, q in iteritems(container.manifest_id_map):
+            for itemid, q in container.manifest_id_map.items():
                 if q == nname:
-                    for item in container.opf_xpath('//opf:manifest/opf:item[@href and @id="%s"]' % itemid):
+                    for item in container.opf_xpath(f'//opf:manifest/opf:item[@href and @id="{itemid}"]'):
                         item.set('media-type', mt)
         container.dirty(container.opf_name)
         with container.open(nname, 'wb') as dest:
@@ -256,7 +255,7 @@ def get_recommended_folders(container, names):
     recommended folder is assumed to be the folder containing the OPF file. '''
     from calibre.ebooks.oeb.polish.utils import guess_type
     counts = defaultdict(Counter)
-    for name, mt in iteritems(container.mime_map):
+    for name, mt in container.mime_map.items():
         folder = name.rpartition('/')[0] if '/' in name else ''
         counts[mt_to_category(container, mt)][folder] += 1
 
@@ -265,7 +264,7 @@ def get_recommended_folders(container, names):
     except KeyError:
         opf_folder = ''
 
-    recommendations = {category:counter.most_common(1)[0][0] for category, counter in iteritems(counts)}
+    recommendations = {category:counter.most_common(1)[0][0] for category, counter in counts.items()}
     return {n:recommendations.get(mt_to_category(container, guess_type(os.path.basename(n))), opf_folder) for n in names}
 
 
@@ -308,7 +307,7 @@ def rationalize_folders(container, folder_type_map):
                 while new_name in all_names or new_name in new_names:
                     c += 1
                     n, ext = bn.rpartition('.')[0::2]
-                    new_name = posixpath.join(folder, '%s_%d.%s' % (n, c, ext))
+                    new_name = posixpath.join(folder, f'{n}_{c}.{ext}')
                 name_map[name] = new_name
                 new_names.add(new_name)
     return name_map
@@ -352,7 +351,7 @@ def remove_links_to(container, predicate):
     stylepath = XPath('//h:style')
     styleattrpath = XPath('//*[@style]')
     changed = set()
-    for name, mt in iteritems(container.mime_map):
+    for name, mt in container.mime_map.items():
         removed = False
         if mt in OEB_DOCS:
             root = container.parsed(name)
@@ -362,11 +361,10 @@ def remove_links_to(container, predicate):
                 if predicate(hname, href, frag):
                     if attr is None:
                         el.text = None
+                    elif el.tag == XHTML('link') or el.tag == XHTML('img'):
+                        extract(el)
                     else:
-                        if el.tag == XHTML('link') or el.tag == XHTML('img'):
-                            extract(el)
-                        else:
-                            del el.attrib[attr]
+                        del el.attrib[attr]
                     removed = True
             for tag in stylepath(root):
                 if tag.text and (tag.get('type') or 'text/css').lower() == 'text/css':

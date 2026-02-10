@@ -16,8 +16,8 @@ import sys
 import time
 import uuid
 from contextlib import closing, suppress
+from datetime import datetime
 from functools import partial
-from typing import Optional
 
 import apsw
 
@@ -49,6 +49,7 @@ from calibre.db.tables import (
     SizeTable,
     UUIDTable,
 )
+from calibre.db.utils import atomic_write
 from calibre.ebooks.metadata import author_to_author_sort, title_sort
 from calibre.library.field_metadata import FieldMetadata
 from calibre.ptempfile import PersistentTemporaryFile, TemporaryFile
@@ -73,7 +74,10 @@ from calibre.utils.formatter_functions import compile_user_template_functions, f
 from calibre.utils.icu import lower as icu_lower
 from calibre.utils.icu import sort_key
 from calibre.utils.resources import get_path as P
-from polyglot.builtins import cmp, iteritems, itervalues, native_string_type, reraise, string_or_bytes
+from polyglot.builtins import cmp, reraise
+
+if iswindows:
+    from calibre_extensions import winutil
 
 # }}}
 
@@ -114,7 +118,7 @@ class DBPrefs(dict):  # {{{
         for key, val in self.db.conn.get('SELECT key,val FROM preferences'):
             try:
                 val = self.raw_to_object(val)
-            except:
+            except Exception:
                 prints('Failed to read value for:', key, 'from db')
                 continue
             dict.__setitem__(self, key, val)
@@ -164,7 +168,7 @@ class DBPrefs(dict):  # {{{
         self.__setitem__(key, val)
 
     def get_namespaced(self, namespace, key, default=None):
-        key = 'namespaced:%s:%s'%(namespace, key)
+        key = f'namespaced:{namespace}:{key}'
         try:
             return dict.__getitem__(self, key)
         except KeyError:
@@ -175,7 +179,7 @@ class DBPrefs(dict):  # {{{
             raise KeyError('Colons are not allowed in keys')
         if ':' in namespace:
             raise KeyError('Colons are not allowed in the namespace')
-        key = 'namespaced:%s:%s'%(namespace, key)
+        key = f'namespaced:{namespace}:{key}'
         self[key] = val
 
     def write_serialized(self, library_path):
@@ -186,7 +190,7 @@ class DBPrefs(dict):  # {{{
                 data = data.encode('utf-8')
             with open(to_filename, 'wb') as f:
                 f.write(data)
-        except:
+        except Exception:
             import traceback
             traceback.print_exc()
 
@@ -198,19 +202,19 @@ class DBPrefs(dict):  # {{{
             return json.load(f, object_hook=from_json)
 # }}}
 
-# Extra collators {{{
 
+# Extra collators {{{
 
 def pynocase(one, two, encoding='utf-8'):
     if isbytestring(one):
         try:
             one = one.decode(encoding, 'replace')
-        except:
+        except Exception:
             pass
     if isbytestring(two):
         try:
             two = two.decode(encoding, 'replace')
-        except:
+        except Exception:
             pass
     return cmp(one.lower(), two.lower())
 
@@ -227,8 +231,8 @@ def icu_collator(s1, s2):
 
 # }}}
 
-# Unused aggregators {{{
 
+# Unused aggregators {{{
 
 def Concatenate(sep=','):
     '''String concatenation aggregator for sqlite'''
@@ -274,7 +278,7 @@ def IdentifiersConcat():
     '''String concatenation aggregator for the identifiers map'''
 
     def step(ctxt, key, val):
-        ctxt.append('%s:%s'%(key, val))
+        ctxt.append(f'{key}:{val}')
 
     def finalize(ctxt):
         try:
@@ -339,6 +343,26 @@ def save_annotations_for_book(cursor, book_id, fmt, annots_list, user_type='loca
     cursor.executemany(
         'INSERT OR REPLACE INTO annotations (book, format, user_type, user, timestamp, annot_id, annot_type, annot_data, searchable_text)'
         ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', data)
+
+
+def save_annotations_list_to_cursor(cursor, alist, sync_annots_user, book_id, book_fmt):
+    from calibre.db.annotations import annotations_as_copied_list, merge_annotations
+    book_fmt = book_fmt.upper()
+    amap = {}
+    for annot in annotations_for_book(cursor, book_id, book_fmt):
+        amap.setdefault(annot['type'], []).append(annot)
+    merge_annotations((x[0] for x in alist), amap)
+    if sync_annots_user:
+        other_amap = {}
+        for annot in annotations_for_book(cursor, book_id, book_fmt, user_type='web', user=sync_annots_user):
+            other_amap.setdefault(annot['type'], []).append(annot)
+        merge_annotations(amap, other_amap)
+    alist = tuple(annotations_as_copied_list(amap))
+    save_annotations_for_book(cursor, book_id, book_fmt, alist)
+    if sync_annots_user:
+        alist = tuple(annotations_as_copied_list(other_amap))
+        save_annotations_for_book(cursor, book_id, book_fmt, alist, user_type='web', user=sync_annots_user)
+
 # }}}
 
 
@@ -431,7 +455,7 @@ def rmtree_with_retry(path, sleep_time=1):
     except OSError as e:
         if e.errno == errno.ENOENT and not os.path.exists(path):
             return
-        if iswindows:
+        if iswindows and e.winerror == winutil.ERROR_SHARING_VIOLATION:
             time.sleep(sleep_time)  # In case something has temporarily locked a file
         shutil.rmtree(path)
 
@@ -445,7 +469,7 @@ class DB:
 
     def __init__(self, library_path, default_prefs=None, read_only=False,
                  restore_all_prefs=False, progress_callback=lambda x, y:True,
-                 load_user_formatter_functions=True):
+                 load_user_formatter_functions=True, temp_db_path=None):
         self.is_closed = False
         if isbytestring(library_path):
             library_path = library_path.decode(filesystem_encoding)
@@ -453,8 +477,7 @@ class DB:
 
         self.library_path = os.path.abspath(library_path)
         self.dbpath = os.path.join(library_path, 'metadata.db')
-        self.dbpath = os.environ.get('CALIBRE_OVERRIDE_DATABASE_PATH',
-                self.dbpath)
+        self.dbpath = os.environ.get('CALIBRE_OVERRIDE_DATABASE_PATH', self.dbpath)
 
         if iswindows and len(self.library_path) + 4*self.PATH_LIMIT + 10 > 259:
             raise ValueError(_(
@@ -469,7 +492,14 @@ class DB:
                     'Path to library too long. It must be less than'
                     ' %d characters.')%self.WINDOWS_LIBRARY_PATH_LIMIT)
 
-        if read_only and os.path.exists(self.dbpath):
+        if temp_db_path is not None:
+            if not os.path.exists(temp_db_path):
+                raise FileNotFoundError(f"temp_db_path '{temp_db_path} doesn't refer to a file")
+            # temp_db_path specifies a path to the database to use for this
+            # library. It should be in its own folder along with .calnotes.
+            # It overrides the environment variable CALIBRE_OVERRIDE_DATABASE_PATH.
+            self.dbpath = temp_db_path
+        elif read_only and os.path.exists(self.dbpath):
             # Work on only a copy of metadata.db to ensure that
             # metadata.db is not changed
             pt = PersistentTemporaryFile('_metadata_ro.db')
@@ -526,6 +556,10 @@ class DB:
         self.initialize_notes()
 
     @property
+    def max_number_of_variables(self) -> int:
+        return self.conn.limit(apsw.SQLITE_LIMIT_VARIABLE_NUMBER)
+
+    @property
     def last_expired_trash_at(self) -> float:
         return float(self.prefs['last_expired_trash_at'])
 
@@ -552,7 +586,7 @@ class DB:
             # Only apply default prefs to a new database
             for i, key in enumerate(default_prefs):
                 # be sure that prefs not to be copied are listed below
-                if restore_all_prefs or key not in frozenset(['news_to_be_synced']):
+                if restore_all_prefs or key != 'news_to_be_synced':
                     self.prefs[key] = default_prefs[key]
                     progress_callback(_('restored preference ') + key, i+1)
             if 'field_metadata' in default_prefs:
@@ -589,7 +623,7 @@ class DB:
         ('path', True), ('publisher', False), ('rating', False),
         ('author_sort', False), ('sort', False), ('timestamp', False),
         ('uuid', False), ('comments', True), ('id', False), ('pubdate', False),
-        ('last_modified', False), ('size', False), ('languages', False),
+        ('last_modified', False), ('size', False), ('languages', False), ('pages', False),
         ]
         defs['popup_book_display_fields'] = [('title', True)] + [(f[0], True) for f in defs['book_display_fields'] if f[0] != 'title']
         defs['qv_display_fields'] = [('title', True), ('authors', True), ('series', True)]
@@ -603,6 +637,16 @@ class DB:
         defs['styled_columns'] = {}
         defs['edit_metadata_ignore_display_order'] = False
         defs['fts_enabled'] = False
+        defs['column_tooltip_templates'] = {}
+        defs['bookshelf_grouping_mode'] = ''
+        defs['bookshelf_title_template'] = '{title}'
+        defs['bookshelf_author_template'] = ''
+        defs['bookshelf_spine_size_template'] = '{pages}'
+        defs['bookshelf_icon_rules'] = []
+
+        # Migrate the beta bookshelf_grouping_mode
+        if self.prefs.get('bookshelf_grouping_mode', '') == 'none':
+            self.prefs.set('bookshelf_grouping_mode', '')
 
         # Migrate the bool tristate tweak
         defs['bools_are_tristate'] = \
@@ -615,15 +659,15 @@ class DB:
             from calibre.library.coloring import migrate_old_rule
             old_rules = []
             for i in range(1, 6):
-                col = self.prefs.get('column_color_name_%d' % i, None)
-                templ = self.prefs.get('column_color_template_%d' % i, None)
+                col = self.prefs.get(f'column_color_name_{i}', None)
+                templ = self.prefs.get(f'column_color_template_{i}', None)
                 if col and templ:
                     try:
-                        del self.prefs['column_color_name_%d' % i]
+                        del self.prefs[f'column_color_name_{i}']
                         rules = migrate_old_rule(self.field_metadata, templ)
                         for templ in rules:
                             old_rules.append((col, templ))
-                    except:
+                    except Exception:
                         pass
             if old_rules:
                 self.prefs['column_color_rules'] += old_rules
@@ -648,7 +692,7 @@ class DB:
                 for t in ogst:
                     ngst[icu_lower(t)] = ogst[t]
                 self.prefs.set('grouped_search_terms', ngst)
-            except:
+            except Exception:
                 pass
 
         # migrate the gui_restriction preference to a virtual library
@@ -678,14 +722,14 @@ class DB:
                 catmap[ucl] = []
             catmap[ucl].append(uc)
         cats_changed = False
-        for uc in catmap:
-            if len(catmap[uc]) > 1:
-                prints('found user category case overlap', catmap[uc])
-                cat = catmap[uc][0]
+        for uc, user_cat in catmap.items():
+            if len(user_cat) > 1:
+                prints('found user category case overlap', user_cat)
+                cat = user_cat[0]
                 suffix = 1
                 while icu_lower(cat + str(suffix)) in catmap:
                     suffix += 1
-                prints('Renaming user category %s to %s'%(cat, cat+str(suffix)))
+                prints(f'Renaming user category {cat} to {cat+str(suffix)}')
                 user_cats[cat + str(suffix)] = user_cats[cat]
                 del user_cats[cat]
                 cats_changed = True
@@ -698,10 +742,10 @@ class DB:
         self.deleted_fields = []
         with self.conn:
             # Delete previously marked custom columns
-            for (num, label) in self.conn.get(
+            for num, label in self.conn.get(
                     'SELECT id,label FROM custom_columns WHERE mark_for_delete=1'):
                 table, lt = self.custom_table_names(num)
-                self.execute('''\
+                self.execute(f'''\
                         DROP INDEX   IF EXISTS {table}_idx;
                         DROP INDEX   IF EXISTS {lt}_aidx;
                         DROP INDEX   IF EXISTS {lt}_bidx;
@@ -715,7 +759,7 @@ class DB:
                         DROP VIEW    IF EXISTS tag_browser_filtered_{table};
                         DROP TABLE   IF EXISTS {table};
                         DROP TABLE   IF EXISTS {lt};
-                        '''.format(table=table, lt=lt)
+                        '''
                 )
                 self.prefs.set('update_all_last_mod_dates_on_start', True)
                 self.deleted_fields.append('#'+label)
@@ -765,16 +809,15 @@ class DB:
 
             # Create Foreign Key triggers
             if data['normalized']:
-                trigger = 'DELETE FROM %s WHERE book=OLD.id;'%lt
+                trigger = f'DELETE FROM {lt} WHERE book=OLD.id;'
             else:
-                trigger = 'DELETE FROM %s WHERE book=OLD.id;'%table
+                trigger = f'DELETE FROM {table} WHERE book=OLD.id;'
             triggers.append(trigger)
 
         if remove:
             with self.conn:
                 for data in remove:
-                    prints('WARNING: Custom column %r not found, removing.' %
-                            data['label'])
+                    prints('WARNING: Custom column {!r} not found, removing.'.format(data['label']))
                     self.execute('DELETE FROM custom_columns WHERE id=?',
                             (data['num'],))
 
@@ -784,9 +827,9 @@ class DB:
                     CREATE TEMP TRIGGER custom_books_delete_trg
                         AFTER DELETE ON books
                         BEGIN
-                        %s
+                        {}
                     END;
-                    '''%(' \n'.join(triggers)))
+                    '''.format(' \n'.join(triggers)))
 
         # Setup data adapters
         def adapt_text(x, d):
@@ -875,7 +918,7 @@ class DB:
     def initialize_tables(self):  # {{{
         tables = self.tables = {}
         for col in ('title', 'sort', 'author_sort', 'series_index', 'comments',
-                'timestamp', 'pubdate', 'uuid', 'path', 'cover',
+                'timestamp', 'pubdate', 'uuid', 'path', 'cover', 'pages',
                 'last_modified'):
             metadata = self.field_metadata[col].copy()
             if col == 'comments':
@@ -906,13 +949,13 @@ class DB:
             'rating':5, 'tags':6, 'comments':7, 'series':8, 'publisher':9,
             'series_index':10, 'sort':11, 'author_sort':12, 'formats':13,
             'path':14, 'pubdate':15, 'uuid':16, 'cover':17, 'au_map':18,
-            'last_modified':19, 'identifiers':20, 'languages':21,
+            'last_modified':19, 'identifiers':20, 'languages':21, 'pages':22,
         }
 
-        for k,v in iteritems(self.FIELD_MAP):
+        for k,v in self.FIELD_MAP.items():
             self.field_metadata.set_field_record_index(k, v, prefer_custom=False)
 
-        base = max(itervalues(self.FIELD_MAP))
+        base = max(self.FIELD_MAP.values())
 
         for label_ in sorted(self.custom_column_label_map):
             data = self.custom_column_label_map[label_]
@@ -944,11 +987,10 @@ class DB:
                         metadata['column'] = 'extra'
                         metadata['table'] = link_table
                         tables[label] = OneToOneTable(label, metadata)
+            elif data['datatype'] == 'composite':
+                tables[label] = CompositeTable(label, metadata)
             else:
-                if data['datatype'] == 'composite':
-                    tables[label] = CompositeTable(label, metadata)
-                else:
-                    tables[label] = OneToOneTable(label, metadata)
+                tables[label] = OneToOneTable(label, metadata)
 
         self.FIELD_MAP['ondevice'] = base = base+1
         self.field_metadata.set_field_record_index('ondevice', base, prefer_custom=False)
@@ -1007,7 +1049,7 @@ class DB:
     def add_notes_resource(self, path_or_stream, name, mtime=None) -> int:
         return self.notes.add_resource(self.conn, path_or_stream, name, mtime=mtime)
 
-    def get_notes_resource(self, resource_hash) -> Optional[dict]:
+    def get_notes_resource(self, resource_hash) -> dict | None:
         return self.notes.get_resource_data(self.conn, resource_hash)
 
     def notes_resources_used_by(self, field, item_id):
@@ -1213,7 +1255,7 @@ class DB:
         if re.match(r'^\w*$', label) is None or not label[0].isalpha() or label.lower() != label:
             raise ValueError(_('The label must contain only lower case letters, digits and underscores, and start with a letter'))
         if datatype not in CUSTOM_DATA_TYPES:
-            raise ValueError('%r is not a supported data type'%datatype)
+            raise ValueError(f'{datatype!r} is not a supported data type')
         normalized  = datatype not in ('datetime', 'comments', 'int', 'bool',
                 'float', 'composite')
         is_multiple = is_multiple and datatype in ('text', 'composite')
@@ -1228,7 +1270,7 @@ class DB:
             dt = 'INT'
         elif datatype in ('text', 'comments', 'series', 'composite', 'enumeration'):
             dt = 'TEXT'
-        elif datatype in ('float',):
+        elif datatype == 'float':
             dt = 'REAL'
         elif datatype == 'datetime':
             dt = 'timestamp'
@@ -1242,29 +1284,29 @@ class DB:
             else:
                 s_index = ''
             lines = [
-                '''\
-                CREATE TABLE %s(
+                f'''\
+                CREATE TABLE {table}(
                     id    INTEGER PRIMARY KEY AUTOINCREMENT,
-                    value %s NOT NULL %s,
+                    value {dt} NOT NULL {collate},
                     link TEXT NOT NULL DEFAULT "",
                     UNIQUE(value));
-                '''%(table, dt, collate),
+                ''',
 
-                'CREATE INDEX %s_idx ON %s (value %s);'%(table, table, collate),
+                f'CREATE INDEX {table}_idx ON {table} (value {collate});',
 
-                '''\
-                CREATE TABLE %s(
+                f'''\
+                CREATE TABLE {lt}(
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     book INTEGER NOT NULL,
                     value INTEGER NOT NULL,
-                    %s
+                    {s_index}
                     UNIQUE(book, value)
-                    );'''%(lt, s_index),
+                    );''',
 
-                'CREATE INDEX %s_aidx ON %s (value);'%(lt,lt),
-                'CREATE INDEX %s_bidx ON %s (book);'%(lt,lt),
+                f'CREATE INDEX {lt}_aidx ON {lt} (value);',
+                f'CREATE INDEX {lt}_bidx ON {lt} (book);',
 
-                '''\
+                f'''\
                 CREATE TRIGGER fkc_update_{lt}_a
                         BEFORE UPDATE OF book ON {lt}
                         BEGIN
@@ -1325,22 +1367,22 @@ class DB:
                     value AS sort
                 FROM {table};
 
-                '''.format(lt=lt, table=table),
+                ''',
 
             ]
         else:
             lines = [
-                '''\
-                CREATE TABLE %s(
+                f'''\
+                CREATE TABLE {table}(
                     id    INTEGER PRIMARY KEY AUTOINCREMENT,
                     book  INTEGER,
-                    value %s NOT NULL %s,
+                    value {dt} NOT NULL {collate},
                     UNIQUE(book));
-                '''%(table, dt, collate),
+                ''',
 
-                'CREATE INDEX %s_idx ON %s (book);'%(table, table),
+                f'CREATE INDEX {table}_idx ON {table} (book);',
 
-                '''\
+                f'''\
                 CREATE TRIGGER fkc_insert_{table}
                         BEFORE INSERT ON {table}
                         BEGIN
@@ -1357,7 +1399,7 @@ class DB:
                                 THEN RAISE(ABORT, 'Foreign key violation: book not in books')
                             END;
                         END;
-                '''.format(table=table),
+                ''',
             ]
         script = ' \n'.join(lines)
         self.execute(script)
@@ -1369,7 +1411,7 @@ class DB:
         data = self.custom_field_metadata(label, num)
         self.execute('UPDATE custom_columns SET mark_for_delete=1 WHERE id=?', (data['num'],))
 
-    def close(self, force=False, unload_formatter_functions=True):
+    def close(self, force=True, unload_formatter_functions=True):
         if getattr(self, '_conn', None) is not None:
             if self.prefs['expire_old_trash_after'] == 0:
                 self.expire_old_trash(0)
@@ -1382,7 +1424,7 @@ class DB:
             del self._conn
             self.is_closed = True
 
-    def reopen(self, force=False):
+    def reopen(self, force=True):
         self.close(force=force, unload_formatter_functions=False)
         self._conn = None
         self.conn
@@ -1412,7 +1454,7 @@ class DB:
                 with closing(Connection(tmpdb)) as conn:
                     shell = Shell(db=conn, encoding='utf-8')
                     shell.process_command('.read ' + fname.replace(os.sep, '/'))
-                    conn.execute('PRAGMA user_version=%d;'%uv)
+                    conn.execute(f'PRAGMA user_version={uv};')
 
                 self.close(unload_formatter_functions=False)
                 try:
@@ -1420,8 +1462,11 @@ class DB:
                 finally:
                     self.reopen()
 
-    def vacuum(self, include_fts_db, include_notes_db):
+    def vacuum(self, include_fts_db, include_notes_db, rebuild_annotations_fts):
         self.execute('VACUUM')
+        if rebuild_annotations_fts:
+            self.execute('INSERT INTO annotations_fts(annotations_fts) VALUES("rebuild");')
+            self.execute('INSERT INTO annotations_fts_stemmed(annotations_fts_stemmed) VALUES("rebuild");')
         if self.fts_enabled and include_fts_db:
             self.fts.vacuum()
         if include_notes_db:
@@ -1434,23 +1479,31 @@ class DB:
 
     @user_version.setter
     def user_version(self, val):
-        self.execute('PRAGMA user_version=%d'%int(val))
+        self.execute(f'PRAGMA user_version={int(val)}')
 
     def initialize_database(self):
         metadata_sqlite = P('metadata_sqlite.sql', data=True,
                 allow_user_override=False).decode('utf-8')
-        cur = self.conn.cursor()
-        cur.execute('BEGIN EXCLUSIVE TRANSACTION')
-        try:
-            cur.execute(metadata_sqlite)
-        except:
-            cur.execute('ROLLBACK')
-            raise
-        else:
-            cur.execute('COMMIT')
-        if self.user_version == 0:
-            self.user_version = 1
+        with self.conn:
+            self.conn.cursor().execute(metadata_sqlite)
+            if self.user_version == 0:
+                self.user_version = 1
     # }}}
+
+    def __enter__(self):
+        self.conn.__enter__()
+
+    def __exit__(self, exc_type, exc_value, tb):
+        self.conn.__exit__(exc_type, exc_value, tb)
+
+    def clone_for_readonly_access(self, dest_dir: str) -> str:
+        dbpath = os.path.abspath(self.conn.db_filename('main'))
+        clone_db_path = os.path.join(dest_dir, os.path.basename(dbpath))
+        shutil.copy2(dbpath, clone_db_path)
+        notes_dir = os.path.join(os.path.dirname(dbpath), NOTES_DIR_NAME)
+        if os.path.exists(notes_dir):
+            shutil.copytree(notes_dir, os.path.join(dest_dir, NOTES_DIR_NAME))
+        return clone_db_path
 
     def normpath(self, path):
         path = os.path.abspath(os.path.realpath(path))
@@ -1497,7 +1550,7 @@ class DB:
         # windows).
         l = (self.PATH_LIMIT - (extlen // 2) - 2) if iswindows else ((self.PATH_LIMIT - extlen - 2) // 2)
         if l < 5:
-            raise ValueError('Extension length too long: %d' % extlen)
+            raise ValueError(f'Extension length too long: {extlen}')
         author = ascii_filename(author)[:l]
         title  = ascii_filename(title.lstrip())[:l].rstrip()
         if not title:
@@ -1512,13 +1565,13 @@ class DB:
     # Database layer API {{{
 
     def custom_table_names(self, num):
-        return 'custom_column_%d'%num, 'books_custom_column_%d_link'%num
+        return f'custom_column_{num}', f'books_custom_column_{num}_link'
 
     @property
     def custom_tables(self):
         return {x[0] for x in self.conn.get(
-            'SELECT name FROM sqlite_master WHERE type=\'table\' AND '
-            '(name GLOB \'custom_column_*\' OR name GLOB \'books_custom_column_*\')')}
+            "SELECT name FROM sqlite_master WHERE type='table' AND "
+            "(name GLOB 'custom_column_*' OR name GLOB 'books_custom_column_*')")}
 
     @classmethod
     def exists_at(cls, path):
@@ -1555,10 +1608,10 @@ class DB:
         '''
 
         with self.conn:  # Use a single transaction, to ensure nothing modifies the db while we are reading
-            for table in itervalues(self.tables):
+            for table in self.tables.values():
                 try:
                     table.read(self)
-                except:
+                except Exception:
                     prints('Failed to read table:', table.name)
                     import pprint
                     pprint.pprint(table.metadata)
@@ -1630,7 +1683,7 @@ class DB:
     def format_hash(self, book_id, fmt, fname, path):
         path = self.format_abspath(book_id, fmt, fname, path)
         if path is None:
-            raise NoSuchFormat('Record %d has no fmt: %s'%(book_id, fmt))
+            raise NoSuchFormat(f'Record {book_id} has no fmt: {fmt}')
         sha = hashlib.sha256()
         with open(path, 'rb') as f:
             while True:
@@ -1666,7 +1719,7 @@ class DB:
     def remove_formats(self, remove_map, metadata_map):
         self.ensure_trash_dir()
         removed_map = {}
-        for book_id, removals in iteritems(remove_map):
+        for book_id, removals in remove_map.items():
             paths = set()
             removed_map[book_id] = set()
             for fmt, fname, path in removals:
@@ -1678,7 +1731,7 @@ class DB:
                 self.move_book_files_to_trash(book_id, paths, metadata_map[book_id])
         return removed_map
 
-    def cover_last_modified(self, path):
+    def cover_last_modified(self, path) -> datetime | None:
         path = os.path.abspath(os.path.join(self.library_path, path, COVER_FILE_NAME))
         try:
             return utcfromtimestamp(os.stat(path).st_mtime)
@@ -1688,40 +1741,39 @@ class DB:
     def copy_cover_to(self, path, dest, windows_atomic_move=None, use_hardlink=False, report_file_size=None):
         path = os.path.abspath(os.path.join(self.library_path, path, COVER_FILE_NAME))
         if windows_atomic_move is not None:
-            if not isinstance(dest, string_or_bytes):
+            if not isinstance(dest, (str, bytes)):
                 raise Exception('Error, you must pass the dest as a path when'
                         ' using windows_atomic_move')
             if os.access(path, os.R_OK) and dest and not samefile(dest, path):
                 windows_atomic_move.copy_path_to(path, dest)
                 return True
-        else:
-            if os.access(path, os.R_OK):
-                try:
-                    f = open(path, 'rb')
-                except OSError:
-                    if iswindows:
-                        time.sleep(0.2)
-                    f = open(path, 'rb')
-                with f:
-                    if hasattr(dest, 'write'):
-                        if report_file_size is not None:
-                            f.seek(0, os.SEEK_END)
-                            report_file_size(f.tell())
-                            f.seek(0)
-                        shutil.copyfileobj(f, dest)
-                        if hasattr(dest, 'flush'):
-                            dest.flush()
-                        return True
-                    elif dest and not samefile(dest, path):
-                        if use_hardlink:
-                            try:
-                                hardlink_file(path, dest)
-                                return True
-                            except:
-                                pass
-                        with open(dest, 'wb') as d:
-                            shutil.copyfileobj(f, d)
-                        return True
+        elif os.access(path, os.R_OK):
+            try:
+                f = open(path, 'rb')
+            except OSError:
+                if iswindows:
+                    time.sleep(0.2)
+                f = open(path, 'rb')
+            with f:
+                if hasattr(dest, 'write'):
+                    if report_file_size is not None:
+                        f.seek(0, os.SEEK_END)
+                        report_file_size(f.tell())
+                        f.seek(0)
+                    shutil.copyfileobj(f, dest)
+                    if hasattr(dest, 'flush'):
+                        dest.flush()
+                    return True
+                elif dest and not samefile(dest, path):
+                    if use_hardlink:
+                        try:
+                            hardlink_file(path, dest)
+                            return True
+                        except Exception:
+                            pass
+                    with open(dest, 'wb') as d:
+                        shutil.copyfileobj(f, d)
+                    return True
         return False
 
     def cover_or_cache(self, path, timestamp, as_what='bytes'):
@@ -1746,6 +1798,14 @@ class DB:
             else:
                 data = f.read()
         return True, data, stat.st_mtime
+
+    def cover_timestamp(self, path: str) -> float | None:
+        path = os.path.abspath(os.path.join(self.library_path, path, COVER_FILE_NAME))
+        try:
+            stat = os.stat(path)
+        except OSError:
+            return None
+        return stat.st_mtime
 
     def compress_covers(self, path_map, jpeg_quality, progress_callback):
         cpath_map = {}
@@ -1781,18 +1841,17 @@ class DB:
                     if iswindows:
                         time.sleep(0.2)
                     os.remove(path)
+        elif no_processing:
+            with open(path, 'wb') as f:
+                f.write(data)
         else:
-            if no_processing:
-                with open(path, 'wb') as f:
-                    f.write(data)
-            else:
-                from calibre.utils.img import save_cover_data_to
-                try:
-                    save_cover_data_to(data, path)
-                except OSError:
-                    if iswindows:
-                        time.sleep(0.2)
-                    save_cover_data_to(data, path)
+            from calibre.utils.img import save_cover_data_to
+            try:
+                save_cover_data_to(data, path)
+            except OSError:
+                if iswindows:
+                    time.sleep(0.2)
+                save_cover_data_to(data, path)
 
     def copy_format_to(self, book_id, fmt, fname, path, dest,
                        windows_atomic_move=None, use_hardlink=False, report_file_size=None):
@@ -1800,7 +1859,7 @@ class DB:
         if path is None:
             return False
         if windows_atomic_move is not None:
-            if not isinstance(dest, string_or_bytes):
+            if not isinstance(dest, (str, bytes)):
                 raise Exception('Error, you must pass the dest as a path when'
                         ' using windows_atomic_move')
             if dest:
@@ -1809,37 +1868,35 @@ class DB:
                     try:
                         if path != dest:
                             os.rename(path, dest)
-                    except:
+                    except Exception:
                         pass  # Nothing too catastrophic happened, the cases mismatch, that's all
                 else:
                     windows_atomic_move.copy_path_to(path, dest)
-        else:
-            if hasattr(dest, 'write'):
-                with open(path, 'rb') as f:
-                    if report_file_size is not None:
-                        f.seek(0, os.SEEK_END)
-                        report_file_size(f.tell())
-                        f.seek(0)
-                    shutil.copyfileobj(f, dest)
-                if hasattr(dest, 'flush'):
-                    dest.flush()
-            elif dest:
-                if samefile(dest, path):
-                    if not self.is_case_sensitive and path != dest:
-                        # Ensure that the file has the same case as dest
-                        try:
-                            os.rename(path, dest)
-                        except OSError:
-                            pass  # Nothing too catastrophic happened, the cases mismatch, that's all
-                else:
-                    if use_hardlink:
-                        try:
-                            hardlink_file(path, dest)
-                            return True
-                        except:
-                            pass
-                    with open(path, 'rb') as f, open(make_long_path_useable(dest), 'wb') as d:
-                        shutil.copyfileobj(f, d)
+        elif hasattr(dest, 'write'):
+            with open(path, 'rb') as f:
+                if report_file_size is not None:
+                    f.seek(0, os.SEEK_END)
+                    report_file_size(f.tell())
+                    f.seek(0)
+                shutil.copyfileobj(f, dest)
+            if hasattr(dest, 'flush'):
+                dest.flush()
+        elif dest:
+            if samefile(dest, path):
+                if not self.is_case_sensitive and path != dest:
+                    # Ensure that the file has the same case as dest
+                    try:
+                        os.rename(path, dest)
+                    except OSError:
+                        pass  # Nothing too catastrophic happened, the cases mismatch, that's all
+            else:
+                if use_hardlink:
+                    try:
+                        hardlink_file(path, dest)
+                        return True
+                    except Exception:
+                        pass
+                shutil.copyfile(path, make_long_path_useable(dest))
         return True
 
     def windows_check_if_files_in_use(self, paths):
@@ -1997,14 +2054,17 @@ class DB:
             copy_tree(os.path.abspath(spath), tpath, delete_source=True, transform_destination_filename=transform_format_filenames)
             parent = os.path.dirname(spath)
             with suppress(OSError):
-                os.rmdir(parent)  # remove empty parent directory
+                remove_dir_if_empty(parent, ignore_metadata_caches=True)
         else:
             os.makedirs(tpath)
         update_paths_in_db()
 
     def copy_extra_file_to(self, book_id, book_path, relpath, stream_or_path):
         full_book_path = os.path.abspath(os.path.join(self.library_path, book_path))
-        src_path = make_long_path_useable(os.path.join(full_book_path, relpath))
+        extra_file_path = os.path.abspath(os.path.join(full_book_path, relpath))
+        if not extra_file_path.startswith(full_book_path):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), relpath)
+        src_path = make_long_path_useable(extra_file_path)
         if isinstance(stream_or_path, str):
             shutil.copy2(src_path, make_long_path_useable(stream_or_path))
         else:
@@ -2055,6 +2115,33 @@ class DB:
                         with src:
                             yield relpath, src, stat_result
 
+    def remove_extra_files(self, book_path, relpaths, permanent):
+        bookdir = os.path.join(self.library_path, book_path)
+        errors = {}
+        for relpath in relpaths:
+            path = os.path.abspath(os.path.join(bookdir, relpath))
+            if not self.normpath(path).startswith(self.normpath(bookdir)):
+                continue
+            try:
+                if permanent:
+                    try:
+                        os.remove(make_long_path_useable(path))
+                    except FileNotFoundError:
+                        pass
+                    except Exception:
+                        if not iswindows:
+                            raise
+                        time.sleep(1)
+                        os.remove(make_long_path_useable(path))
+                else:
+                    from calibre.utils.recycle_bin import recycle
+                    recycle(make_long_path_useable(path))
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                errors[relpath] = e
+        return errors
+
     def rename_extra_file(self, relpath, newrelpath, book_path, replace=True):
         bookdir = os.path.join(self.library_path, book_path)
         src = os.path.abspath(os.path.join(bookdir, relpath))
@@ -2074,6 +2161,8 @@ class DB:
     def add_extra_file(self, relpath, stream, book_path, replace=True, auto_rename=False):
         bookdir = os.path.join(self.library_path, book_path)
         dest = os.path.abspath(os.path.join(bookdir, relpath))
+        if not self.normpath(dest).startswith(self.normpath(bookdir)):
+            return None
         if not replace and os.path.exists(make_long_path_useable(dest)):
             if not auto_rename:
                 return None
@@ -2143,7 +2232,7 @@ class DB:
         os.makedirs(os.path.join(tdir, 'b'), exist_ok=True)
         os.makedirs(os.path.join(tdir, 'f'), exist_ok=True)
         if iswindows:
-            import calibre_extensions.winutil as winutil
+            from calibre_extensions import winutil
             winutil.set_file_attributes(tdir, winutil.FILE_ATTRIBUTE_HIDDEN | winutil.FILE_ATTRIBUTE_NOT_CONTENT_INDEXED)
         if time.time() - self.last_expired_trash_at >= 3600:
             self.expire_old_trash(during_init=during_init)
@@ -2169,10 +2258,10 @@ class DB:
                     except OSError:
                         mtime = 0
                     if mtime + expire_age_in_seconds <= now or expire_age_in_seconds <= 0:
-                        removals.append(x.path)
+                        removals.append(make_long_path_useable(x.path))
         for x in removals:
             try:
-                rmtree_with_retry(x)
+                rmtree_with_retry(x)  # during init we dont want to slow down because of windows mandatory file locking
             except OSError:
                 if not during_init:
                     raise
@@ -2193,8 +2282,7 @@ class DB:
         for path in format_abspaths:
             ext = path.rpartition('.')[-1].lower()
             fmap[path] = os.path.join(dest, ext)
-        with open(os.path.join(dest, 'metadata.json'), 'wb') as f:
-            f.write(json.dumps(metadata).encode('utf-8'))
+        atomic_write(os.path.join(dest, 'metadata.json'), json.dumps(metadata).encode('utf-8'))
         copy_files(fmap, delete_source=True)
 
     def get_metadata_for_trash_book(self, book_id, read_annotations=True):
@@ -2238,7 +2326,7 @@ class DB:
 
     def remove_trash_formats_dir_if_empty(self, book_id):
         bdir = os.path.join(self.trash_dir, 'f', str(book_id))
-        if os.path.isdir(bdir) and len(os.listdir(bdir)) <= 1:  # dont count metadata.json
+        if os.path.isdir(bdir) and len(os.listdir(bdir)) <= 1:  # don't count metadata.json
             self.rmtree(bdir)
 
     def list_trash_entries(self):
@@ -2307,7 +2395,7 @@ class DB:
         self.executemany(
             'INSERT OR REPLACE INTO books_plugin_data (book, name, val) VALUES (?, ?, ?)',
             [(book_id, name, json.dumps(val, default=to_json))
-                    for book_id, val in iteritems(val_map)])
+                    for book_id, val in val_map.items()])
 
     def get_custom_book_data(self, name, book_ids, default=None):
         book_ids = frozenset(book_ids)
@@ -2315,7 +2403,7 @@ class DB:
         def safe_load(val):
             try:
                 return json.loads(val, object_hook=from_json)
-            except:
+            except Exception:
                 return default
 
         if len(book_ids) == 1:
@@ -2355,6 +2443,11 @@ class DB:
     def annotations_for_book(self, book_id, fmt, user_type, user):
         yield from annotations_for_book(self.conn, book_id, fmt, user_type, user)
 
+    def save_annotations_list(self, book_id, book_fmt, sync_annots_user, alist):
+        conn = self.conn
+        with conn:
+            save_annotations_list_to_cursor(conn.cursor(), alist, sync_annots_user, book_id, book_fmt)
+
     def search_annotations(self,
         fts_engine_query, use_stemming, highlight_start, highlight_end, snippet_size, annotation_type,
         restrict_to_book_ids, restrict_to_user, ignore_removed=False
@@ -2362,18 +2455,19 @@ class DB:
         fts_engine_query = unicode_normalize(fts_engine_query)
         fts_table = 'annotations_fts_stemmed' if use_stemming else 'annotations_fts'
         text = 'annotations.searchable_text'
+        data = []
         if highlight_start is not None and highlight_end is not None:
             if snippet_size is not None:
-                text = "snippet({fts_table}, 0, '{highlight_start}', '{highlight_end}', '…', {snippet_size})".format(
-                        fts_table=fts_table, highlight_start=highlight_start, highlight_end=highlight_end,
-                        snippet_size=max(1, min(snippet_size, 64)))
+                text = f"snippet({fts_table}, 0, ?, ?, '…', {max(1, min(snippet_size, 64))})"
             else:
-                text = f"highlight({fts_table}, 0, '{highlight_start}', '{highlight_end}')"
+                text = f'highlight({fts_table}, 0, ?, ?)'
+            data.append(highlight_start)
+            data.append(highlight_end)
         query = 'SELECT {0}.id, {0}.book, {0}.format, {0}.user_type, {0}.user, {0}.annot_data, {1} FROM {0} '
         query = query.format('annotations', text)
-        query += ' JOIN {fts_table} ON annotations.id = {fts_table}.rowid'.format(fts_table=fts_table)
+        query += f' JOIN {fts_table} ON annotations.id = {fts_table}.rowid'
         query += f' WHERE {fts_table} MATCH ?'
-        data = [fts_engine_query]
+        data.append(fts_engine_query)
         if restrict_to_user:
             query += ' AND annotations.user_type = ? AND annotations.user = ?'
             data += list(restrict_to_user)
@@ -2422,9 +2516,7 @@ class DB:
         ts = now.isoformat()
         timestamp = (now - EPOCH).total_seconds()
         for annot_id in annot_ids:
-            for (raw_annot_data, annot_type) in self.execute(
-                'SELECT annot_data, annot_type FROM annotations WHERE id=?', (annot_id,)
-            ):
+            for raw_annot_data, annot_type in self.execute('SELECT annot_data, annot_type FROM annotations WHERE id=?', (annot_id,)):
                 try:
                     annot_data = json.loads(raw_annot_data)
                 except Exception:
@@ -2565,12 +2657,12 @@ class DB:
 
     def set_conversion_options(self, options, fmt):
         def map_data(x):
-            if not isinstance(x, string_or_bytes):
-                x = native_string_type(x)
+            if not isinstance(x, (str, bytes)):
+                x = str(x)
             x = x.encode('utf-8') if isinstance(x, str) else x
             x = pickle_binary_string(x)
             return x
-        options = [(book_id, fmt.upper(), map_data(data)) for book_id, data in iteritems(options)]
+        options = [(book_id, fmt.upper(), map_data(data)) for book_id, data in options.items()]
         self.executemany('INSERT OR REPLACE INTO conversion_options(book,format,data) VALUES (?,?,?)', options)
 
     def get_top_level_move_items(self, all_paths):

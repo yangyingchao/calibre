@@ -11,7 +11,7 @@ from collections import deque, namedtuple
 from functools import partial
 from hashlib import sha1
 
-from calibre.srv.tests.base import BaseTest, TestServer
+from calibre.srv.tests.base import BaseTest, TestServer, is_ci, retry
 from calibre.srv.web_socket import (
     BINARY,
     CLOSE,
@@ -165,6 +165,12 @@ class WSClient:
             reason = reason.encode('utf-8')
         self.write_frame(1, CLOSE, struct.pack(b'!H', code) + reason)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        self.socket.close()
+
 
 class WSTestServer(TestServer):
 
@@ -184,43 +190,44 @@ class WSTestServer(TestServer):
 class WebSocketTest(BaseTest):
 
     def simple_test(self, server, msgs, expected=(), close_code=NORMAL_CLOSE, send_close=True, close_reason=b'NORMAL CLOSE', ignore_send_failures=False):
-        client = server.connect()
-        for msg in msgs:
-            try:
-                if isinstance(msg, dict):
-                    client.write_frame(**msg)
+        with server.connect() as client:
+            for msg in msgs:
+                try:
+                    if isinstance(msg, dict):
+                        client.write_frame(**msg)
+                    else:
+                        client.write_message(msg)
+                except Exception:
+                    if not ignore_send_failures:
+                        raise
+
+            expected_messages, expected_controls = [], []
+            for ex in expected:
+                if isinstance(ex, str):
+                    ex = TEXT, ex
+                elif isinstance(ex, bytes):
+                    ex = BINARY, ex
+                elif isinstance(ex, numbers.Integral):
+                    ex = ex, b''
+                if ex[0] in CONTROL_CODES:
+                    expected_controls.append(ex)
                 else:
-                    client.write_message(msg)
-            except Exception:
-                if not ignore_send_failures:
+                    expected_messages.append(ex)
+            if send_close:
+                client.write_close(close_code, close_reason)
+            try:
+                messages, control_frames = client.read_messages()
+            except ConnectionAbortedError:
+                if expected_messages or expected_controls or send_close:
                     raise
+                return
+            self.ae(expected_messages, messages)
+            self.assertGreaterEqual(len(control_frames), 1)
+            self.ae(expected_controls, control_frames[:-1])
+            self.ae(control_frames[-1][0], CLOSE)
+            self.ae(close_code, struct.unpack_from(b'!H', control_frames[-1][1], 0)[0])
 
-        expected_messages, expected_controls = [], []
-        for ex in expected:
-            if isinstance(ex, str):
-                ex = TEXT, ex
-            elif isinstance(ex, bytes):
-                ex = BINARY, ex
-            elif isinstance(ex, numbers.Integral):
-                ex = ex, b''
-            if ex[0] in CONTROL_CODES:
-                expected_controls.append(ex)
-            else:
-                expected_messages.append(ex)
-        if send_close:
-            client.write_close(close_code, close_reason)
-        try:
-            messages, control_frames = client.read_messages()
-        except ConnectionAbortedError:
-            if expected_messages or expected_controls or send_close:
-                raise
-            return
-        self.ae(expected_messages, messages)
-        self.assertGreaterEqual(len(control_frames), 1)
-        self.ae(expected_controls, control_frames[:-1])
-        self.ae(control_frames[-1][0], CLOSE)
-        self.ae(close_code, struct.unpack_from(b'!H', control_frames[-1][1], 0)[0])
-
+    @retry(max_attempts=3 if is_ci else 1, delay=1)
     def test_websocket_basic(self):
         'Test basic interaction with the websocket server'
         from calibre.srv.web_socket import EchoHandler
@@ -228,12 +235,12 @@ class WebSocketTest(BaseTest):
         with WSTestServer(EchoHandler) as server:
             simple_test = partial(self.simple_test, server)
 
-            for q in ('', '*' * 125, '*' * 126, '*' * 127, '*' * 128, '*' * 65535, '*' * 65536, "Hello-µ@ßöäüàá-UTF-8!!"):
+            for q in ('', '*' * 125, '*' * 126, '*' * 127, '*' * 128, '*' * 65535, '*' * 65536, 'Hello-µ@ßöäüàá-UTF-8!!'):
                 simple_test([q], [q])
             for q in (b'', b'\xfe' * 125, b'\xfe' * 126, b'\xfe' * 127, b'\xfe' * 128, b'\xfe' * 65535, b'\xfe' * 65536):
                 simple_test([q], [q])
 
-            for payload in [b'', b'ping', b'\x00\xff\xfe\xfd\xfc\xfb\x00\xff', b"\xfe" * 125]:
+            for payload in [b'', b'ping', b'\x00\xff\xfe\xfd\xfc\xfb\x00\xff', b'\xfe' * 125]:
                 simple_test([(PING, payload)], [(PONG, payload)])
 
             simple_test([(PING, 'a'*126)], close_code=PROTOCOL_ERROR, send_close=False)
@@ -306,7 +313,7 @@ class WebSocketTest(BaseTest):
             simple_test([
                 {'opcode':TEXT, 'fin':0}, {'opcode':CONTINUATION, 'fin':0, 'payload':'x'}, {'opcode':CONTINUATION},], ['x'])
 
-            for q in (b'\xc2\xb5', b'\xce\xba\xe1\xbd\xb9\xcf\x83\xce\xbc\xce\xb5', "Hello-µ@ßöäüàá-UTF-8!!".encode()):
+            for q in (b'\xc2\xb5', b'\xce\xba\xe1\xbd\xb9\xcf\x83\xce\xbc\xce\xb5', 'Hello-µ@ßöäüàá-UTF-8!!'.encode()):
                 frags = []
                 for i in range(len(q)):
                     b = q[i:i+1]

@@ -58,7 +58,7 @@ class USER_DEFINED(USBMS):
             'Enter the folder where the books are to be stored. This folder '
             'is prepended to any send_to_device template') + '</p>',
         _('Swap main and card A') + ':::<p>' + _(
-            'Check this box if the device\'s main memory is being seen as '
+            "Check this box if the device's main memory is being seen as "
             'card a and the card is being seen as main memory') + '</p>',
     ]
     EXTRA_CUSTOMIZATION_DEFAULT = [
@@ -106,7 +106,7 @@ class USER_DEFINED(USBMS):
                 self.WINDOWS_CARD_A_MEM = e[self.OPT_USB_WINDOWS_CA_ID] + '&'
                 self.EBOOK_DIR_MAIN     = e[self.OPT_MAIN_MEM_FOLDER]
                 self.EBOOK_DIR_CARD_A   = e[self.OPT_CARD_A_FOLDER]
-        except:
+        except Exception:
             import traceback
             traceback.print_exc()
         self.plugin_needs_delayed_initialization = False

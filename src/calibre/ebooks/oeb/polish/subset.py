@@ -14,7 +14,6 @@ from calibre.ebooks.oeb.base import OEB_DOCS, OEB_STYLES, XPath, css_text
 from calibre.ebooks.oeb.polish.utils import OEB_FONTS
 from calibre.utils.fonts.subset import subset
 from calibre.utils.fonts.utils import get_font_names
-from polyglot.builtins import iteritems
 
 
 def remove_font_face_rules(container, sheet, remove_names, base):
@@ -34,7 +33,7 @@ def remove_font_face_rules(container, sheet, remove_names, base):
 
 
 def iter_subsettable_fonts(container):
-    for name, mt in iteritems(container.mime_map):
+    for name, mt in container.mime_map.items():
         if (mt in OEB_FONTS or name.rpartition('.')[-1].lower() in {'otf', 'ttf'}):
             yield name, mt
 
@@ -58,8 +57,7 @@ def subset_all_fonts(container, font_stats, report):
                 font_name = get_font_names(raw)[-1]
             except Exception as e:
                 report(
-                    'Corrupted font: %s, ignoring.  Error: %s'%(
-                        name, as_unicode(e)))
+                    f'Corrupted font: {name}, ignoring.  Error: {as_unicode(e)}')
                 continue
             warnings = []
             report('Subsetting font: %s'%(font_name or name))
@@ -69,8 +67,7 @@ def subset_all_fonts(container, font_stats, report):
                 warnings = subset(BytesIO(raw), output, font_type, chars)
             except Exception as e:
                 report(
-                    'Unsupported font: %s, ignoring. Error: %s'%(
-                        name, as_unicode(e)))
+                    f'Unsupported font: {name}, ignoring. Error: {as_unicode(e)}')
                 continue
             nraw = output.getvalue()
             total_old += font_size
@@ -84,7 +81,7 @@ def subset_all_fonts(container, font_stats, report):
                 report(_('The font %s was already subset')%font_name)
             else:
                 report(_('Decreased the font {0} to {1} of its original size').format(
-                    font_name, ('%.1f%%' % (nlen/olen * 100))))
+                    font_name, (f'{nlen/olen*100:.1f}%')))
                 changed = True
             f.seek(0), f.truncate(), f.write(nraw)
 
@@ -93,7 +90,7 @@ def subset_all_fonts(container, font_stats, report):
         changed = True
 
     if remove:
-        for name, mt in iteritems(container.mime_map):
+        for name, mt in container.mime_map.items():
             if mt in OEB_STYLES:
                 sheet = container.parsed(name)
                 if remove_font_face_rules(container, sheet, remove, name):

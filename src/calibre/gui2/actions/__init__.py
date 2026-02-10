@@ -14,7 +14,6 @@ from calibre import prints
 from calibre.constants import ismacos
 from calibre.gui2 import Dispatcher
 from calibre.gui2.keyboard import NameConflict
-from polyglot.builtins import string_or_bytes
 
 
 def toolbar_widgets_for_action(gui, action):
@@ -31,7 +30,7 @@ def toolbar_widgets_for_action(gui, action):
             # The button might be hidden
             if not w.isVisible():
                 continue
-            yield(w)
+            yield w
         except Exception:
             continue
 
@@ -68,17 +67,23 @@ def show_menu_under_widget(gui, menu, action, name):
                 return
             except Exception:
                 continue
+    # Is it one of the status bar buttons?
+    for button in gui.status_bar_extra_buttons:
+        if name == button.action_name and button.isVisible():
+            r = button.geometry()
+            p = gui.status_bar
+            menu.exec(p.mapToGlobal(QPoint(r.x()+2, r.height()-2)))
+            return
     # No visible button found. Fall back to displaying in upper left corner
     # of the library view.
     menu.exec(gui.library_view.mapToGlobal(QPoint(10, 10)))
 
 
 def menu_action_unique_name(plugin, unique_name):
-    return '%s : menu action : %s'%(plugin.unique_name, unique_name)
+    return f'{plugin.unique_name} : menu action : {unique_name}'
 
 
 class InterfaceAction(QObject):
-
     '''
     A plugin representing an "action" that can be taken in the graphical user
     interface. All the items in the toolbar and context menus are implemented
@@ -210,7 +215,7 @@ class InterfaceAction(QObject):
         bn = self.__class__.__name__
         if getattr(self.interface_action_base_plugin, 'name'):
             bn = self.interface_action_base_plugin.name
-        return 'Interface Action: %s (%s)'%(bn, self.name)
+        return f'Interface Action: {bn} ({self.name})'
 
     def create_action(self, spec=None, attr='qaction', shortcut_name=None, persist_shortcut=False):
         if spec is None:
@@ -238,7 +243,7 @@ class InterfaceAction(QObject):
         if attr == 'qaction':
             shortcut_action = ma
         if shortcut is not None:
-            keys = ((shortcut,) if isinstance(shortcut, string_or_bytes) else
+            keys = ((shortcut,) if isinstance(shortcut, (str, bytes)) else
                     tuple(shortcut))
             if shortcut_name is None:
                 if self.action_shortcut_name is not None:
@@ -256,14 +261,14 @@ class InterfaceAction(QObject):
                 except NameConflict as e:
                     try:
                         prints(str(e))
-                    except:
+                    except Exception:
                         pass
                     shortcut_action.setShortcuts([QKeySequence(key,
                         QKeySequence.SequenceFormat.PortableText) for key in keys])
                 else:
                     self.shortcut_action_for_context_menu = shortcut_action
                     if ismacos:
-                        # In Qt 5 keyboard shortcuts dont work unless the
+                        # In Qt 5 keyboard shortcuts don't work unless the
                         # action is explicitly added to the main window
                         self.gui.addAction(shortcut_action)
 
@@ -318,7 +323,7 @@ class InterfaceAction(QObject):
             ac.setIcon(icon)
         keys = ()
         if shortcut is not None and shortcut is not False:
-            keys = ((shortcut,) if isinstance(shortcut, string_or_bytes) else
+            keys = ((shortcut,) if isinstance(shortcut, (str, bytes)) else
                     tuple(shortcut))
         unique_name = menu_action_unique_name(self, unique_name)
         if description is not None:
@@ -332,7 +337,7 @@ class InterfaceAction(QObject):
                 shortcut_name, default_keys=keys,
                 action=ac, description=description, group=self.action_spec[0],
                 persist_shortcut=persist_shortcut)
-            # In Qt 5 keyboard shortcuts dont work unless the
+            # In Qt 5 keyboard shortcuts don't work unless the
             # action is explicitly added to the main window and on OSX and
             # Unity since the menu might be exported, the shortcuts won't work
             self.gui.addAction(ac)
@@ -438,12 +443,13 @@ class InterfaceAction(QObject):
         '''
         pass
 
+
 class InterfaceActionWithLibraryDrop(InterfaceAction):
     '''
-    Subclass of InterfaceAction that implemente methods to execute the default action
+    Subclass of InterfaceAction that implements methods to execute the default action
     by drop some books from the library.
 
-    Inside the do_drop() method, the ids of the droped books are provided
+    Inside the do_drop() method, the ids of the dropped books are provided
     by the attribute self.dropped_ids
     '''
 

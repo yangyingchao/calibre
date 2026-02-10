@@ -33,11 +33,11 @@ class WizardWidget(QWidget, Ui_Form):
         q = ''
         if attr:
             if val:
-                q = '[re:test(@%s, "%s", "i")]'%(attr, val)
+                q = f'[re:test(@{attr}, "{val}", "i")]'
             else:
-                q = '[@%s]'%attr
+                q = f'[@{attr}]'
         elif val:
-            q = '[re:test(., "%s", "i")]'%(val)
+            q = f'[re:test(., "{val}", "i")]'
         expr = '//'+tag + q
         return expr
 
@@ -127,7 +127,7 @@ class XPathEdit(QWidget):
         try:
             if self.text.strip():
                 XPath(self.text)
-        except:
+        except Exception:
             import traceback
             traceback.print_exc()
             return False

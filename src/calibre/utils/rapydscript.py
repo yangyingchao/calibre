@@ -32,8 +32,8 @@ COMPILER_PATH = 'rapydscript/compiler.js.xz'
 def abspath(x):
     return os.path.realpath(os.path.abspath(x))
 
-# Update RapydScript {{{
 
+# Update RapydScript {{{
 
 def update_rapydscript():
     import lzma
@@ -49,8 +49,8 @@ def update_rapydscript():
         f.write(raw)
 # }}}
 
-# Compiler {{{
 
+# Compiler {{{
 
 def to_dict(obj):
     return dict(zip(list(obj.keys()), list(obj.values())))
@@ -350,18 +350,18 @@ def atomic_write(base, name, content):
 
 
 def run_rapydscript_tests():
+    from calibre.gui2 import must_use_qt
+    must_use_qt()
+    from calibre.utils.webengine import create_script, insert_scripts, secure_webengine, setup_default_profile, setup_fake_protocol, setup_profile
+    setup_fake_protocol()
+    setup_default_profile()
     from urllib.parse import parse_qs
 
     from qt.core import QApplication, QByteArray, QEventLoop, QUrl
     from qt.webengine import QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineUrlRequestJob, QWebEngineUrlSchemeHandler
 
     from calibre.constants import FAKE_HOST, FAKE_PROTOCOL
-    from calibre.gui2 import must_use_qt
     from calibre.gui2.viewer.web_view import send_reply
-    from calibre.utils.webengine import create_script, insert_scripts, secure_webengine, setup_default_profile, setup_fake_protocol, setup_profile
-    must_use_qt()
-    setup_fake_protocol()
-    setup_default_profile()
 
     base = base_dir()
     rapydscript_dir = os.path.join(base, 'src', 'pyj')
@@ -394,7 +394,7 @@ def run_rapydscript_tests():
             if fail_code is None:
                 fail_code = QWebEngineUrlRequestJob.Error.UrlNotFound
             rq.fail(fail_code)
-            print(f"Blocking FAKE_PROTOCOL request: {rq.requestUrl().toString()}", file=sys.stderr)
+            print(f'Blocking FAKE_PROTOCOL request: {rq.requestUrl().toString()}', file=sys.stderr)
 
     class Tester(QWebEnginePage):
 
@@ -430,10 +430,15 @@ def run_rapydscript_tests():
 
     tester = Tester()
     result = tester.spin_loop()
+    if result is None:
+        result = 1
     raise SystemExit(int(result))
 
 
 def set_data(src, **kw):
+    from calibre.db.constants import NO_SEARCH_LINK
+    from calibre.ebooks.oeb.polish.main import SUPPORTED
+    from calibre.library.page_count import CHARS_PER_PAGE
     for k, v in {
         '__SPECIAL_TITLE__': SPECIAL_TITLE_FOR_WEBENGINE_COMMS,
         '__FAKE_PROTOCOL__': FAKE_PROTOCOL,
@@ -442,7 +447,10 @@ def set_data(src, **kw):
         '__DARK_LINK_COLOR__': dark_link_color,
         '__BUILTIN_COLORS_LIGHT__': json.dumps(builtin_colors_light),
         '__BUILTIN_COLORS_DARK__': json.dumps(builtin_colors_dark),
-        '__BUILTIN_DECORATIONS__': json.dumps(builtin_decorations)
+        '__BUILTIN_DECORATIONS__': json.dumps(builtin_decorations),
+        '__NO_SEARCH_LINK__': NO_SEARCH_LINK,
+        '__CHARS_PER_PAGE__': str(CHARS_PER_PAGE),
+        '__EDITABLE_FORMATS__': json.dumps(tuple(SUPPORTED)),
     }.items():
         src = src.replace(k, v, 1)
     for k, v in kw.items():
@@ -468,8 +476,7 @@ def compile_viewer():
     icons = g['merge']()
     with open(os.path.join(base, 'resources', 'content-server', 'reset.css'), 'rb') as f:
         reset = f.read().decode('utf-8')
-    html = '<!DOCTYPE html>\n<html><head><style>{reset}</style></head><body>{icons}</body></html>'.format(
-            icons=icons, reset=reset)
+    html = f'<!DOCTYPE html>\n<html><head><style>{reset}</style></head><body>{icons}</body></html>'
 
     rapydscript_dir = os.path.join(base, 'src', 'pyj')
     fname = os.path.join(rapydscript_dir, 'viewer-main.pyj')
@@ -508,29 +515,49 @@ def compile_srv():
 
 # }}}
 
+
 # Translations {{{
 
-
 def create_pot(source_files):
-    c = compiler()
-    gettext_options = json.dumps({
+    global has_external_compiler
+    if has_external_compiler is None:
+        has_external_compiler = detect_external_compiler()
+    gettext_options = {
         'package_name': __appname__,
         'package_version': __version__,
         'bugs_address': 'https://bugs.launchpad.net/calibre'
-    })
-    c.eval(f'window.catalog = {{}}; window.gettext_options = {gettext_options}; 1')
-    for fname in source_files:
-        with open(fname, 'rb') as f:
-            code = f.read().decode('utf-8')
-            fname = fname
-        c.eval('RapydScript.gettext_parse(window.catalog, {}, {}); 1'.format(*map(json.dumps, (code, fname))))
+    }
+    if not has_external_compiler:
+        c = compiler()
+        c.eval(f'window.catalog = {{}}; window.gettext_options = {json.dumps(gettext_options)}; 1')
+        for fname in source_files:
+            with open(fname, 'rb') as f:
+                code = f.read().decode('utf-8')
+            c.eval('RapydScript.gettext_parse(window.catalog, {}, {}); 1'.format(*map(json.dumps, (code, fname))))
 
-    buf = c.eval('ans = []; RapydScript.gettext_output(window.catalog, window.gettext_options, ans.push.bind(ans)); ans;')
-    return ''.join(buf)
+        buf = c.eval('ans = []; RapydScript.gettext_output(window.catalog, window.gettext_options, ans.push.bind(ans)); ans;')
+        return ''.join(buf)
+    cp = subprocess.run([
+        has_external_compiler, 'gettext', '--package-name', gettext_options['package_name'],
+        '--package-version', gettext_options['package_version'], '--bugs-address', gettext_options['bugs_address'],
+    ] + list(source_files), capture_output=True)
+    if cp.returncode != 0:
+        sys.stderr.buffer.write(cp.stderr)
+        raise SystemExit(cp.returncode)
+    return cp.stdout.decode().strip()
 
 
 def msgfmt(po_data_as_string):
-    c = compiler()
-    return c.eval('RapydScript.msgfmt({}, {})'.format(
-        json.dumps(po_data_as_string), json.dumps({'use_fuzzy': False})))
+    global has_external_compiler
+    if has_external_compiler is None:
+        has_external_compiler = detect_external_compiler()
+    if not has_external_compiler:
+        c = compiler()
+        return c.eval('RapydScript.msgfmt({}, {})'.format(
+            json.dumps(po_data_as_string), json.dumps({'use_fuzzy': False})))
+    cp = subprocess.run([has_external_compiler, 'msgfmt'], input=po_data_as_string.encode(), capture_output=True)
+    if cp.returncode != 0:
+        sys.stderr.write(cp.stderr)
+        raise SystemExit(cp.returncode)
+    return cp.stdout.decode().strip()
 # }}}

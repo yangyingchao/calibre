@@ -42,11 +42,12 @@ class PreferencesAction(InterfaceAction):
         self.preferences_menu = pm
         for x in (self.gui.preferences_action, self.qaction):
             x.triggered.connect(self.do_config)
+        self.action_map = {}
 
     def initialization_complete(self):
         # Add the individual preferences to the menu.
         # First, sort them into the same order as shown in the preferences dialog
-        plugins = sorted([p for p in preferences_plugins()],
+        plugins = sorted(preferences_plugins(),
                          key=lambda p: p.category_order * 100 + p.name_order)
 
         pm = self.preferences_menu
@@ -60,11 +61,10 @@ class PreferencesAction(InterfaceAction):
                 current_cat = p.category_order
                 cm = pm.addMenu(p.gui_category.replace('&', '&&'))
                 cm.setIcon(config_icon)
-            self.create_menu_action(cm, p.name, p.gui_name.replace('&', '&&'),
+            self.action_map[p.name] = self.create_menu_action(cm, p.name, p.gui_name.replace('&', '&&'),
                                     icon=QIcon.ic(p.icon), shortcut=None, shortcut_name=p.gui_name,
                                     triggered=partial(self.do_config, initial_plugin=(p.category, p.name),
                                                       close_after_initial=True))
-
 
     def get_plugins(self):
         from calibre.gui2.dialogs.plugin_updater import FILTER_NOT_INSTALLED, PluginUpdaterDialog
@@ -74,8 +74,7 @@ class PreferencesAction(InterfaceAction):
         if d.do_restart:
             self.gui.quit(restart=True)
 
-    def do_config(self, checked=False, initial_plugin=None,
-            close_after_initial=False):
+    def do_config(self, checked=False, initial_plugin=None, close_after_initial=False):
         if self.gui.job_manager.has_jobs():
             d = error_dialog(self.gui, _('Cannot configure'),
                     _('Cannot configure while there are running jobs.'))

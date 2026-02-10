@@ -27,7 +27,6 @@ class LeMonde(BasicNewsRecipe):
 
     oldest_article = 1
     no_stylesheets = True
-    remove_empty_feeds = True
     ignore_duplicate_articles = {'title', 'url'}
     reverse_article_order = True
     remove_empty_feeds = True
@@ -35,6 +34,20 @@ class LeMonde(BasicNewsRecipe):
     conversion_options = {
         'publisher': publisher
     }
+
+    recipe_specific_options = {
+        'days': {
+            'short': 'Oldest article to download from this news source. In days ',
+            'long': 'For example, 0.5, gives you articles from the past 12 hours',
+            'default': str(oldest_article)
+        }
+    }
+
+    def __init__(self, *args, **kwargs):
+        BasicNewsRecipe.__init__(self, *args, **kwargs)
+        d = self.recipe_specific_options.get('days')
+        if d and isinstance(d, str):
+            self.oldest_article = float(d)
 
     masthead_url = 'http://upload.wikimedia.org/wikipedia/commons/thumb/5/54/Le_monde_logo.svg/800px-Le_monde_logo.svg.png'
 
@@ -112,14 +125,14 @@ class LeMonde(BasicNewsRecipe):
 
     remove_tags = [
         classes('article__status meta__reading-time meta__social multimedia-embed'),
-        dict(name=['footer', 'link', 'meta', 'svg', 'button']),
+        dict(name=['footer', 'link', 'meta', 'svg', 'button', 'source']),
         dict(name='img', attrs={'class': ['article__author-picture']}),
-        dict(name='section', attrs={'class': 
-			[
-				'inread js-services-inread', 'catcher catcher--inline', 'inread inread--NL js-services-inread', 
-				'article__reactions', 'author', 'catcher', 'portfolio', 'services-inread'
-			]
-		})
+        dict(name='section', attrs={'class':
+            [
+                'inread js-services-inread', 'catcher catcher--inline', 'inread inread--NL js-services-inread',
+                'article__reactions', 'author', 'catcher', 'portfolio', 'services-inread'
+            ]
+        })
     ]
 
     remove_attributes = [
@@ -164,10 +177,10 @@ class LeMonde(BasicNewsRecipe):
         # soup = self.index_to_soup('https://www.lemonde.fr/')
         # a = soup.find('a', {'id': 'jelec_link', 'style': True})
         # if a and a['style']:
-            # url = a['style'].split('/')
-            # if len(url) > 5 and url[3].isdigit():
-                # overwrite guess if actual cover ID was found
-                # cover_id = url[3]
+        #     url = a['style'].split('/')
+        #     if len(url) > 5 and url[3].isdigit():
+        #         overwrite guess if actual cover ID was found
+        #         cover_id = url[3]
         return 'https://www.lemonde.fr/thumbnail/journal/' + cover_id + '/1000/1490'
 
     def get_article_url(self, article):

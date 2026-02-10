@@ -120,7 +120,7 @@ class LayoutButton(QToolButton):
 
     on_action_trigger = pyqtSignal(bool)
 
-    def __init__(self, name: str, icon: str, label: str, central: 'CentralContainer', shortcut=None):
+    def __init__(self, name: str, icon: str, label: str, central: CentralContainer, shortcut=None):
         super().__init__(central)
         self.central = central
         self.label = label
@@ -182,8 +182,14 @@ class LayoutButton(QToolButton):
                 gui.iactions['Preferences'].do_config(initial_plugin=('Interface', 'Search'), close_after_initial=True)
                 ev.accept()
                 return
-            tab_name = {'book_details':'book_details', 'cover_grid':'cover_grid', 'cover_browser':'cover_browser',
-                        'tag_browser':'tag_browser', 'quick_view':'quickview'}.get(self.name)
+            tab_name = {
+                'book_details':'book_details',
+                'cover_grid':'cover_grid',
+                'bookshelf_view':'bookshelf',
+                'cover_browser':'cover_browser',
+                'tag_browser':'tag_browser',
+                'quick_view':'quickview',
+            }.get(self.name)
             if tab_name:
                 if gui is not None:
                     gui.iactions['Preferences'].do_config(initial_plugin=('Interface', 'Look & Feel', tab_name+'_tab'), close_after_initial=True)
@@ -485,7 +491,7 @@ class CentralContainer(QWidget):
 
     def read_settings(self):
         before = self.serialized_settings()
-        # sadly self.size() doesnt always return sensible values so look at
+        # sadly self.size() doesn't always return sensible values so look at
         # the size of the main window which works perfectly for width, not so
         # perfectly for height
         sz = self.size()
@@ -520,6 +526,8 @@ class CentralContainer(QWidget):
 
     def set_visibility_of(self, which, visible):
         was_visible = getattr(self.is_visible, which)
+        if visible == was_visible:
+            return
         setattr(self.is_visible, which, visible)
         if not was_visible:
             if self.layout is Layout.wide:
@@ -670,7 +678,7 @@ class CentralContainer(QWidget):
             hs = h.state
             if hs is HandleState.both_visible or hs is HandleState.only_side_visible:
                 height = normal_handle_width
-            if hs is HandleState.only_main_visible and h is self.bottom_handle or (h is self.top_handle and self.separate_cover_browser):
+            if (hs is HandleState.only_main_visible and h is self.bottom_handle) or (h is self.top_handle and self.separate_cover_browser):
                 height = 0
             h.resize(int(central_width), int(height))
             available_height -= height

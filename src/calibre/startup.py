@@ -6,13 +6,12 @@ __docformat__ = 'restructuredtext en'
 Perform various initialization tasks.
 '''
 
+import builtins
 import locale
 import os
 import sys
 
 # Default translation is NOOP
-from polyglot.builtins import builtins
-
 builtins.__dict__['_'] = lambda s: s
 
 # For strings which belong in the translation tables, but which shouldn't be
@@ -25,15 +24,13 @@ builtins.__dict__['dynamic_property'] = lambda func: func(None)
 from calibre.constants import DEBUG, isfreebsd, islinux, ismacos, iswindows
 
 
-def get_debug_executable(headless=False):
-    exe_name = 'calibre-debug' + ('.exe' if iswindows else '')
+def get_debug_executable(headless=False, exe_name='calibre-debug'):
+    exe_name = exe_name + ('.exe' if iswindows else '')
     if hasattr(sys, 'frameworks_dir'):
         base = os.path.dirname(sys.frameworks_dir)
         if headless:
-            from calibre.utils.ipc.launch import Worker
-            class W(Worker):
-                exe_name = 'calibre-debug'
-            return [W().executable]
+            from calibre.utils.ipc.launch import headless_exe_path
+            return [headless_exe_path(exe_name)]
         return [os.path.join(base, 'MacOS', exe_name)]
     if getattr(sys, 'run_local', None):
         return [sys.run_local, exe_name]
@@ -72,15 +69,10 @@ def initialize_calibre():
     if hasattr(initialize_calibre, 'initialized'):
         return
     initialize_calibre.initialized = True
-
     # Ensure that all temp files/dirs are created under a calibre tmp dir
-    from calibre.ptempfile import base_dir
-    try:
-        base_dir()
-    except OSError:
-        pass  # Ignore this error during startup, so we can show a better error message to the user later.
+    from calibre.ptempfile import fix_tempfile_module
+    fix_tempfile_module()
 
-    #
     # Ensure that the max number of open files is at least 1024
     if iswindows:
         # See https://msdn.microsoft.com/en-us/library/6e3b887c.aspx
@@ -101,17 +93,34 @@ def initialize_calibre():
     # Fix multiprocessing
     from multiprocessing import spawn, util
 
+    def get_executable() -> list[str]:
+        return get_debug_executable(headless=True, exe_name='calibre-parallel')
+
     def get_command_line(**kwds):
-        prog = 'from multiprocessing.spawn import spawn_main; spawn_main(%s)'
-        prog %= ', '.join('%s=%r' % item for item in kwds.items())
-        return get_debug_executable() + ['--fix-multiprocessing', '--', prog]
+        prog = ', '.join('{}={!r}'.format(*item) for item in kwds.items())
+        prog = f'from multiprocessing.spawn import spawn_main; spawn_main({prog})'
+        return get_executable() + ['__multiprocessing__', prog]
     spawn.get_command_line = get_command_line
+    spawn._fixup_main_from_path = lambda *a: None
+    if iswindows:
+        # On windows multiprocessing does not run the result of
+        # get_command_line directly, see popen_spawn_win32.py
+        spawn.set_executable(get_executable()[-1])
     orig_spawn_passfds = util.spawnv_passfds
+    orig_remove_temp_dir = util._remove_temp_dir
+
+    def safe_rmtree(rmtree):
+        def r(tdir, *a, **kw):
+            if tdir and os.path.exists(tdir):
+                rmtree(tdir, *a, **kw)
+        return r
+
+    def safe_remove_temp_dir(rmtree, tdir):
+        orig_remove_temp_dir(safe_rmtree(rmtree), tdir)
 
     def wrapped_orig_spawn_fds(args, passfds):
         # as of python 3.11 util.spawnv_passfds expects bytes args
-        if sys.version_info >= (3, 11):
-            args = [x.encode('utf-8') if isinstance(x, str) else x for x in args]
+        args = [x.encode('utf-8') if isinstance(x, str) else x for x in args]
         return orig_spawn_passfds(args[0], args, passfds)
 
     def spawnv_passfds(path, args, passfds):
@@ -119,13 +128,14 @@ def initialize_calibre():
             idx = args.index('-c')
         except ValueError:
             return wrapped_orig_spawn_fds(args, passfds)
-        patched_args = get_debug_executable() + ['--fix-multiprocessing', '--'] + args[idx + 1:]
+        patched_args = get_executable() + ['__multiprocessing__'] + args[idx + 1:]
         return wrapped_orig_spawn_fds(patched_args, passfds)
     util.spawnv_passfds = spawnv_passfds
+    util._remove_temp_dir = safe_remove_temp_dir
 
     #
     # Setup resources
-    import calibre.utils.resources as resources
+    from calibre.utils import resources
     resources
 
     #
@@ -162,9 +172,9 @@ def initialize_calibre():
 
     builtins.__dict__['connect_lambda'] = connect_lambda
 
-    if islinux or ismacos or isfreebsd:
+    if sys.version_info[:2] < (3, 14) and (islinux or ismacos or isfreebsd):
         # Name all threads at the OS level created using the threading module, see
-        # http://bugs.python.org/issue15500
+        # https://github.com/python/cpython/issues/59705
         import threading
 
         from calibre_extensions import speedup

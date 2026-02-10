@@ -22,8 +22,7 @@ import os.path as op
 import shutil
 import stat
 from datetime import datetime
-
-from polyglot.urllib import quote
+from urllib.parse import quote
 
 FILES_DIR = 'files'
 INFO_DIR = 'info'
@@ -35,7 +34,7 @@ HOMETRASH = op.join(XDG_DATA_HOME, 'Trash')
 
 uid = os.getuid()
 TOPDIR_TRASH = '.Trash'
-TOPDIR_FALLBACK = '.Trash-%s'%uid
+TOPDIR_FALLBACK = f'.Trash-{uid}'
 
 
 def uniquote(raw):
@@ -51,7 +50,7 @@ def is_parent(parent, path):
 
 
 def format_date(date):
-    return date.strftime("%Y-%m-%dT%H:%M:%S")
+    return date.strftime('%Y-%m-%dT%H:%M:%S')
 
 
 def info_for(src, topdir):
@@ -62,9 +61,9 @@ def info_for(src, topdir):
     else:
         src = op.relpath(src, topdir)
 
-    info  = "[Trash Info]\n"
-    info += "Path=" + uniquote(src) + "\n"
-    info += "DeletionDate=" + format_date(datetime.now()) + "\n"
+    info  = '[Trash Info]\n'
+    info += 'Path=' + uniquote(src) + '\n'
+    info += 'DeletionDate=' + format_date(datetime.now()) + '\n'
     return info
 
 
@@ -151,11 +150,11 @@ def get_dev(path):
 
 def send2trash(path):
     if not op.exists(path):
-        raise OSError("File not found: %s" % path)
+        raise OSError(f'File not found: {path}')
     # ...should check whether the user has the necessary permissions to delete
     # it, before starting the trashing operation itself. [2]
     if not os.access(path, os.W_OK):
-        raise OSError("Permission denied: %s" % path)
+        raise OSError(f'Permission denied: {path}')
     # if the file to be trashed is on the same device as HOMETRASH we
     # want to move it there.
     path_dev = get_dev(path)
@@ -171,6 +170,6 @@ def send2trash(path):
         topdir = find_mount_point(path)
         trash_dev = get_dev(topdir)
         if trash_dev != path_dev:
-            raise OSError("Couldn't find mount point for %s" % path)
+            raise OSError(f"Couldn't find mount point for {path}")
         dest_trash = find_ext_volume_trash(topdir)
     trash_move(path, dest_trash, topdir)

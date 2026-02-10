@@ -49,10 +49,10 @@ class MOBIOutput(OutputFormatPlugin):
         ),
         OptionRecommendation(name='no_inline_toc',
             recommended_value=False, level=OptionRecommendation.LOW,
-            help=_('Don\'t add Table of Contents to the book. Useful if '
+            help=_("Don't add Table of Contents to the book. Useful if "
                 'the book has its own table of contents.')),
         OptionRecommendation(name='toc_title', recommended_value=None,
-            help=_('Title for any generated in-line table of contents.')
+            help=_('Title for any generated inline table of contents.')
         ),
         OptionRecommendation(name='dont_compress',
             recommended_value=False, level=OptionRecommendation.LOW,
@@ -63,7 +63,9 @@ class MOBIOutput(OutputFormatPlugin):
                    ' This option has no effect on the conversion. It is used'
                    ' only when sending MOBI files to a device. If the file'
                    ' being sent has the specified tag, it will be marked as'
-                   ' a personal document when sent to the Kindle.')
+                   ' a personal document when sent to the Kindle. Use the value *'
+                   ' to match all books.'
+            )
         ),
         OptionRecommendation(name='mobi_ignore_margins',
             recommended_value=False,
@@ -188,6 +190,7 @@ class MOBIOutput(OutputFormatPlugin):
             mobi_type = 'old'  # Amazon does not support KF8 periodicals
         create_kf8 = mobi_type in ('new', 'both')
 
+        self.oeb.set_page_progression_direction_if_needed()
         remove_html_cover(self.oeb, self.log)
         resources = Resources(oeb, opts, self.is_periodical,
                 add_fonts=create_kf8)
@@ -279,10 +282,10 @@ class AZW3Output(OutputFormatPlugin):
         ),
         OptionRecommendation(name='no_inline_toc',
             recommended_value=False, level=OptionRecommendation.LOW,
-            help=_('Don\'t add Table of Contents to the book. Useful if '
+            help=_("Don't add Table of Contents to the book. Useful if "
                 'the book has its own table of contents.')),
         OptionRecommendation(name='toc_title', recommended_value=None,
-            help=_('Title for any generated in-line table of contents.')
+            help=_('Title for any generated inline table of contents.')
         ),
         OptionRecommendation(name='dont_compress',
             recommended_value=False, level=OptionRecommendation.LOW,
@@ -313,6 +316,7 @@ class AZW3Output(OutputFormatPlugin):
         self.oeb, self.opts, self.log = oeb, opts, log
         opts.mobi_periodical = self.is_periodical
         passthrough = getattr(opts, 'mobi_passthrough', False)
+        self.oeb.set_page_progression_direction_if_needed()
         remove_duplicate_anchors(oeb)
 
         resources = Resources(self.oeb, self.opts, self.is_periodical,

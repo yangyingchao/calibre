@@ -9,7 +9,6 @@ from collections import namedtuple
 from calibre.ebooks.docx.writer.styles import border_edges
 from calibre.ebooks.docx.writer.styles import read_css_block_borders as rcbb
 from calibre.ebooks.docx.writer.utils import convert_color
-from polyglot.builtins import iteritems
 
 
 class Dummy:
@@ -34,7 +33,7 @@ class SpannedCell:
     def serialize(self, tr, makeelement):
         tc = makeelement(tr, 'w:tc')
         tcPr = makeelement(tc, 'w:tcPr')
-        makeelement(tcPr, 'w:%sMerge' % ('h' if self.horizontal else 'v'), w_val='continue')
+        makeelement(tcPr, 'w:{}Merge'.format('h' if self.horizontal else 'v'), w_val='continue')
         makeelement(tc, 'w:p')
 
     def applicable_borders(self, edge):
@@ -46,10 +45,10 @@ def read_css_block_borders(self, css):
     rcbb(obj, css, store_css_style=True)
     for edge in border_edges:
         setattr(self, 'border_' + edge, Border(
-            getattr(obj, 'border_%s_css_style' % edge),
-            getattr(obj, 'border_%s_style' % edge),
-            getattr(obj, 'border_%s_width' % edge),
-            getattr(obj, 'border_%s_color' % edge),
+            getattr(obj, f'border_{edge}_css_style'),
+            getattr(obj, f'border_{edge}_style'),
+            getattr(obj, f'border_{edge}_width'),
+            getattr(obj, f'border_{edge}_color'),
             self.BLEVEL
         ))
         setattr(self, 'padding_' + edge, getattr(obj, 'padding_' + edge))
@@ -121,10 +120,10 @@ class Cell:
         # cell level
         bc = self.background_color or self.row.background_color or self.row.table.background_color
         if bc:
-            makeelement(tcPr, 'w:shd', w_val="clear", w_color="auto", w_fill=bc)
+            makeelement(tcPr, 'w:shd', w_val='clear', w_color='auto', w_fill=bc)
 
         b = makeelement(tcPr, 'w:tcBorders', append=False)
-        for edge, border in iteritems(self.borders):
+        for edge, border in self.borders.items():
             if border is not None and border.width > 0 and border.style != 'none':
                 makeelement(b, 'w:' + edge, w_val=border.style, w_sz=str(border.width), w_color=border.color)
         if len(b) > 0:
@@ -324,12 +323,11 @@ class Table:
                         if tcell is None:
                             nrow.cells.extend([SpannedCell(nrow.cells[-1], horizontal=True) for i in range(idx - len(nrow.cells))])
                             nrow.cells.append(sc)
+                        elif isinstance(tcell, SpannedCell):
+                            # Conflict between rowspan and colspan
+                            break
                         else:
-                            if isinstance(tcell, SpannedCell):
-                                # Conflict between rowspan and colspan
-                                break
-                            else:
-                                nrow.cells.insert(idx, sc)
+                            nrow.cells.insert(idx, sc)
 
     def start_new_row(self, html_tag, html_style):
         if self.current_row is not None:

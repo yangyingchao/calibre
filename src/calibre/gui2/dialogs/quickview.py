@@ -36,7 +36,6 @@ from calibre.utils.iso8601 import UNDEFINED_DATE
 
 
 class TableItem(QTableWidgetItem):
-
     '''
     A QTableWidgetItem that sorts on a separate string and uses ICU rules
     '''
@@ -188,7 +187,7 @@ class Quickview(QDialog, Ui_Quickview):
                         gprefs.get('quickview_dialog_books_table_widths', None)
             if not self.is_pane:
                 self.restore_geometry(gprefs, 'quickview_dialog_geometry')
-        except:
+        except Exception:
             pass
 
         self.view = gui.library_view
@@ -447,13 +446,12 @@ class Quickview(QDialog, Ui_Quickview):
                 self.set_search_text(col+ ':="' + t + '"')
             else:
                 self.set_search_text(None)
+        elif self.fm[col]['is_multiple']:
+            items = [(col + ':"=' + v.strip() + '"') for v in
+                     current.text().split(self.fm[col]['is_multiple']['ui_to_list'])]
+            self.set_search_text(' and '.join(items))
         else:
-            if self.fm[col]['is_multiple']:
-                items = [(col + ':"=' + v.strip() + '"') for v in
-                         current.text().split(self.fm[col]['is_multiple']['ui_to_list'])]
-                self.set_search_text(' and '.join(items))
-            else:
-                self.set_search_text(col + ':"=' + current.text() + '"')
+            self.set_search_text(col + ':"=' + current.text() + '"')
 
     def tab_pressed(self, in_widget, isForward):
         if isForward:
@@ -502,7 +500,7 @@ class Quickview(QDialog, Ui_Quickview):
         # eventually.
         try:
             self.refresh(self.view.model().index(self.db.row(mi.id), self.current_column))
-        except:
+        except Exception:
             pass
 
     # clicks on the items listWidget
@@ -540,7 +538,7 @@ class Quickview(QDialog, Ui_Quickview):
             if self.current_book_id == book_id and self.current_key == key:
                 return
             self._refresh(book_id, key)
-        except:
+        except Exception:
             traceback.print_exc()
             self.indicate_no_items()
 
@@ -583,7 +581,7 @@ class Quickview(QDialog, Ui_Quickview):
                 if is_grid_view:
                     key = 'authors'
                     vals = mi.get(key, None)
-        except:
+        except Exception:
             traceback.print_exc()
 
         self.current_book_id = book_id
@@ -666,7 +664,7 @@ class Quickview(QDialog, Ui_Quickview):
                         select_item = a
                 # The data is supplied on demand when the item is displayed
                 a.setData(Qt.ItemDataRole.UserRole, b)
-                a.setToolTip(tt)
+                a.setToolTip(f"<div>{_('Value')}: {a.text()}</div>{tt}")
                 self.books_table.setItem(row, self.key_to_table_widget_column(col), a)
                 self.books_table.setRowHeight(row, self.books_table_row_height)
         self.books_table.blockSignals(False)
@@ -680,40 +678,40 @@ class Quickview(QDialog, Ui_Quickview):
         mi = self.db.new_api.get_proxy_metadata(book_id)
         try:
             if col == 'title':
-                return (mi.title, mi.title_sort, 0)
+                return mi.title, mi.title_sort, 0
             elif col == 'authors':
-                return (' & '.join(mi.authors), mi.author_sort, 0)
+                return ' & '.join(mi.authors), mi.author_sort, 0
             elif col == 'series':
                 series = mi.format_field('series')[1]
                 if series is None:
-                    return ('', None, 0)
+                    return '', None, 0
                 else:
-                    return (series, mi.series, mi.series_index)
+                    return series, mi.series, mi.series_index
             elif col == 'size':
                 v = mi.get('book_size')
                 if v is not None:
-                    return (f'{v:n}', v, 0)
+                    return f'{v:n}', v, 0
                 else:
-                    return ('', None, 0)
+                    return '', None, 0
             elif self.fm[col]['datatype'] == 'series':
                 v = mi.format_field(col)[1]
-                return (v, mi.get(col), mi.get(col+'_index'))
+                return v, mi.get(col), mi.get(col+'_index')
             elif self.fm[col]['datatype'] == 'datetime':
                 v = mi.format_field(col)[1]
                 d = mi.get(col)
                 if d is None:
                     d = UNDEFINED_DATE
-                return (v, timestampfromdt(d), 0)
+                return v, timestampfromdt(d), 0
             elif self.fm[col]['datatype'] in ('float', 'int'):
                 v = mi.format_field(col)[1]
                 sort_val = mi.get(col)
-                return (v, sort_val, 0)
+                return v, sort_val, 0
             else:
                 v = mi.format_field(col)[1]
-                return (v, v, 0)
-        except:
+                return v, v, 0
+        except Exception:
             traceback.print_exc()
-            return (_('Something went wrong while filling in the table'), '', 0)
+            return _('Something went wrong while filling in the table'), '', 0
 
     # Deal with sizing the table columns. Done here because the numbers are not
     # correct until the first paint.
@@ -729,7 +727,7 @@ class Quickview(QDialog, Ui_Quickview):
             # widths will be remembered
             w = self.books_table.width() - 25 - self.books_table.verticalHeader().width()
             w //= self.books_table.columnCount()
-            for c in range(0, self.books_table.columnCount()):
+            for c in range(self.books_table.columnCount()):
                 self.books_table.setColumnWidth(c, w)
         self.save_state()
 
@@ -755,7 +753,7 @@ class Quickview(QDialog, Ui_Quickview):
         try:
             self.db.data.index(book_id)
             return True
-        except:
+        except Exception:
             return False
 
     def quickview_item(self, row, column):
@@ -769,7 +767,7 @@ class Quickview(QDialog, Ui_Quickview):
                 self.quickview_item(row, column)
             else:
                 self.quickview_item(row, self.key_to_table_widget_column(self.current_key))
-        except:
+        except Exception:
             traceback.print_exc()
             self.book_not_in_view_error()
 
@@ -817,7 +815,7 @@ class Quickview(QDialog, Ui_Quickview):
             self.edit_metadata(book_id)
         else:
             if key not in self.view.visible_columns:
-                error_dialog(self, _("Quickview: Column cannot be selected"),
+                error_dialog(self, _('Quickview: Column cannot be selected'),
                      _("The column you double-clicked, '{}', is not shown in the "
                        "library view. The book/column cannot be selected by Quickview.").format(key),
                      show=True,
@@ -853,7 +851,7 @@ class Quickview(QDialog, Ui_Quickview):
         if self.is_closed:
             return
         self.books_table_column_widths = []
-        for c in range(0, self.books_table.columnCount()):
+        for c in range(self.books_table.columnCount()):
             self.books_table_column_widths.append(self.books_table.columnWidth(c))
         gprefs['quickview_dialog_books_table_widths'] = self.books_table_column_widths
         if not self.is_pane:

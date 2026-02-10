@@ -3,6 +3,7 @@
 
 
 import textwrap
+from contextlib import suppress
 from enum import IntEnum
 
 from qt.core import (
@@ -19,6 +20,7 @@ from qt.core import (
     QLabel,
     QListView,
     QModelIndex,
+    QObject,
     QPalette,
     QPixmap,
     QPushButton,
@@ -35,6 +37,7 @@ from qt.core import (
 
 from calibre import fit_image
 from calibre.db.constants import RESOURCE_URL_SCHEME
+from calibre.db.listeners import EventType
 from calibre.gui2 import BOOK_DETAILS_DISPLAY_DEBOUNCE_DELAY, NO_URL_FORMATTING, gprefs
 from calibre.gui2.book_details import DropMixin, create_open_cover_with_menu, details_context_menu_event, render_html, resolved_css, set_html
 from calibre.gui2.ui import get_gui
@@ -48,6 +51,7 @@ class Cover(CoverView):
     open_with_requested = pyqtSignal(object)
     choose_open_with_requested = pyqtSignal()
     copy_to_clipboard_requested = pyqtSignal()
+    download_cover = pyqtSignal()
 
     def __init__(self, parent, show_size=False):
         CoverView.__init__(self, parent, show_size=show_size)
@@ -58,6 +62,8 @@ class Cover(CoverView):
     def build_context_menu(self):
         ans = CoverView.build_context_menu(self)
         create_open_cover_with_menu(self, ans)
+        download = ans.addAction(QIcon.ic('download-metadata.png'), _('Download cover from internet'))
+        download.triggered.connect(self.download_cover)
         return ans
 
     def open_with(self, entry):
@@ -85,7 +91,7 @@ class Configure(Dialog):
         Dialog.__init__(self, _('Configure the Book details window'), 'book-details-popup-conf', parent)
 
     def setup_ui(self):
-        from calibre.gui2.preferences.look_feel import DisplayedFields, move_field_down, move_field_up
+        from calibre.gui2.preferences.look_feel_tabs import DisplayedFields, move_field_down, move_field_up
         self.l = QVBoxLayout(self)
         self.field_display_order = fdo = QListView(self)
         self.model = DisplayedFields(self.db, fdo, pref_name='popup_book_display_fields')
@@ -98,13 +104,20 @@ class Configure(Dialog):
         h.addWidget(fdo)
         v = QVBoxLayout()
         self.mub = b = QToolButton(self)
+        self.ds = s = QShortcut(QKeySequence('Ctrl+Up'), self)
+        s.activated.connect(b.click)
         connect_lambda(b.clicked, self, lambda self: move_field_up(fdo, self.model))
         b.setIcon(QIcon.ic('arrow-up.png'))
-        b.setToolTip(_('Move the selected field up'))
+        b.setToolTip(_('Move the selected field up [{}]').format(
+            str(s.key().toString(QKeySequence.SequenceFormat.NativeText))))
         v.addWidget(b), v.addStretch(10)
+
         self.mud = b = QToolButton(self)
+        self.ds = s = QShortcut(QKeySequence('Ctrl+Down'), self)
+        s.activated.connect(b.click)
         b.setIcon(QIcon.ic('arrow-down.png'))
-        b.setToolTip(_('Move the selected field down'))
+        b.setToolTip(_('Move the selected field down [{}]').format(
+            str(s.key().toString(QKeySequence.SequenceFormat.NativeText))))
         connect_lambda(b.clicked, self, lambda self: move_field_down(fdo, self.model))
         v.addWidget(b)
         h.addLayout(v)
@@ -169,6 +182,22 @@ class DialogNumbers(IntEnum):
     DetailsLink = 2
 
 
+class ListenerSignal(QObject):
+    # We need to create a long-lived object to contain a metadata changed
+    # signal. Creating the listener in BookInfo doesn't work because the
+    # weakref dies for some reason. Instead the BookInfo object connects to
+    # this signal.
+    metadata_changed = pyqtSignal()
+
+
+listener_object = ListenerSignal()
+
+
+def book_metatada_changed(event_type: EventType, library_id, event_data):
+    if event_type not in (EventType.book_created, EventType.books_removed, EventType.book_edited, EventType.indexing_progress_changed):
+        listener_object.metadata_changed.emit()
+
+
 class BookInfo(QDialog, DropMixin):
 
     closed = pyqtSignal(object)
@@ -192,6 +221,7 @@ class BookInfo(QDialog, DropMixin):
 
         self.cover = Cover(self, show_size=gprefs['bd_overlay_cover_size'])
         self.cover.copy_to_clipboard_requested.connect(self.copy_cover_to_clipboard)
+        self.cover.download_cover.connect(self.download_cover)
         self.cover.resizeEvent = self.cover_view_resized
         self.cover.cover_changed.connect(self.cover_changed)
         self.cover.open_with_requested.connect(self.open_with)
@@ -202,7 +232,7 @@ class BookInfo(QDialog, DropMixin):
 
         self.details = Details(parent.book_details.book_info, self,
                                allow_context_menu=library_path is None,
-                               is_locked = dialog_number == DialogNumbers.Locked)
+                               is_locked=dialog_number == DialogNumbers.Locked)
         self.details.anchor_clicked.connect(self.on_link_clicked)
         self.link_delegate = link_delegate
         self.details.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
@@ -247,6 +277,10 @@ class BookInfo(QDialog, DropMixin):
         t.setInterval(BOOK_DETAILS_DISPLAY_DEBOUNCE_DELAY)
         t.setSingleShot(True)
         t.timeout.connect(self._debounce_refresh)
+        self.update_debounce_timer = t = QTimer(self)
+        t.setInterval(BOOK_DETAILS_DISPLAY_DEBOUNCE_DELAY)
+        t.setSingleShot(True)
+        t.timeout.connect(self.do_update_book_details)
         if library_path is not None:
             self.view = None
             db = get_gui().library_broker.get_library(library_path)
@@ -256,8 +290,8 @@ class BookInfo(QDialog, DropMixin):
             mi = dbn.get_metadata(book_id, get_cover=False)
             mi.cover_data = [None, dbn.cover(book_id, as_image=True)]
             mi.path = None
-            mi.format_files = dict()
-            mi.formats = list()
+            mi.format_files = {}
+            mi.formats = []
             mi.marked = ''
             mi.field_metadata = db.field_metadata
             mi.external_library_path = library_path
@@ -272,7 +306,7 @@ class BookInfo(QDialog, DropMixin):
                 dbn = db.new_api
                 mi = dbn.get_metadata(book_id, get_cover=False)
                 mi.cover_data = [None, dbn.cover(book_id, as_image=True)]
-                mi.path = dbn._field_for('path', book_id)
+                mi.path = dbn.get_book_path(book_id, sep='/')
                 mi.format_files = dbn.format_files(book_id)
                 mi.marked = db.data.get_marked(book_id)
                 mi.field_metadata = db.field_metadata
@@ -295,11 +329,23 @@ class BookInfo(QDialog, DropMixin):
             self.clabel.linkActivated.connect(self.configure)
             hl.addWidget(self.clabel)
         self.fit_cover.stateChanged.connect(self.toggle_cover_fit)
+        if dialog_number == DialogNumbers.Locked:
+            get_gui().current_db.new_api.add_listener(book_metatada_changed, check_already_added=True)
+            listener_object.metadata_changed.connect(self.do_update_book_details_debounce, type=Qt.ConnectionType.QueuedConnection)
         self.restore_geometry(gprefs, self.geometry_string('book_info_dialog_geometry'))
         try:
             self.splitter.restoreState(gprefs.get(self.geometry_string('book_info_dialog_splitter_state')))
         except Exception:
             pass
+
+    def do_update_book_details_debounce(self):
+        self.update_debounce_timer.start()
+
+    def do_update_book_details(self):
+        if self.current_row is not None:
+            mi = self.view.model().get_book_display_info(self.current_row)
+            if mi is not None:
+                self.refresh(self.current_row, mi=mi)
 
     def on_files_dropped(self, event, paths):
         gui = get_gui()
@@ -353,9 +399,12 @@ class BookInfo(QDialog, DropMixin):
         ret = QDialog.done(self, r)
         if self.slave_connected:
             self.view.model().new_bookdisplay_data.disconnect(self.slave)
-        self.slave_debounce_timer.stop() # OK if it isn't running
+        self.slave_debounce_timer.stop()  # OK if it isn't running
+        self.update_debounce_timer.stop()
         self.view = self.link_delegate = self.gui = None
         self.closed.emit(self)
+        with suppress(Exception):
+            listener_object.metadata_changed.disconnect(self.do_update_book_details_debounce)
         return ret
 
     def cover_changed(self, data):
@@ -379,7 +428,7 @@ class BookInfo(QDialog, DropMixin):
 
     def slave(self, mi):
         self._mi_for_debounce = mi
-        self.slave_debounce_timer.start() # start() will automatically reset the timer if it was already running
+        self.slave_debounce_timer.start()  # start() will automatically reset the timer if it was already running
 
     def _debounce_refresh(self):
         mi, self._mi_for_debounce = self._mi_for_debounce, None
@@ -425,6 +474,13 @@ class BookInfo(QDialog, DropMixin):
     def copy_cover_to_clipboard(self):
         if self.cover_pixmap is not None:
             QApplication.instance().clipboard().setPixmap(self.cover_pixmap)
+
+    def download_cover(self):
+        from calibre.gui2.book_details import download_cover
+        if self.current_row is not None:
+            book_id = self.view.model().id(self.current_row)
+            if pmap := download_cover(self, book_id, self.cover_pixmap):
+                self.cover_changed(pmap)
 
     def update_cover_tooltip(self):
         tt = ''

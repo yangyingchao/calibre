@@ -7,17 +7,16 @@ import sys
 
 from calibre.ebooks.lrf.fonts import get_font
 from calibre.ebooks.lrf.pylrs.pylrs import CR, CharButton, LrsTextTag, Paragraph, Plot, Span, Text, TextBlock
-from polyglot.builtins import native_string_type, string_or_bytes
 
 
 def ceil(num):
-    return int(math.ceil(num))
+    return math.ceil(num)
 
 
 def print_xml(elem):
     from calibre.ebooks.lrf.pylrs.pylrs import ElementWriter
-    elem = elem.toElement(native_string_type('utf8'))
-    ew = ElementWriter(elem, sourceEncoding=native_string_type('utf8'))
+    elem = elem.toElement('utf8')
+    ew = ElementWriter(elem, sourceEncoding='utf8')
     ew.write(sys.stdout)
     print()
 
@@ -39,7 +38,7 @@ def tokens(tb):
             yield 2, None
         elif isinstance(x, Text):
             yield x.text, cattrs(attrs, {})
-        elif isinstance(x, string_or_bytes):
+        elif isinstance(x, (str, bytes)):
             yield x, cattrs(attrs, {})
         elif isinstance(x, (CharButton, LrsTextTag)):
             if x.contents:
@@ -89,7 +88,7 @@ class Cell:
         try:
             self.colspan = int(tag['colspan']) if tag.has_attr('colspan') else 1
             self.rowspan = int(tag['rowspan']) if tag.has_attr('rowspan') else 1
-        except:
+        except Exception:
             pass
 
         pp = conv.current_page
@@ -145,11 +144,10 @@ class Cell:
             if not token.strip():
                 continue
             word = token.split()
-            word = word[0] if word else ""
+            word = word[0] if word else ''
             fl, ft, fr, fb = font.getbbox(word)
             width = fr - fl
-            if width > mwidth:
-                mwidth = width
+            mwidth = max(mwidth, width)
         return parindent + mwidth + 2
 
     def text_block_size(self, tb, maxwidth=sys.maxsize, debug=False):
@@ -162,11 +160,11 @@ class Cell:
             if left + width > maxwidth:
                 left = width + ws
                 top += ls
-                bottom = top+ls if top+ls > bottom else bottom
+                bottom = max(bottom, top + ls)
             else:
                 left += (width + ws)
-                right = left if left > right else right
-                bottom = top+ls if top+ls > bottom else bottom
+                right = max(right, left)
+                bottom = max(bottom, top + ls)
             return left, right, top, bottom
 
         for token, attrs in tokens(tb):
@@ -182,7 +180,7 @@ class Cell:
                 else:
                     top += ls
                     bottom += ls
-                left = parindent if int == 1 else 0
+                left = 0
                 continue
             if isinstance(token, Plot):
                 width, height = self.pts_to_pixels(token.xsize), self.pts_to_pixels(token.ysize)
@@ -213,7 +211,7 @@ class Row:
     def __init__(self, conv, row, css, colpad):
         self.cells = []
         self.colpad = colpad
-        cells = row.findAll(re.compile('td|th', re.IGNORECASE))
+        cells = row.findAll(re.compile(r'td|th', re.IGNORECASE))
         self.targets = []
         for cell in cells:
             ccss = conv.tag_css(cell, css)[0]
@@ -244,7 +242,7 @@ class Row:
         i = -1
         cell = None
         for cell in self.cells:
-            for k in range(0, cell.colspan):
+            for k in range(cell.colspan):
                 if i == col:
                     break
                 i += 1
@@ -289,10 +287,10 @@ class Table:
         conv.in_table = False
 
     def number_of_columns(self):
-        max = 0
+        val = 0
         for row in self.rows:
-            max = row.number_of_cells() if row.number_of_cells() > max else max
-        return max
+            val = max(val, row.number_of_cells())
+        return val
 
     def number_or_rows(self):
         return len(self.rows)
@@ -363,8 +361,7 @@ class Table:
 
         xpos = [sum(widths[:i]) for i in range(cols)]
         delta = maxwidth - sum(widths)
-        if delta < 0:
-            delta = 0
+        delta = max(delta, 0)
         for r in range(len(cellmatrix)):
             yield None, 0, heights[r], 0, self.rows[r].targets
             for c in range(len(cellmatrix[r])):

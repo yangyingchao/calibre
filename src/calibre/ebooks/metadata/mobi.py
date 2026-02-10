@@ -14,7 +14,6 @@ from calibre.ebooks.mobi.utils import rescale_image
 from calibre.utils.date import now as nowf
 from calibre.utils.imghdr import what
 from calibre.utils.localization import canonicalize_lang, lang_as_iso639_1
-from polyglot.builtins import codepoint_to_chr
 
 '''
 Retrieve and modify in-place Mobipocket book metadata.
@@ -53,20 +52,20 @@ class StreamSlicer:
                 start, stop = stop, start
             size = stop - start
             if size <= 0:
-                return b""
+                return b''
             stream.seek(base + start)
             data = stream.read(size)
             if stride != 1:
                 data = data[::stride]
             return data
-        raise TypeError("stream indices must be integers")
+        raise TypeError('stream indices must be integers')
 
     def __setitem__(self, key, value):
         stream = self._stream
         base = self.start
         if isinstance(key, numbers.Integral):
             if len(value) != 1:
-                raise ValueError("key and value lengths must match")
+                raise ValueError('key and value lengths must match')
             stream.seek(base + key)
             return stream.write(value)
         if isinstance(key, slice):
@@ -77,10 +76,10 @@ class StreamSlicer:
             if stride != 1:
                 value = value[::stride]
             if len(value) != size:
-                raise ValueError("key and value lengths must match")
+                raise ValueError('key and value lengths must match')
             stream.seek(base + start)
             return stream.write(value)
-        raise TypeError("stream indices must be integers")
+        raise TypeError('stream indices must be integers')
 
     def update(self, data_blocks):
         # Rewrite the stream
@@ -103,7 +102,7 @@ class MetadataUpdater:
         data = self.data = StreamSlicer(stream)
         self.type = data[60:68]
 
-        if self.type != b"BOOKMOBI":
+        if self.type != b'BOOKMOBI':
             return
 
         self.nrecs, = unpack('>H', data[76:78])
@@ -181,7 +180,7 @@ class MetadataUpdater:
     def patch(self, off, new_record0):
         # Save the current size of each record
         record_sizes = [len(new_record0)]
-        for i in range(1,self.nrecs-1):
+        for i in range(1, self.nrecs-1):
             record_sizes.append(self.pdbrecords[i+1][0]-self.pdbrecords[i][0])
         # And the last one
         record_sizes.append(self.data.stop - self.pdbrecords[self.nrecs-1][0])
@@ -192,7 +191,7 @@ class MetadataUpdater:
         record0_offset = self.pdbrecords[0][0]
         updated_offset = record0_offset + len(new_record0)
 
-        for i in range(1,self.nrecs-1):
+        for i in range(1, self.nrecs-1):
             updated_pdbrecords.append(updated_offset)
             updated_offset += record_sizes[i]
         # Update the last pdbrecord
@@ -200,7 +199,7 @@ class MetadataUpdater:
 
         # Read in current records 1 to last
         data_blocks = [new_record0]
-        for i in range(1,self.nrecs):
+        for i in range(1, self.nrecs):
             data_blocks.append(self.data[self.pdbrecords[i][0]:self.pdbrecords[i][0] + record_sizes[i]])
 
         # Rewrite the stream
@@ -227,13 +226,13 @@ class MetadataUpdater:
         # Fetch the existing title
         title_offset, = unpack('>L', self.record0[0x54:0x58])
         title_length, = unpack('>L', self.record0[0x58:0x5c])
-        title_in_file, = unpack('%ds' % (title_length), self.record0[title_offset:title_offset + title_length])
+        title_in_file, = unpack(f'{title_length}s', self.record0[title_offset:title_offset + title_length])
 
         # Adjust length to accommodate PrimaryINDX if necessary
         mobi_header_length, = unpack('>L', self.record0[0x14:0x18])
         if mobi_header_length == 0xe4:
             # Patch mobi_header_length to 0xE8
-            self.record0[0x17] = b"\xe8"
+            self.record0[0x17] = b'\xe8'
             self.record0[0xf4:0xf8] = pack('>L', 0xFFFFFFFF)
             mobi_header_length = 0xe8
 
@@ -272,21 +271,21 @@ class MetadataUpdater:
         new_record0.write(b'\0'*(1024*8))
 
         # Rebuild the stream, update the pdbrecords pointers
-        self.patchSection(0,new_record0.getvalue())
+        self.patchSection(0, new_record0.getvalue())
 
         # Update record0
         self.record0 = self.record(0)
 
     def hexdump(self, src, length=16):
         # Diagnostic
-        FILTER=''.join([(len(repr(codepoint_to_chr(x)))==3) and codepoint_to_chr(x) or '.' for x in range(256)])
+        FILTER=''.join([((len(repr(chr(x)))==3) and chr(x)) or '.' for x in range(256)])
         N=0
         result=''
         while src:
-            s,src = src[:length],src[length:]
-            hexa = ' '.join(["%02X"%ord(x) for x in s])
+            s, src = src[:length],src[length:]
+            hexa = ' '.join([f'{ord(x):02X}' for x in s])
             s = s.translate(FILTER)
-            result += "%04X   %-*s   %s\n" % (N, length*3, hexa, s)
+            result += '%04X   %-*s   %s\n' % (N, length*3, hexa, s)  # noqa: UP031
             N+=length
         print(result)
 
@@ -299,7 +298,7 @@ class MetadataUpdater:
         return pdbrecords
 
     def update_pdbrecords(self, updated_pdbrecords):
-        for (i, pdbrecord) in enumerate(updated_pdbrecords):
+        for i,pdbrecord in enumerate(updated_pdbrecords):
             self.data[78+i*8:78+i*8 + 4] = pack('>L',pdbrecord)
 
         # Refresh local copy
@@ -307,15 +306,15 @@ class MetadataUpdater:
 
     def dump_pdbrecords(self):
         # Diagnostic
-        print("MetadataUpdater.dump_pdbrecords()")
-        print("%10s %10s %10s" % ("offset","flags","val"))
+        print('MetadataUpdater.dump_pdbrecords()')
+        print(f"{'offset':>10} {'flags':>10} {'val':>10}")
         for i in range(len(self.pdbrecords)):
             pdbrecord = self.pdbrecords[i]
-            print(f"{pdbrecord[0]:10X} {pdbrecord[1]:10X} {pdbrecord[2]:10X}")
+            print(f'{pdbrecord[0]:10X} {pdbrecord[1]:10X} {pdbrecord[2]:10X}')
 
     def record(self, n):
         if n >= self.nrecs:
-            raise ValueError('non-existent record %r' % n)
+            raise ValueError(f'non-existent record {n!r}')
         offoff = 78 + (8 * n)
         start, = unpack('>I', self.data[offoff + 0:offoff + 4])
         stop = None
@@ -331,9 +330,9 @@ class MetadataUpdater:
             if rec[0] in self.original_exth_records:
                 self.original_exth_records.pop(rec[0])
 
-        if self.type != b"BOOKMOBI":
+        if self.type != b'BOOKMOBI':
             raise MobiError("Setting metadata only supported for MOBI files of type 'BOOK'.\n"
-                            "\tThis is a %r file of type %r" % (self.type[0:4], self.type[4:8]))
+                            f"\tThis is a {self.type[0:4]!r} file of type {self.type[4:8]!r}")
 
         recs = []
         added_501 = False
@@ -343,7 +342,7 @@ class MetadataUpdater:
             pas = prefs.get('prefer_author_sort', False)
             kindle_pdoc = prefs.get('personal_doc', None)
             share_not_sync = prefs.get('share_not_sync', False)
-        except:
+        except Exception:
             pas = False
             kindle_pdoc = None
             share_not_sync = False
@@ -374,7 +373,7 @@ class MetadataUpdater:
             subjects = '; '.join(mi.tags)
             update_exth_record((105, normalize(subjects).encode(self.codec, 'replace')))
 
-            if kindle_pdoc and kindle_pdoc in mi.tags:
+            if kindle_pdoc and (kindle_pdoc == '*' or kindle_pdoc in mi.tags):
                 added_501 = True
                 update_exth_record((501, b'PDOC'))
 
@@ -406,7 +405,7 @@ class MetadataUpdater:
         # Add a 112 record with actual UUID
         if getattr(mi, 'uuid', None):
             update_exth_record((112,
-                    ("calibre:%s" % mi.uuid).encode(self.codec, 'replace')))
+                    (f'calibre:{mi.uuid}').encode(self.codec, 'replace')))
         if 503 in self.original_exth_records:
             update_exth_record((503, mi.title.encode(self.codec, 'replace')))
 
@@ -448,11 +447,11 @@ class MetadataUpdater:
 
         if mi.cover_data[1] or mi.cover:
             try:
-                data =  mi.cover_data[1]
+                data = mi.cover_data[1]
                 if not data:
                     with open(mi.cover, 'rb') as f:
                         data = f.read()
-            except:
+            except Exception:
                 pass
             else:
                 if is_image(self.cover_record):
@@ -473,7 +472,6 @@ class MetadataUpdater:
 def set_metadata(stream, mi):
     mu = MetadataUpdater(stream)
     mu.update(mi)
-    return
 
 
 def get_metadata(stream):
@@ -497,7 +495,7 @@ def get_metadata(stream):
     log = Log()
     try:
         mi = MetaInformation(os.path.basename(stream.name), [_('Unknown')])
-    except:
+    except Exception:
         mi = MetaInformation(_('Unknown'), [_('Unknown')])
     mh = MetadataHeader(stream, log)
     if mh.title and mh.title != _('Unknown'):

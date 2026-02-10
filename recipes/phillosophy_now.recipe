@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# vim:fileencoding=utf-8
 from collections import OrderedDict
 
 from calibre import browser
@@ -32,18 +34,28 @@ class PhilosophyNow(BasicNewsRecipe):
         em, blockquote { color:#202020; }
     '''
 
+    recipe_specific_options = {
+        'issue': {
+            'short': 'Enter the Issue Number you want to download ',
+            'long': 'For example, 136'
+        }
+    }
+
     def parse_index(self):
         soup = self.index_to_soup('https://philosophynow.org/')
         div = soup.find('div', attrs={'id': 'aside_issue_cover'})
-        url = div.find('a', href=True)['href']
-        issue = div.find('div', attrs={'id':'aside_issue_text'})
-        if issue:
-            self.log('Downloading issue:', self.tag_to_string(issue).strip())
-            self.timefmt = ' [' + self.tag_to_string(issue.find(attrs={'id':'aside_issue_date'})) + ']'
-            self.title = 'Philosophy Now ' + self.tag_to_string(issue.find(attrs={'id':'aside_issue_number'}))
+        url = 'https://philosophynow.org' + div.find('a', href=True)['href']
+
+        d = self.recipe_specific_options.get('issue')
+        if d and isinstance(d, str):
+            url = 'https://philosophynow.org/issues/' + d
+
+        soup = self.index_to_soup(url)
+
+        div = soup.find('div', attrs={'id': 'issue_contents_cover_div'})
         cov_url = div.find('img', src=True)['src']
         self.cover_url = 'https://philosophynow.org' + cov_url
-        soup = self.index_to_soup('https://philosophynow.org' + url)
+        self.timefmt = ' [' + self.tag_to_string(soup.find('h1')) + ']'
 
         feeds = OrderedDict()
 
@@ -70,7 +82,7 @@ class PhilosophyNow(BasicNewsRecipe):
                 if section_title not in feeds:
                     feeds[section_title] = []
                 feeds[section_title] += articles
-        ans = [(key, val) for key, val in feeds.items()]
+        ans = list(feeds.items())
         return ans
 
     # PN changes the content it delivers based on cookies, so the
@@ -82,7 +94,7 @@ class PhilosophyNow(BasicNewsRecipe):
         return self.get_browser()
 
     def open_novisit(self, *args, **kwargs):
-        br = browser()
+        br = browser(verify_ssl_certificates=False)
         return br.open_novisit(*args, **kwargs)
 
     open = open_novisit

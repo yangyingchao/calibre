@@ -11,9 +11,8 @@ import os
 
 from calibre.customize.conversion import OptionRecommendation, OutputFormatPlugin
 from calibre.ptempfile import TemporaryDirectory
-from polyglot.builtins import iteritems
 
-UNITS = ('millimeter', 'centimeter', 'point', 'inch' , 'pica' , 'didot',
+UNITS = ('millimeter', 'centimeter', 'point', 'inch', 'pica', 'didot',
         'cicero', 'devicepixel')
 
 PAPER_SIZES = ('a0', 'a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'b0', 'b1',
@@ -151,9 +150,10 @@ class PDFOutput(OutputFormatPlugin):
         # Ensure Qt is setup to be used with WebEngine
         # specialize_options is called early enough in the pipeline
         # that hopefully no Qt application has been constructed as yet
-        from qt.webengine import QWebEnginePage  # noqa
+        from qt.webengine import QWebEnginePage  # noqa: F401
+
         from calibre.gui2 import must_use_qt
-        from calibre.utils.webengine import setup_fake_protocol, setup_default_profile
+        from calibre.utils.webengine import setup_default_profile, setup_fake_protocol
         setup_fake_protocol()
         must_use_qt()
         setup_default_profile()
@@ -215,7 +215,7 @@ class PDFOutput(OutputFormatPlugin):
                     try:
                         s = rule.style
                         src = s.getProperty('src').propertyValue[0].uri
-                    except:
+                    except Exception:
                         continue
                     path = item.abshref(src)
                     ff = self.oeb.manifest.hrefs.get(urlnormalize(path), None)
@@ -227,7 +227,7 @@ class PDFOutput(OutputFormatPlugin):
                         processed.add(path)
                         try:
                             nraw = remove_embed_restriction(raw)
-                        except:
+                        except Exception:
                             continue
                         if nraw != raw:
                             ff.data = nraw
@@ -242,7 +242,7 @@ class PDFOutput(OutputFormatPlugin):
         self.process_fonts()
 
         if self.opts.pdf_use_document_margins and self.stored_page_margins:
-            for href, margins in iteritems(self.stored_page_margins):
+            for href, margins in self.stored_page_margins.items():
                 item = oeb_book.manifest.hrefs.get(href)
                 if item is not None:
                     root = item.data

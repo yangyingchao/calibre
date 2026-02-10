@@ -12,7 +12,6 @@ from qt.core import QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, QGroupBox
 
 from calibre.gui2.preferences.metadata_sources import FieldsModel as FM
 from calibre.utils.icu import sort_key
-from polyglot.builtins import iteritems
 
 
 class FieldsModel(FM):  # {{{
@@ -30,7 +29,7 @@ class FieldsModel(FM):  # {{{
         for x in fields:
             if not x.startswith('identifier:') and x not in self.exclude:
                 self.fields.append(x)
-        self.fields.sort(key=lambda x:self.descs.get(x, x))
+        self.fields.sort(key=lambda x: self.descs.get(x, x))
         self.endResetModel()
 
     def state(self, field, defaults=False):
@@ -46,7 +45,7 @@ class FieldsModel(FM):  # {{{
     def commit(self):
         ignored_fields = {x for x in self.prefs['ignore_fields'] if x not in
             self.overrides}
-        changed = {k for k, v in iteritems(self.overrides) if v ==
+        changed = {k for k, v in self.overrides.items() if v ==
             Qt.CheckState.Unchecked}
         self.prefs['ignore_fields'] = list(ignored_fields.union(changed))
 
@@ -96,6 +95,7 @@ class ConfigWidget(QWidget):
         if opt.type == 'number':
             c = QSpinBox if isinstance(opt.default, numbers.Integral) else QDoubleSpinBox
             widget = c(self)
+            widget.setRange(min(widget.minimum(), 20 * val), max(widget.maximum(), 20 * val))
             widget.setValue(val)
         elif opt.type == 'string':
             widget = QLineEdit(self)
@@ -105,7 +105,7 @@ class ConfigWidget(QWidget):
             widget.setChecked(bool(val))
         elif opt.type == 'choices':
             widget = QComboBox(self)
-            items = list(iteritems(opt.choices))
+            items = list(opt.choices.items())
             items.sort(key=lambda k_v: sort_key(k_v[1]))
             for key, label in items:
                 widget.addItem(label, (key))

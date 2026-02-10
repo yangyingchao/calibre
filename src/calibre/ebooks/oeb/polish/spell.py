@@ -15,14 +15,13 @@ from calibre.ebooks.oeb.polish.toc import find_existing_nav_toc, find_existing_n
 from calibre.spell.break_iterator import index_of, split_into_words
 from calibre.spell.dictionary import parse_lang_code
 from calibre.utils.icu import ord_string
-from polyglot.builtins import iteritems
 
 _patterns = None
 
 
 class Patterns:
 
-    __slots__ = ('sanitize_invisible_pat', 'split_pat', 'digit_pat', 'fr_elision_pat')
+    __slots__ = ('digit_pat', 'fr_elision_pat', 'sanitize_invisible_pat', 'split_pat')
 
     def __init__(self):
         import regex
@@ -36,7 +35,7 @@ class Patterns:
         # French words with prefixes are reduced to the stem word, so that the
         # words appear only once in the word list
         self.fr_elision_pat = regex.compile(
-            "^(?:l|d|m|t|s|j|c|ç|lorsqu|puisqu|quoiqu|qu)['’]", flags=regex.UNICODE | regex.VERSION1 | regex.IGNORECASE)
+            r"^(?:l|d|m|t|s|j|c|ç|lorsqu|puisqu|quoiqu|qu)['’]", flags=regex.UNICODE | regex.VERSION1 | regex.IGNORECASE)
 
 
 def patterns():
@@ -56,7 +55,7 @@ class CharCounter:
 
 class Location:
 
-    __slots__ = ('file_name', 'sourceline', 'original_word', 'location_node', 'node_item', 'elided_prefix')
+    __slots__ = ('elided_prefix', 'file_name', 'location_node', 'node_item', 'original_word', 'sourceline')
 
     def __init__(self, file_name=None, elided_prefix='', original_word=None, location_node=None, node_item=(None, None)):
         self.file_name, self.elided_prefix, self.original_word = file_name, elided_prefix, original_word
@@ -142,12 +141,12 @@ def count_chars_in_text(node, attr, counter, file_name, locale):
 
 def add_words_from_escaped_html(text, words, file_name, node, attr, locale):
     text = replace_entities(text)
-    root = parse('<html><body><div>%s</div></body></html>' % text, decoder=lambda x:x.decode('utf-8'))
+    root = parse(f'<html><body><div>{text}</div></body></html>', decoder=lambda x:x.decode('utf-8'))
     ewords = defaultdict(list)
     ewords[None] = 0
     read_words_from_html(root, ewords, file_name, locale)
     words[None] += ewords.pop(None)
-    for k, locs in iteritems(ewords):
+    for k, locs in ewords.items():
         for loc in locs:
             loc.location_node, loc.node_item = node, (False, attr)
         words[k].extend(locs)
@@ -155,16 +154,16 @@ def add_words_from_escaped_html(text, words, file_name, node, attr, locale):
 
 def count_chars_in_escaped_html(text, counter, file_name, node, attr, locale):
     text = replace_entities(text)
-    root = parse('<html><body><div>%s</div></body></html>' % text, decoder=lambda x:x.decode('utf-8'))
+    root = parse(f'<html><body><div>{text}</div></body></html>', decoder=lambda x:x.decode('utf-8'))
     count_chars_in_html(root, counter, file_name, locale)
 
 
-_opf_file_as = '{%s}file-as' % OPF_NAMESPACES['opf']
+_opf_file_as = '{{{}}}file-as'.format(OPF_NAMESPACES['opf'])
 opf_spell_tags = {'title', 'creator', 'subject', 'description', 'publisher'}
+
 
 # We can only use barename() for tag names and simple attribute checks so that
 # this code matches up with the syntax highlighter base spell checking
-
 
 def read_words_from_opf(root, words, file_name, book_locale):
     for tag in root.iterdescendants('*'):
@@ -224,7 +223,7 @@ html_spell_tags = {'script', 'style', 'link'}
 def read_words_from_html_tag(tag, words, file_name, parent_locale, locale):
     if tag.text is not None and isinstance(tag.tag, str) and barename(tag.tag) not in html_spell_tags:
         add_words_from_text(tag, 'text', words, file_name, locale)
-    for attr in {'alt', 'title'}:
+    for attr in ('alt', 'title'):
         add_words_from_attr(tag, attr, words, file_name, locale)
     if tag.tail is not None and tag.getparent() is not None and barename(tag.getparent().tag) not in html_spell_tags:
         add_words_from_text(tag, 'tail', words, file_name, parent_locale)
@@ -233,7 +232,7 @@ def read_words_from_html_tag(tag, words, file_name, parent_locale, locale):
 def count_chars_in_html_tag(tag, counter, file_name, parent_locale, locale):
     if tag.text is not None and isinstance(tag.tag, str) and barename(tag.tag) not in html_spell_tags:
         count_chars_in_text(tag, 'text', counter, file_name, locale)
-    for attr in {'alt', 'title'}:
+    for attr in ('alt', 'title'):
         count_chars_in_attr(tag, attr, counter, file_name, locale)
     if tag.tail is not None and tag.getparent() is not None and barename(tag.getparent().tag) not in html_spell_tags:
         count_chars_in_text(tag, 'tail', counter, file_name, parent_locale)
@@ -327,7 +326,7 @@ def get_all_words(container, book_locale, get_word_count=False, excluded_files=(
         file_words_counts[file_name] = file_word_count
         file_word_count = 0
     count = words.pop(None)
-    ans = {k:group_sort(v) for k, v in iteritems(words)}
+    ans = {k:group_sort(v) for k, v in words.items()}
     if get_word_count:
         return count, ans
     return ans
@@ -395,7 +394,7 @@ def replace_word(container, new_word, locations, locale, undo_cache=None):
 
 def undo_replace_word(container, undo_cache):
     changed = set()
-    for (file_name, node, is_attr, attr), text in iteritems(undo_cache):
+    for (file_name, node, is_attr, attr), text in undo_cache.items():
         node.set(attr, text) if is_attr else setattr(node, attr, text)
         container.replace(file_name, node.getroottree().getroot())
         changed.add(file_name)

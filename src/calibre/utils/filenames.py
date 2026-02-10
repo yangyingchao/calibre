@@ -13,7 +13,6 @@ from math import ceil
 from calibre import force_unicode, isbytestring, prints, sanitize_file_name
 from calibre.constants import filesystem_encoding, ismacos, iswindows, preferred_encoding
 from calibre.utils.localization import _, get_udc
-from polyglot.builtins import iteritems, itervalues
 
 
 def ascii_text(orig):
@@ -76,7 +75,7 @@ def shorten_components_to(length, components, more_to_take=0, last_has_extension
     deltas = []
     for x in components:
         pct = len(x)/float(len(filepath))
-        deltas.append(int(ceil(pct*extra)))
+        deltas.append(ceil(pct*extra))
     ans = []
 
     for i, x in enumerate(components):
@@ -205,7 +204,7 @@ def case_preserving_open_file(path, mode='wb', mkdir_mode=0o777):
 
     components = path.split(sep)
     if not components:
-        raise ValueError('Invalid path: %r'%path)
+        raise ValueError(f'Invalid path: {path!r}')
 
     cpath = sep
     if iswindows:
@@ -225,8 +224,8 @@ def case_preserving_open_file(path, mode='wb', mkdir_mode=0o777):
         cl = comp.lower()
         try:
             candidates = [c for c in os.listdir(cpath) if c.lower() == cl]
-        except:
-            # Dont have permission to do the listdir, assume the case is
+        except Exception:
+            # Don't have permission to do the listdir, assume the case is
             # correct as we have no way to check it.
             pass
         else:
@@ -342,8 +341,8 @@ def windows_hardlink(src, dest):
 
     sz = windows_get_size(dest)
     if sz != src_size:
-        msg = f'Creating hardlink from {src} to {dest} failed: %s'
-        raise OSError(msg % ('hardlink size: %d not the same as source size' % sz))
+        msg = f'Creating hardlink from {src} to {dest} failed: '
+        raise OSError(msg + (f'hardlink size: {sz} not the same as source size'))
 
 
 def windows_fast_hardlink(src, dest):
@@ -351,8 +350,8 @@ def windows_fast_hardlink(src, dest):
     winutil.create_hard_link(dest, src)
     ssz, dsz = windows_get_size(src), windows_get_size(dest)
     if ssz != dsz:
-        msg = f'Creating hardlink from {src} to {dest} failed: %s'
-        raise OSError(msg % ('hardlink size: %d not the same as source size: %s' % (dsz, ssz)))
+        msg = f'Creating hardlink from {src} to {dest} failed: '
+        raise OSError(msg + (f'hardlink size: {dsz} not the same as source size: {ssz}'))
 
 
 def windows_nlinks(path):
@@ -363,7 +362,6 @@ def windows_nlinks(path):
 
 
 class WindowsAtomicFolderMove:
-
     '''
     Move all the files inside a specified folder in an atomic fashion,
     preventing any other process from locking a file while the operation is
@@ -387,7 +385,7 @@ class WindowsAtomicFolderMove:
         names = os.listdir(path)
         name_to_fileid = {x:windows_get_fileid(os.path.join(path, x)) for x in names}
         fileid_to_names = defaultdict(set)
-        for name, fileid in iteritems(name_to_fileid):
+        for name, fileid in name_to_fileid.items():
             fileid_to_names[fileid].add(name)
 
         for x in names:
@@ -420,15 +418,15 @@ class WindowsAtomicFolderMove:
 
                 self.close_handles()
                 if e.winerror == winutil.ERROR_SHARING_VIOLATION:
-                    err = IOError(errno.EACCES,
+                    err = OSError(errno.EACCES,
                             _('File is open in another process'))
                     err.filename = f
                     raise err
-                prints('CreateFile failed for: %r' % f)
+                prints(f'CreateFile failed for: {f!r}')
                 raise
-            except:
+            except Exception:
                 self.close_handles()
-                prints('CreateFile failed for: %r' % f)
+                prints(f'CreateFile failed for: {f!r}')
                 raise
             self.handle_map[f] = h
 
@@ -441,10 +439,10 @@ class WindowsAtomicFolderMove:
                 break
         if handle is None:
             if os.path.exists(path):
-                raise ValueError('The file %r did not exist when this move'
-                        ' operation was started'%path)
+                raise ValueError(f'The file {path!r} did not exist when this move'
+                        ' operation was started')
             else:
-                raise ValueError('The file %r does not exist'%path)
+                raise ValueError(f'The file {path!r} does not exist')
 
         with suppress(OSError):
             windows_hardlink(path, dest)
@@ -462,18 +460,18 @@ class WindowsAtomicFolderMove:
     def release_file(self, path):
         ' Release the lock on the file pointed to by path. Will also release the lock on any hardlinks to path '
         key = None
-        for p, h in iteritems(self.handle_map):
+        for p, h in self.handle_map.items():
             if samefile_windows(path, p):
                 key = (p, h)
                 break
         if key is not None:
             key[1].close()
-            remove = [f for f, h in iteritems(self.handle_map) if h is key[1]]
+            remove = [f for f, h in self.handle_map.items() if h is key[1]]
             for x in remove:
                 self.handle_map.pop(x)
 
     def close_handles(self):
-        for h in itervalues(self.handle_map):
+        for h in self.handle_map.values():
             h.close()
         self.handle_map = {}
 
@@ -499,17 +497,6 @@ def nlinks_file(path):
     return os.stat(path).st_nlink
 
 
-if iswindows:
-    from calibre_extensions.winutil import move_file
-
-    def rename_file(a, b):
-        if isinstance(a, bytes):
-            a = os.fsdecode(a)
-        if isinstance(b, bytes):
-            b = os.fsdecode(b)
-        move_file(a, b)
-
-
 def retry_on_fail(func, *args, count=10, sleep_time=0.2):
     for i in range(count):
         try:
@@ -528,9 +515,10 @@ def atomic_rename(oldpath, newpath):
     are on different volumes. If succeeds, guaranteed to be atomic. newpath may
     or may not exist. If it exists, it is replaced. '''
     if iswindows:
-        retry_on_fail(rename_file, oldpath, newpath)
+        oldpath, newpath = make_long_path_useable(oldpath), make_long_path_useable(newpath)
+        retry_on_fail(os.replace, oldpath, newpath)
     else:
-        os.rename(oldpath, newpath)
+        os.replace(oldpath, newpath)
 
 
 def remove_dir_if_empty(path, ignore_metadata_caches=False):
@@ -601,10 +589,8 @@ def get_hardlink_function(src, dest):
     if not iswindows:
         return os.link
     from calibre_extensions import winutil
-    if src.startswith(long_path_prefix):
-        src = src[len(long_path_prefix):]
-    if dest.startswith(long_path_prefix):
-        dest = dest[len(long_path_prefix):]
+    src = src.removeprefix(long_path_prefix)
+    dest = dest.removeprefix(long_path_prefix)
     root = dest[0] + ':\\'
     if src[0].lower() == dest[0].lower() and winutil.supports_hardlinks(root):
         return windows_fast_hardlink
@@ -649,6 +635,20 @@ def copytree_using_links(path, dest, dest_is_parent=True, filecopyfunc=copyfile)
                 filecopyfunc(src, df)
 
 
+def is_existing_subpath(child: str, parent: str) -> bool:
+    ' Check if child is under parent. If either child or parent dont exist, returns False. '
+    try:
+        parent = os.path.realpath(parent, strict=True)  # resolve symlinks
+        child = os.path.realpath(child, strict=True)
+    except OSError:
+        return False
+    parent = os.path.abspath(parent)
+    child = os.path.abspath(child)
+    if not parent.endswith(os.sep):
+        parent += os.sep
+    return child.startswith(parent)
+
+
 rmtree = shutil.rmtree
 
 
@@ -685,7 +685,7 @@ if iswindows:
         except FileNotFoundError:
             return path
         except OSError as e:
-            if e.winerror == 123: # ERR_INVALID_NAME
+            if e.winerror == 123:  # ERR_INVALID_NAME
                 return path
             raise
 

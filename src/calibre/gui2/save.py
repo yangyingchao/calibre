@@ -10,6 +10,7 @@ import shutil
 import time
 import traceback
 from collections import defaultdict, namedtuple
+from queue import Empty
 
 from qt.core import QObject, Qt, pyqtSignal
 
@@ -26,8 +27,6 @@ from calibre.library.save_to_disk import find_plugboard, get_path_components, pl
 from calibre.ptempfile import PersistentTemporaryDirectory, SpooledTemporaryFile
 from calibre.utils.filenames import make_long_path_useable
 from calibre.utils.ipc.pool import Failure, Pool
-from polyglot.builtins import iteritems, itervalues
-from polyglot.queue import Empty
 
 BookId = namedtuple('BookId', 'title authors')
 
@@ -35,14 +34,14 @@ BookId = namedtuple('BookId', 'title authors')
 def ensure_unique_components(data):  # {{{
     cmap = defaultdict(set)
     bid_map = {}
-    for book_id, (mi, components, fmts) in iteritems(data):
+    for book_id, (mi, components, fmts) in data.items():
         cmap[tuple(components)].add(book_id)
         bid_map[book_id] = components
 
-    for book_ids in itervalues(cmap):
+    for book_ids in cmap.values():
         if len(book_ids) > 1:
             for i, book_id in enumerate(sorted(book_ids)[1:]):
-                suffix = ' (%d)' % (i + 1)
+                suffix = f' ({i + 1})'
                 components = bid_map[book_id]
                 components[-1] = components[-1] + suffix
 # }}}
@@ -65,7 +64,6 @@ class SpooledFile(SpooledTemporaryFile):  # {{{
         newfile.seek(orig.tell(), 0)
 
         self._rolled = True
-
 # }}}
 
 
@@ -116,7 +114,7 @@ class Saver(QObject):
             self.pool.shutdown()
         self.setParent(None)
         self.jobs = self.pool = self.plugboards = self.template_functions = self.library_id =\
-                self.collected_data = self.all_book_ids = self.pd = self.db = None  # noqa
+                self.collected_data = self.all_book_ids = self.pd = self.db = None
         self.deleteLater()
 
     def book_id_data(self, book_id):
@@ -125,7 +123,7 @@ class Saver(QObject):
             try:
                 ans = BookId(self.db.field_for('title', book_id), self.db.field_for('authors', book_id))
             except Exception:
-                ans = BookId((_('Unknown') + ' (%d)' % book_id), (_('Unknown'),))
+                ans = BookId((_('Unknown') + f' ({book_id})'), (_('Unknown'),))
             self._book_id_data[book_id] = ans
         return ans
 
@@ -156,7 +154,7 @@ class Saver(QObject):
         self.pd.max = len(self.collected_data)
         self.pd.value = 0
         if self.opts.update_metadata:
-            all_fmts = {fmt for data in itervalues(self.collected_data) for fmt in data[2]}
+            all_fmts = {fmt for data in self.collected_data.values() for fmt in data[2]}
             plugboards_cache = {fmt:find_plugboard(plugboard_save_to_disk_value, fmt, self.plugboards) for fmt in all_fmts}
             self.pool = Pool(name='SaveToDisk') if self.pool is None else self.pool
             try:
@@ -213,11 +211,14 @@ class Saver(QObject):
         base_path = os.path.join(self.root, *components)
         base_dir = os.path.dirname(base_path)
         if self.opts.formats and self.opts.formats != 'all':
-            asked_formats = {x.lower().strip() for x in self.opts.formats.split(',')}
-            fmts = asked_formats.intersection(fmts)
-            if not fmts:
-                self.errors[book_id].append(('critical', _('Requested formats not available')))
-                return
+            if self.opts.formats == '..cover..':
+                fmts = set()
+            else:
+                asked_formats = {x.lower().strip() for x in self.opts.formats.split(',')}
+                fmts = asked_formats.intersection(fmts)
+                if not fmts:
+                    self.errors[book_id].append(('critical', _('Requested formats not available')))
+                    return
 
         extra_files = {}
         if self.opts.save_extra_files:
@@ -249,7 +250,7 @@ class Saver(QObject):
                 fname = base_path + os.extsep + 'jpg'
                 mi.cover = os.path.basename(fname)
             elif self.opts.update_metadata:
-                fname = os.path.join(self.tdir, '%d.jpg' % book_id)
+                fname = os.path.join(self.tdir, f'{book_id}.jpg')
 
             if fname:
                 with open(fname, 'wb') as f:
@@ -261,7 +262,7 @@ class Saver(QObject):
         if self.opts.write_opf:
             fname = base_path + os.extsep + 'opf'
         elif self.opts.update_metadata:
-            fname = os.path.join(self.tdir, '%d.opf' % book_id)
+            fname = os.path.join(self.tdir, f'{book_id}.opf')
         if fname:
             opf = metadata_to_opf(mi)
             with open(fname, 'wb') as f:
@@ -340,7 +341,7 @@ class Saver(QObject):
 
     def updating_metadata_finished(self):
         if DEBUG:
-            prints('Saved %d books in %.1f seconds' % (len(self.all_book_ids), time.time() - self.start_time))
+            prints(f'Saved {len(self.all_book_ids)} books in {time.time()-self.start_time:.1f} seconds')
         self.pd.close()
         self.pd.deleteLater()
         self.report()
@@ -356,7 +357,7 @@ class Saver(QObject):
             text = force_unicode(text)
             return '\xa0\xa0\xa0\xa0' + '\n\xa0\xa0\xa0\xa0'.join(text.splitlines())
 
-        for book_id, errors in iteritems(self.errors):
+        for book_id, errors in self.errors.items():
             types = {t for t, data in errors}
             title, authors = self.book_id_data(book_id).title, authors_to_string(self.book_id_data(book_id).authors[:1])
             if report:
@@ -384,7 +385,7 @@ class Saver(QObject):
     def report(self):
         if not self.errors:
             return
-        err_types = {e[0] for errors in itervalues(self.errors) for e in errors}
+        err_types = {e[0] for errors in self.errors.values() for e in errors}
         if err_types == {'metadata'}:
             msg = _('Failed to update metadata in some books, click "Show details" for more information')
             d = warning_dialog

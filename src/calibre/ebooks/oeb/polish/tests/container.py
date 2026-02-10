@@ -5,6 +5,7 @@ __license__ = 'GPL v3'
 __copyright__ = '2013, Kovid Goyal <kovid at kovidgoyal.net>'
 
 import os
+import pickle
 import subprocess
 from zipfile import ZipFile
 
@@ -17,7 +18,6 @@ from calibre.ebooks.oeb.polish.tests.base import BaseTest, get_simple_book, get_
 from calibre.ptempfile import TemporaryDirectory, TemporaryFile
 from calibre.utils.filenames import nlinks_file
 from calibre.utils.resources import get_path as P
-from polyglot.builtins import iteritems, itervalues
 
 
 def get_container(*args, **kwargs):
@@ -40,13 +40,13 @@ class ContainerTests(BaseTest):
             c2 = clone_container(c1, tdir)
 
             for c in (c1, c2):
-                for name, path in iteritems(c.name_path_map):
-                    self.assertEqual(2, nlinks_file(path), 'The file %s is not linked' % name)
+                for name, path in c.name_path_map.items():
+                    self.assertEqual(2, nlinks_file(path), f'The file {name} is not linked')
 
             for name in c1.name_path_map:
                 self.assertIn(name, c2.name_path_map)
                 with c1.open(name) as one, c2.open(name) as two:
-                    self.assertEqual(one.read(), two.read(), 'The file %s differs' % name)
+                    self.assertEqual(one.read(), two.read(), f'The file {name} differs')
 
             spine_names = tuple(x[0] for x in c1.spine_names)
             text = spine_names[0]
@@ -71,6 +71,9 @@ class ContainerTests(BaseTest):
             x = base + 'out.' + fmt
             for c in (c1, c2):
                 c.commit(outpath=x)
+            c = pickle.loads(pickle.dumps(c1))
+            for attr in c1.data_for_clone():
+                self.assertEqual(getattr(c1, attr), getattr(c, attr))
 
     def test_file_removal(self):
         ' Test removal of files from the container '
@@ -183,13 +186,13 @@ class ContainerTests(BaseTest):
         name = 'folder/added file.html'
         c.add_file(name, b'xxx')
         self.assertEqual('xxx', c.raw_data(name))
-        self.assertIn(name, set(itervalues(c.manifest_id_map)))
+        self.assertIn(name, set(c.manifest_id_map.values()))
         self.assertIn(name, {x[0] for x in c.spine_names})
 
         name = 'added.css'
         c.add_file(name, b'xxx')
         self.assertEqual('xxx', c.raw_data(name))
-        self.assertIn(name, set(itervalues(c.manifest_id_map)))
+        self.assertIn(name, set(c.manifest_id_map.values()))
         self.assertNotIn(name, {x[0] for x in c.spine_names})
         self.assertEqual(c.make_name_unique(name), 'added-1.css')
         c.add_file('added-1.css', b'xxx')
@@ -236,8 +239,8 @@ class ContainerTests(BaseTest):
         book = get_simple_book()
         c = get_container(book)
         one, two = 'one/one.html', 'two/two.html'
-        c.add_file(one, b'<head><link href="../stylesheet.css"><p><a name="one" href="../two/two.html">1</a><a name="two" href="../two/two.html#one">2</a>')  # noqa
-        c.add_file(two, b'<head><link href="../page_styles.css"><p><a name="one" href="two.html#two">1</a><a name="two" href="../one/one.html#one">2</a><a href="#one">3</a>')  # noqa
+        c.add_file(one, b'<head><link href="../stylesheet.css"><p><a name="one" href="../two/two.html">1</a><a name="two" href="../two/two.html#one">2</a>')  # noqa: E501
+        c.add_file(two, b'<head><link href="../page_styles.css"><p><a name="one" href="two.html#two">1</a><a name="two" href="../one/one.html#one">2</a><a href="#one">3</a>')  # noqa: E501
         merge(c, 'text', (one, two), one)
         self.check_links(c)
         root = c.parsed(one)

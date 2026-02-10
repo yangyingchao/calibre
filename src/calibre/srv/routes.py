@@ -4,6 +4,7 @@
 __license__ = 'GPL v3'
 __copyright__ = '2015, Kovid Goyal <kovid at kovidgoyal.net>'
 
+import http.client
 import inspect
 import json as jsonlib
 import numbers
@@ -12,13 +13,11 @@ import sys
 import textwrap
 import time
 from operator import attrgetter
+from urllib.parse import quote as urlquote
 
 from calibre.srv.errors import HTTPNotFound, HTTPSimpleResponse, RouteError
 from calibre.srv.utils import http_date
 from calibre.utils.serialize import MSGPACK_MIME, json_dumps, msgpack_dumps
-from polyglot import http_client
-from polyglot.builtins import iteritems, itervalues
-from polyglot.urllib import quote as urlquote
 
 default_methods = frozenset(('HEAD', 'GET'))
 
@@ -94,14 +93,14 @@ def endpoint(route,
         f.needs_db_write = needs_db_write
         argspec = inspect.getfullargspec(f)
         if len(argspec.args) < 2:
-            raise TypeError('The endpoint %r must take at least two arguments' % f.route)
+            raise TypeError(f'The endpoint {f.route!r} must take at least two arguments')
         f.__annotations__ = {
             argspec.args[0]: Context,
             argspec.args[1]: RequestData,
         }
         f.__doc__ = textwrap.dedent(f.__doc__ or '') + '\n\n' + (
-            (':type %s: calibre.srv.handler.Context\n' % argspec.args[0]) +
-            (':type %s: calibre.srv.http_response.RequestData\n' % argspec.args[1])
+            (f':type {argspec.args[0]}: calibre.srv.handler.Context\n') +
+            (f':type {argspec.args[1]}: calibre.srv.http_response.RequestData\n')
         )
         return f
     return annotate
@@ -117,7 +116,7 @@ class Route:
         self.endpoint = endpoint_
         del endpoint_
         if not self.endpoint.route.startswith('/'):
-            raise RouteError('A route must start with /, %s does not' % self.endpoint.route)
+            raise RouteError(f'A route must start with /, {self.endpoint.route} does not')
         parts = list(filter(None, self.endpoint.route.split('/')))
         matchers = self.matchers = []
         self.defaults = {}
@@ -149,9 +148,8 @@ class Route:
                         self.type_checkers[name] = type(default)
                     if is_sponge and not isinstance(default, str):
                         raise route_error('Soak up path component must have a default value of string type')
-                else:
-                    if found_optional_part is not False:
-                        raise route_error('Cannot have non-optional path components after optional ones')
+                elif found_optional_part is not False:
+                    raise route_error('Cannot have non-optional path components after optional ones')
                 if is_sponge:
                     self.soak_up_extra = name
                 matchers.append((name, True))
@@ -164,11 +162,11 @@ class Route:
         self.required_names = self.all_names - frozenset(self.defaults)
         argspec = inspect.getfullargspec(self.endpoint)
         if len(self.names) + 2 != len(argspec.args) - len(argspec.defaults or ()):
-            raise route_error('Function must take %d non-default arguments' % (len(self.names) + 2))
+            raise route_error(f'Function must take {len(self.names) + 2} non-default arguments')
         if argspec.args[2:len(self.names)+2] != self.names:
-            raise route_error('Function\'s argument names do not match the variable names in the route')
+            raise route_error("Function's argument names do not match the variable names in the route")
         if not frozenset(self.type_checkers).issubset(frozenset(self.names)):
-            raise route_error('There exist type checkers that do not correspond to route variables: %r' % (set(self.type_checkers) - set(self.names)))
+            raise route_error(f'There exist type checkers that do not correspond to route variables: {set(self.type_checkers)-set(self.names)!r}')
         self.min_size = found_optional_part if found_optional_part is not False else len(matchers)
         self.max_size = sys.maxsize if self.soak_up_extra else len(matchers)
 
@@ -192,7 +190,7 @@ class Route:
                 return tc(val)
             except Exception:
                 raise HTTPNotFound('Argument of incorrect type')
-        for name, tc in iteritems(self.type_checkers):
+        for name, tc in self.type_checkers.items():
             args_map[name] = check(tc, args_map[name])
         return (args_map[name] for name in self.names)
 
@@ -213,8 +211,8 @@ class Route:
             return urlquote(x, '')
         args = {k:'' for k in self.defaults}
         args.update(kwargs)
-        args = {k:quoted(v) for k, v in iteritems(args)}
-        route = self.var_pat.sub(lambda m:'{%s}' % m.group(1).partition('=')[0].lstrip('+'), self.endpoint.route)
+        args = {k:quoted(v) for k, v in args.items()}
+        route = self.var_pat.sub(lambda m:'{{{}}}'.format(m.group(1).partition('=')[0].lstrip('+')), self.endpoint.route)
         return route.format(**args).rstrip('/')
 
     def __str__(self):
@@ -256,7 +254,7 @@ class Router:
                 self.add(item)
 
     def __iter__(self):
-        return itervalues(self.routes)
+        yield from self.routes.values()
 
     def finalize(self):
         try:
@@ -295,14 +293,14 @@ class Router:
                 if x:
                     k, v = x.partition('=')[::2]
                     if k:
-                        # Since we only set simple hex encoded cookies, we dont
+                        # Since we only set simple hex encoded cookies, we don't
                         # need more sophisticated value parsing
                         c[k] = v.strip('"')
 
     def dispatch(self, data):
         endpoint_, args = self.find_route(data.path)
         if data.method not in endpoint_.methods:
-            raise HTTPSimpleResponse(http_client.METHOD_NOT_ALLOWED)
+            raise HTTPSimpleResponse(http.client.METHOD_NOT_ALLOWED)
 
         self.read_cookies(data)
 
@@ -331,14 +329,14 @@ class Router:
                 outheaders['Pragma'] = 'no-cache'
             elif isinstance(cc, numbers.Number):
                 cc = int(60 * 60 * cc)
-                outheaders['Cache-Control'] = 'public, max-age=%d' % cc
+                outheaders['Cache-Control'] = f'public, max-age={cc}'
                 if cc == 0:
                     cc -= 100000
                 outheaders['Expires'] = http_date(cc + time.time())
             else:
                 ctype, max_age = cc
                 max_age = int(60 * 60 * max_age)
-                outheaders['Cache-Control'] = '%s, max-age=%d' % (ctype, max_age)
+                outheaders['Cache-Control'] = f'{ctype}, max-age={max_age}'
                 if max_age == 0:
                     max_age -= 100000
                 outheaders['Expires'] = http_date(max_age + time.time())

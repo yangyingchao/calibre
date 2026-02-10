@@ -11,7 +11,6 @@ from lxml.etree import tostring
 
 from calibre.ebooks.metadata.toc import TOC
 from calibre.ebooks.oeb.polish.toc import elem_to_toc_text
-from polyglot.builtins import iteritems
 
 
 def from_headings(body, log, namespace, num_levels=3):
@@ -23,14 +22,14 @@ def from_headings(body, log, namespace, num_levels=3):
     level_item_map = {i:frozenset(
         x for x in all_heading_nodes if int(x.get('data-heading-level')) == i)
         for i in range(1, num_levels+1)}
-    item_level_map = {e:i for i, elems in iteritems(level_item_map) for e in elems}
+    item_level_map = {e:i for i, elems in level_item_map.items() for e in elems}
 
     idcount = count()
 
     def ensure_id(elem):
         ans = elem.get('id', None)
         if not ans:
-            ans = 'toc_id_%d' % (next(idcount) + 1)
+            ans = f'toc_id_{next(idcount) + 1}'
             elem.set('id', ans)
         return ans
 
@@ -123,7 +122,7 @@ def from_toc(docx, link_map, styles, object_map, log, namespace):
                 if txt and href and p is not None:
                     ps = styles.resolve_paragraph(p)
                     try:
-                        ml = int(ps.margin_left[:-2])
+                        ml = float(ps.margin_left[:-2])
                     except (TypeError, ValueError, AttributeError):
                         ml = 0
                     if ps.text_align in {'center', 'right'}:

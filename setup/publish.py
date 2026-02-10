@@ -11,10 +11,9 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 
-from setup import Command, __version__, installer_names, require_clean_git, require_git_master
+from setup import Command, __version__, installer_names, manual_build_dir, require_clean_git, require_git_master
 from setup.parallel_build import create_job, parallel_build
 
 
@@ -50,9 +49,9 @@ class Stage2(Command):
         platforms = 'linux64', 'linuxarm64', 'osx', 'win'
         for x in platforms:
             cmd = (
-                '''{exe} -c "import subprocess; subprocess.Popen(['{exe}', './setup.py', '{x}']).wait() != 0 and'''
-                ''' input('Build of {x} failed, press Enter to exit');"'''
-            ).format(exe=sys.executable, x=x)
+                f'''{sys.executable} -c "import subprocess; subprocess.Popen(['{sys.executable}', './setup.py', '{x}']).wait() != 0 and'''
+                f''' input('Build of {x} failed, press Enter to exit');"'''
+            )
             session.append('title ' + x)
             session.append('launch ' + cmd)
 
@@ -67,9 +66,8 @@ class Stage2(Command):
         for installer in installer_names(include_source=False):
             installer = self.j(self.d(self.SRC), installer)
             if not os.path.exists(installer) or os.path.getsize(installer) < 10000:
-                raise SystemExit(
-                    'The installer %s does not exist' % os.path.basename(installer)
-                )
+                raise SystemExit(f'The installer {os.path.basename(installer)} does not exist')
+            os.chmod(installer, 0o644)
 
 
 class Stage3(Command):
@@ -93,6 +91,12 @@ class Stage5(Command):
         subprocess.check_call('rm -rf build/* dist/*', shell=True)
 
 
+def require_hsm_for_signing():
+    cp = subprocess.run(['pkcs11-tool', '-L'], stdout=subprocess.DEVNULL)
+    if cp.returncode != 0:
+        raise SystemExit('Attach the HSM for authenticode signing first')
+
+
 class Publish(Command):
 
     description = 'Publish a new calibre release'
@@ -107,6 +111,10 @@ class Publish(Command):
     def pre_sub_commands(self, opts):
         require_git_master()
         require_clean_git()
+        require_hsm_for_signing()
+        version = tuple(map(int, __version__.split('.')))  # noqa: RUF048
+        if version[2] > 99:
+            raise SystemExit(f'The version number {__version__} indicates a preview release, did you mean to run ./setup.py publish_preview?')
         if 'PUBLISH_BUILD_DONE' not in os.environ:
             subprocess.check_call([sys.executable, 'setup.py', 'check'])
             subprocess.check_call([sys.executable, 'setup.py', 'build'])
@@ -124,13 +132,13 @@ class PublishBetas(Command):
 
     def pre_sub_commands(self, opts):
         require_clean_git()
+        require_hsm_for_signing()
         # require_git_master()
 
     def run(self, opts):
         dist = self.a(self.j(self.d(self.SRC), 'dist'))
         subprocess.check_call((
-            'rsync --partial -rh --info=progress2 --delete-after %s/ download.calibre-ebook.com:/srv/download/betas/'
-            % dist
+            f'rsync --partial -rh --info=progress2 --delete-after {dist}/ download.calibre-ebook.com:/srv/download/betas/'
         ).split())
 
 
@@ -139,11 +147,12 @@ class PublishPreview(Command):
     sub_commands = ['stage1', 'stage2', 'sdist']
 
     def pre_sub_commands(self, opts):
-        version = tuple(map(int, __version__.split('.')))
+        version = tuple(map(int, __version__.split('.')))  # noqa: RUF048
         if version[2] < 100:
             raise SystemExit('Must set calibre version to have patch level greater than 100')
         require_clean_git()
         require_git_master()
+        require_hsm_for_signing()
 
     def run(self, opts):
         dist = self.a(self.j(self.d(self.SRC), 'dist'))
@@ -180,7 +189,7 @@ class Manual(Command):
         )
 
     def run(self, opts):
-        tdir = self.j(tempfile.gettempdir(), 'user-manual-build')
+        tdir = manual_build_dir()
         if os.path.exists(tdir):
             shutil.rmtree(tdir)
         os.mkdir(tdir)
@@ -203,8 +212,8 @@ class Manual(Command):
             jobs.append(create_job([
                 sys.executable, self.j(self.d(self.SRC), 'manual', 'build.py'),
                 language, self.j(tdir, language)
-            ], '\n\n**************** Building translations for: %s' % language))
-        self.info('Building manual for %d languages' % len(jobs))
+            ], f'\n\n**************** Building translations for: {language}'))
+        self.info(f'Building manual for {len(jobs)} languages')
         subprocess.check_call(jobs[0].cmd)
         if not parallel_build(jobs[1:], self.info):
             raise SystemExit(1)
@@ -223,8 +232,8 @@ class Manual(Command):
                 if x and not os.path.exists(x):
                     os.symlink('.', x)
             self.info(
-                'Built manual for %d languages in %s minutes' %
-                (len(jobs), int((time.time() - st) / 60.))
+                f'Built manual for {len(jobs)} languages in {int((time.time() - st) / 60.)} minutes'
+
             )
         finally:
             os.chdir(cwd)
@@ -234,16 +243,16 @@ class Manual(Command):
 
     def serve_manual(self, root):
         os.chdir(root)
-        from polyglot.http_server import HTTPServer, SimpleHTTPRequestHandler
+        from http.server import HTTPServer, SimpleHTTPRequestHandler
         HandlerClass = SimpleHTTPRequestHandler
         ServerClass = HTTPServer
-        Protocol = "HTTP/1.0"
+        Protocol = 'HTTP/1.0'
         server_address = ('127.0.0.1', 8000)
 
         HandlerClass.protocol_version = Protocol
         httpd = ServerClass(server_address, HandlerClass)
 
-        print("Serving User Manual on localhost:8000")
+        print('Serving User Manual on localhost:8000')
         from calibre.gui2 import open_url
         open_url('http://localhost:8000')
         httpd.serve_forever()
@@ -289,6 +298,7 @@ class ManPages(Command):
         base = self.j(self.d(self.SRC), 'manual')
         languages = set(available_translations())
         languages.discard('ta')  # Tamil translatins are completely borked break sphinx
+        languages.discard('id')  # Indonesian man page fails to build
         languages = ['en'] + list(languages - {'en', 'en_GB'})
         os.environ['ALL_USER_MANUAL_LANGUAGES'] = ' '.join(languages)
         try:
@@ -299,7 +309,7 @@ class ManPages(Command):
         for l in languages:
             jobs.append(create_job(
                 [sys.executable, self.j(base, 'build.py'), '--man-pages', l, dest],
-                '\n\n**************** Building translations for: %s' % l)
+                f'\n\n**************** Building translations for: {l}')
             )
         self.info(f'\tCreating man pages in {dest} for {len(jobs)} languages...')
         subprocess.check_call(jobs[0].cmd)
@@ -338,6 +348,6 @@ class TagRelease(Command):
     def run(self, opts):
         self.info('Tagging release')
         subprocess.check_call(
-            'git tag -s v{0} -m "version-{0}"'.format(__version__).split()
+            f'git tag -s v{__version__} -m "version-{__version__}"'.split()
         )
         subprocess.check_call(f'git push origin v{__version__}'.split())

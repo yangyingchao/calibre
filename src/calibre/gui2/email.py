@@ -28,7 +28,6 @@ from calibre.utils.resources import get_image_path as I
 from calibre.utils.smtp import compose_mail, extract_email_address, sendmail
 from calibre.utils.smtp import config as email_config
 from polyglot.binary import from_hex_unicode
-from polyglot.builtins import iteritems, itervalues
 
 
 class Worker(Thread):
@@ -76,8 +75,7 @@ class Sendmail:
         try_count = 0
         while True:
             if try_count > 0:
-                log('\nRetrying in %d seconds...\n' %
-                        self.rate_limit)
+                log(f'\nRetrying in {self.rate_limit} seconds...\n')
             worker = Worker(self.sendmail,
                     (attachment, aname, to, subject, text, log))
             worker.start()
@@ -90,8 +88,7 @@ class Sendmail:
                 if time.time() - start_time > self.TIMEOUT:
                     log('Sending timed out')
                     raise Exception(
-                            'Sending email %r to %r timed out, aborting'% (subject,
-                                to))
+                            f'Sending email {subject!r} to {to!r} timed out, aborting')
             if worker.exception is None:
                 log('Email successfully sent')
                 return
@@ -105,7 +102,7 @@ class Sendmail:
         logged = False
         while time.time() - self.last_send_time <= self.rate_limit:
             if not logged and self.rate_limit > 0:
-                log('Waiting %s seconds before sending, to avoid being marked as spam.\nYou can control this delay via Preferences->Tweaks' % self.rate_limit)
+                log(f'Waiting {self.rate_limit} seconds before sending, to avoid being marked as spam.\nYou can control this delay via Preferences->Tweaks')
                 logged = True
             time.sleep(1)
         try:
@@ -155,26 +152,26 @@ def send_mails(jobnames, callback, attachments, to_s, subjects,
             attachments, to_s, subjects, texts, attachment_names):
         description = _('Email %(name)s to %(to)s') % dict(name=name, to=to)
         if isinstance(to, str) and (is_for_kindle(to) or '@pbsync.com' in to):
-            # The PocketBook service is a total joke. It cant handle
+            # The PocketBook service is a total joke. It can't handle
             # non-ascii, filenames that are long enough to be split up, commas, and
             # the good lord alone knows what else. So use a random filename
             # containing only 22 English letters and numbers
             #
             # And since this email is only going to be processed by automated
             # services, make the subject+text random too as at least the amazon
-            # service cant handle non-ascii text. I dont know what baboons
+            # service can't handle non-ascii text. I don't know what baboons
             # these companies employ to write their code. It's the height of
             # irony that they are called "tech" companies.
             # https://bugs.launchpad.net/calibre/+bug/1989282
-            from calibre.utils.short_uuid import uuid4
-            if is_for_kindle(to):
+            if not is_for_kindle(to):
+                from calibre.utils.short_uuid import uuid4
+                # Amazon nowadays reads metadata from attachment filename instead of
+                # file internal metadata so don't nuke the filename.
                 # https://www.mobileread.com/forums/showthread.php?t=349290
-                from calibre.utils.filenames import ascii_filename
-                aname = ascii_filename(aname)
-            else:
                 aname = f'{uuid4()}.' + aname.rpartition('.')[-1]
-            subject = uuid4()
-            text = uuid4()
+            from calibre.utils.random_ua import random_english_text
+            subject = random_english_text(min_words_per_sentence=3, max_words_per_sentence=9, max_num_sentences=1).rstrip('.')
+            text = random_english_text()
         job = ThreadedJob('email', description, gui_sendmail, (attachment, aname, to,
                 subject, text), {}, callback)
         job_manager.run_threaded_job(job)
@@ -355,7 +352,7 @@ class EmailMixin:  # {{{
 
         for to, fmts, subject in recipients:
             rfmts = set(fmts)
-            ok_ids = {book_id for book_id, bfmts in iteritems(db_fmt_map) if bfmts.intersection(rfmts)}
+            ok_ids = {book_id for book_id, bfmts in db_fmt_map.items() if bfmts.intersection(rfmts)}
             convert_ids = ids - ok_ids
             self.send_by_mail(to, fmts, delete_from_library, subject=subject, send_ids=ok_ids, do_auto_convert=False)
             if not rfmts.intersection(ofmts):
@@ -370,20 +367,20 @@ class EmailMixin:  # {{{
                 auto_convert_map[outfmt].append((to, subject, ok_ids))
 
         if auto_convert_map:
-            titles = {book_id for x in itervalues(auto_convert_map) for data in x for book_id in data[2]}
+            titles = {book_id for x in auto_convert_map.values() for data in x for book_id in data[2]}
             titles = {db.title(book_id, index_is_id=True) for book_id in titles}
             if self.auto_convert_question(
                 _('Auto convert the following books before sending via email?'), list(titles)):
-                for ofmt, data in iteritems(auto_convert_map):
+                for ofmt, data in auto_convert_map.items():
                     ids = {bid for x in data for bid in x[2]}
                     data = [(to, subject) for to, subject, x in data]
                     self.iactions['Convert Books'].auto_convert_multiple_mail(ids, data, ofmt, delete_from_library)
 
         if bad_recipients:
             det_msg = []
-            titles = {book_id for x in itervalues(bad_recipients) for book_id in x[0]}
+            titles = {book_id for x in bad_recipients.values() for book_id in x[0]}
             titles = {book_id:db.title(book_id, index_is_id=True) for book_id in titles}
-            for to, (ids, nooutput) in iteritems(bad_recipients):
+            for to, (ids, nooutput) in bad_recipients.items():
                 msg = _('This recipient has no valid formats defined') if nooutput else \
                         _('These books have no suitable input formats for conversion')
                 det_msg.append(f'{to} - {msg}')
@@ -471,11 +468,10 @@ class EmailMixin:  # {{{
                         auto.append(id)
                     else:
                         bad.append(self.library_view.model().db.title(id, index_is_id=True))
+                elif specific_format in list(set(fmts).intersection(set(available_output_formats()))):
+                    auto.append(id)
                 else:
-                    if specific_format in list(set(fmts).intersection(set(available_output_formats()))):
-                        auto.append(id)
-                    else:
-                        bad.append(self.library_view.model().db.title(id, index_is_id=True))
+                    bad.append(self.library_view.model().db.title(id, index_is_id=True))
 
         if auto != []:
             format = specific_format if specific_format in list(set(fmts).intersection(set(available_output_formats()))) else None
@@ -494,7 +490,7 @@ class EmailMixin:  # {{{
                     self.iactions['Convert Books'].auto_convert_mail(to, fmts, delete_from_library, auto, format, subject)
 
         if bad:
-            bad = '\n'.join('%s'%(i,) for i in bad)
+            bad = '\n'.join(f'{i}' for i in bad)
             d = warning_dialog(self, _('No suitable formats'),
                 _('Could not email the following books '
                 'as no suitable formats were found:'), bad)
@@ -513,7 +509,7 @@ class EmailMixin:  # {{{
                 self.library_view.model().delete_books_by_id(remove)
                 self.iactions['Remove Books'].library_ids_deleted2(remove,
                                                             next_id=next_id)
-            except:
+            except Exception:
                 import traceback
 
                 # Probably the user deleted the files, in any case, failing
@@ -537,12 +533,12 @@ class EmailMixin:  # {{{
                 get_fmts, self.email_sent, self.job_manager)
         if sent_mails:
             self.status_bar.show_message(_('Sent news to')+' '+
-                    ', '.join(sent_mails),  3000)
+                    ', '.join(sent_mails), 3000)
 
 # }}}
 
 
 if __name__ == '__main__':
     from qt.core import QApplication
-    app = QApplication([])  # noqa
+    app = QApplication([])  # noqa: F841
     print(select_recipients())

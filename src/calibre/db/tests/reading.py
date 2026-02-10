@@ -13,7 +13,6 @@ from time import time
 from calibre.db.tests.base import BaseTest
 from calibre.utils.date import utc_tz
 from calibre.utils.localization import calibre_langcode_to_name
-from polyglot.builtins import iteritems, itervalues
 
 
 def p(x):
@@ -26,12 +25,12 @@ class ReadingTest(BaseTest):
         'Test the reading of data from the database'
         cache = self.init_cache(self.library_path)
         tests = {
-                3  : {
+                3: {
                     'title': 'Unknown',
                     'sort': 'Unknown',
                     'authors': ('Unknown',),
                     'author_sort': 'Unknown',
-                    'series' : None,
+                    'series': None,
                     'series_index': 1.0,
                     'rating': None,
                     'tags': (),
@@ -58,12 +57,12 @@ class ReadingTest(BaseTest):
                     'size':None,
                 },
 
-                2 : {
+                2: {
                     'title': 'Title One',
                     'sort': 'One',
                     'authors': ('Author One',),
                     'author_sort': 'One, Author',
-                    'series' : 'A Series One',
+                    'series': 'A Series One',
                     'series_index': 1.0,
                     'tags':('Tag One', 'Tag Two'),
                     'formats': ('FMT1',),
@@ -88,12 +87,12 @@ class ReadingTest(BaseTest):
                     '#comments': '<div>My Comments One<p></p></div>',
                     'size':9,
                 },
-                1  : {
+                1: {
                     'title': 'Title Two',
                     'sort': 'Title Two',
                     'authors': ('Author Two', 'Author One'),
                     'author_sort': 'Two, Author & One, Author',
-                    'series' : 'A Series One',
+                    'series': 'A Series One',
                     'series_index': 2.0,
                     'rating': 6.0,
                     'tags': ('Tag One', 'News'),
@@ -120,14 +119,13 @@ class ReadingTest(BaseTest):
 
                 },
         }
-        for book_id, test in iteritems(tests):
-            for field, expected_val in iteritems(test):
+        for book_id, test in tests.items():
+            for field, expected_val in test.items():
                 val = cache.field_for(field, book_id)
                 if isinstance(val, tuple) and 'authors' not in field and 'languages' not in field:
                     val, expected_val = set(val), set(expected_val)
                 self.assertEqual(expected_val, val,
-                        'Book id: %d Field: %s failed: %r != %r'%(
-                            book_id, field, expected_val, val))
+                        f'Book id: {book_id} Field: {field} failed: {expected_val!r} != {val!r}')
         # }}}
 
     def test_sorting(self):  # {{{
@@ -137,7 +135,7 @@ class ReadingTest(BaseTest):
 
         lmap = {x:cache.field_for('languages', x) for x in (1, 2, 3)}
         lq = sorted(lmap, key=lambda x: calibre_langcode_to_name((lmap[x] or ('',))[0]))
-        for field, order in iteritems({
+        for field, order in {
             'title'  : [2, 1, 3],
             'authors': [2, 1, 3],
             'series' : [3, 1, 2],
@@ -161,14 +159,14 @@ class ReadingTest(BaseTest):
             '#yesno':[2, 1, 3],
             '#comments':[3, 2, 1],
             'id': [1, 2, 3],
-        }):
+        }.items():
             x = list(reversed(order))
             ae(order, cache.multisort([(field, True)],
                 ids_to_sort=x),
-                    'Ascending sort of %s failed'%field)
+                    f'Ascending sort of {field} failed')
             ae(x, cache.multisort([(field, False)],
                 ids_to_sort=order),
-                    'Descending sort of %s failed'%field)
+                    f'Descending sort of {field} failed')
 
         # Test sorting of is_multiple fields.
 
@@ -206,7 +204,7 @@ class ReadingTest(BaseTest):
             ('title', True)]), 'Subsort failed')
         from calibre.ebooks.metadata.book.base import Metadata
         for i in range(7):
-            cache.create_book_entry(Metadata('title%d' % i), apply_import_tags=False)
+            cache.create_book_entry(Metadata(f'title{i}'), apply_import_tags=False)
         cache.create_custom_column('one', 'CC1', 'int', False)
         cache.create_custom_column('two', 'CC2', 'int', False)
         cache.create_custom_column('three', 'CC3', 'int', False)
@@ -217,7 +215,7 @@ class ReadingTest(BaseTest):
         cache.set_field('#two', {10:2})
         cache.set_field('#three', {i:i for i in range(1, 11)})
         ae(list(range(1, 11)), cache.multisort([('#one', True), ('#two', True)], ids_to_sort=sorted(cache.all_book_ids())))
-        ae([4, 5, 1, 2, 3, 7,8, 9, 10, 6], cache.multisort([('#one', True), ('#two', False)], ids_to_sort=sorted(cache.all_book_ids())))
+        ae([4, 5, 1, 2, 3, 7, 8, 9, 10, 6], cache.multisort([('#one', True), ('#two', False)], ids_to_sort=sorted(cache.all_book_ids())))
         ae([5, 4, 3, 2, 1, 10, 9, 8, 7, 6], cache.multisort([('#one', True), ('#two', False), ('#three', False)], ids_to_sort=sorted(cache.all_book_ids())))
     # }}}
 
@@ -228,7 +226,7 @@ class ReadingTest(BaseTest):
         old_metadata = {i:old.get_metadata(
             i, index_is_id=True, get_cover=True, cover_as_data=True) for i in
                 range(1, 4)}
-        for mi in itervalues(old_metadata):
+        for mi in old_metadata.values():
             mi.format_metadata = dict(mi.format_metadata)
             if mi.formats:
                 mi.formats = tuple(mi.formats)
@@ -241,7 +239,7 @@ class ReadingTest(BaseTest):
             i, get_cover=True, cover_as_data=True) for i in range(1, 4)}
         cache = None
         for mi2, mi1 in zip(list(new_metadata.values()), list(old_metadata.values())):
-            self.compare_metadata(mi1, mi2)
+            self.compare_metadata(mi1, mi2, exclude=('pages',))
     # }}}
 
     def test_serialize_metadata(self):  # {{{
@@ -255,9 +253,9 @@ class ReadingTest(BaseTest):
         for i in range(1, 4):
             mi = cache.get_metadata(i, get_cover=True, cover_as_data=True)
             rmi = msgpack_loads(msgpack_dumps(mi))
-            self.compare_metadata(mi, rmi, exclude='format_metadata has_cover formats id'.split())
+            self.compare_metadata(mi, rmi, exclude='format_metadata has_cover formats id pages'.split())
             rmi = json_loads(json_dumps(mi))
-            self.compare_metadata(mi, rmi, exclude='format_metadata has_cover formats id'.split())
+            self.compare_metadata(mi, rmi, exclude='format_metadata has_cover formats id pages'.split())
     # }}}
 
     def test_get_cover(self):  # {{{
@@ -268,7 +266,7 @@ class ReadingTest(BaseTest):
         old.conn.close()
         old = None
         cache = self.init_cache(self.library_path)
-        for book_id, cdata in iteritems(covers):
+        for book_id, cdata in covers.items():
             self.assertEqual(cdata, cache.cover(book_id), 'Reading of cover failed')
             f = cache.cover(book_id, as_file=True)
             try:
@@ -334,11 +332,10 @@ class ReadingTest(BaseTest):
         old = None
 
         cache = self.init_cache(self.cloned_library)
-        for query, ans in iteritems(oldvals):
+        for query, ans in oldvals.items():
             nr = cache.search(query, '')
             self.assertEqual(ans, nr,
-                'Old result: %r != New result: %r for search: %s'%(
-                    ans, nr, query))
+                f'Old result: {ans!r} != New result: {nr!r} for search: {query}')
 
         # Test searching by id, which was introduced in the new backend
         self.assertEqual(cache.search('id:1', ''), {1})
@@ -371,8 +368,8 @@ class ReadingTest(BaseTest):
         cache.set_field('timestamp', {1:p('2002-02-06'), 2:p('2000-10-06'), 3:p('2001-06-06')})
         # Test numeric compare search
         self.assertEqual(cache.search("template:\"program: "
-                                      "floor(days_between(field(\'pubdate\'), "
-                                      "field(\'timestamp\')))#@#:n:>0\""), {2,3})
+                                      "floor(days_between(field('pubdate'), "
+                                      "field('timestamp')))#@#:n:>0\""), {2,3})
         # Test date search
         self.assertEqual(cache.search('template:{pubdate}#@#:d:<2001-09-01"'), {1,3})
         # Test boolean search
@@ -380,7 +377,7 @@ class ReadingTest(BaseTest):
         self.assertEqual(cache.search('template:{series}#@#:b:false'), {3})
 
         # test primary search
-        cache.set_field('title', {1: "Gravity’s Raiñbow"})
+        cache.set_field('title', {1: 'Gravity’s Raiñbow'})
         self.assertEqual(cache.search('title:"Gravity\'s Rainbow"'), {1})
         # Note that the old db searched uuid for un-prefixed searches, the new
         # db does not, for performance
@@ -414,13 +411,12 @@ class ReadingTest(BaseTest):
                 ):
                     continue
                 self.assertEqual(oval, nval,
-                    'The attribute %s for %s in category %s does not match. Old is %r, New is %r'
-                                %(attr, old.name, category, oval, nval))
+                    f'The attribute {attr} for {old.name} in category {category} does not match. Old is {oval!r}, New is {nval!r}')
 
         for category in old_categories:
             old, new = old_categories[category], new_categories[category]
             self.assertEqual(len(old), len(new),
-                'The number of items in the category %s is not the same'%category)
+                f'The number of items in the category {category} is not the same')
             for o, n in zip(old, new):
                 compare_category(category, o, n)
 
@@ -435,11 +431,11 @@ class ReadingTest(BaseTest):
         lf = {i:set(old.formats(i, index_is_id=True).split(',')) if old.formats(
             i, index_is_id=True) else set() for i in ids}
         formats = {i:{f:old.format(i, f, index_is_id=True) for f in fmts} for
-                   i, fmts in iteritems(lf)}
+                   i, fmts in lf.items()}
         old.conn.close()
         old = None
         cache = self.init_cache(self.library_path)
-        for book_id, fmts in iteritems(lf):
+        for book_id, fmts in lf.items():
             self.assertEqual(fmts, set(cache.formats(book_id)),
                              'Set of formats is not the same')
             for fmt in fmts:
@@ -469,13 +465,27 @@ class ReadingTest(BaseTest):
 
     # }}}
 
+    def test_by_year(self):
+        ' Test grouping of books by date fields '
+        cache = self.init_cache()
+        self.assertEqual(cache.books_by_year(), {2011: {1, 2, 3}})
+        self.assertEqual(cache.books_by_year(restrict_to_books={1,2}), {2011: {1, 2}})
+        self.assertEqual(cache.books_by_month(), {(2011, 8): {1}, (2011, 9): {2, 3}})
+        self.assertEqual(cache.books_by_month(restrict_to_books={1,2}), {(2011, 8): {1}, (2011, 9): {2}})
+        self.assertEqual(cache.books_by_year(restrict_to_books=range(cache.backend.max_number_of_variables+200)), {2011: {1, 2, 3}})
+        cache.set_field('#date', {3:datetime.datetime(2001, 11, 10).astimezone(utc_tz)})
+        self.assertEqual(cache.books_by_year('#date'), {2011: {1, 2}, 2001:{3}})
+        self.assertEqual(cache.books_by_year('#date', restrict_to_books={1}), {2011: {1}})
+        self.assertEqual(cache.books_by_month('#date'), {(2011, 9): {1, 2}, (2001, 11): {3}})
+        self.assertEqual(cache.books_by_month('#date', restrict_to_books={1,3}), {(2011, 9): {1}, (2001, 11): {3}})
+
     def test_author_sort_for_authors(self):  # {{{
         'Test getting the author sort for authors from the db'
         cache = self.init_cache()
         table = cache.fields['authors'].table
         table.set_sort_names({next(iter(table.id_map)): 'Fake Sort'}, cache.backend)
 
-        authors = tuple(itervalues(table.id_map))
+        authors = tuple(table.id_map.values())
         nval = cache.author_sort_from_authors(authors)
         self.assertIn('Fake Sort', nval)
 
@@ -492,7 +502,7 @@ class ReadingTest(BaseTest):
         cache.set_field('series', {3:'test series'})
         cache.set_field('series_index', {3:13})
         table = cache.fields['series'].table
-        series = tuple(itervalues(table.id_map))
+        series = tuple(table.id_map.values())
         nvals = {s:cache.get_next_series_num_for(s) for s in series}
         db = self.init_old()
         self.assertEqual({s:db.get_next_series_num_for(s) for s in series}, nvals)
@@ -505,7 +515,7 @@ class ReadingTest(BaseTest):
         from calibre.ebooks.metadata.book.base import Metadata
         cache = self.init_cache()
         db = self.init_old()
-        for title in itervalues(cache.fields['title'].table.book_col_map):
+        for title in cache.fields['title'].table.book_col_map.values():
             for x in (db, cache):
                 self.assertTrue(x.has_book(Metadata(title)))
                 self.assertTrue(x.has_book(Metadata(title.upper())))
@@ -595,7 +605,7 @@ class ReadingTest(BaseTest):
         test(True, {3}, 'Unknown')
         c.limit = 5
         for i in range(6):
-            test(False, set(), 'nomatch_%s' % i)
+            test(False, set(), f'nomatch_{i}')
         test(False, {3}, 'Unknown')  # cached search expired
         test(False, {3}, '', 'unknown', num=1)
         test(True, {3}, '', 'unknown', num=1)
@@ -631,14 +641,14 @@ class ReadingTest(BaseTest):
                 def f(x):
                     try:
                         x.pop('rec_index', None)
-                    except:
+                    except Exception:
                         pass
                     return x
                 if field not in {'#series_index'}:
                     v = pmi.get_standard_metadata(field)
                     self.assertTrue(v is None or isinstance(v, dict))
                     self.assertEqual(f(mi.get_standard_metadata(field, False)), f(v),
-                                     'get_standard_metadata() failed for field %s' % field)
+                                     f'get_standard_metadata() failed for field {field}')
             for field, meta in cache.field_metadata.custom_iteritems():
                 if meta['datatype'] != 'composite':
                     self.assertEqual(f(getattr(mi, field)), f(getattr(pmi, field)),
@@ -711,7 +721,6 @@ class ReadingTest(BaseTest):
         self.assertRaises(NotImplementedError, pmi.remove_stale_user_metadata, {})
         self.assertRaises(NotImplementedError, pmi.template_to_attribute, {}, {})
         self.assertRaises(NotImplementedError, pmi.smart_update, {})
-
 
     # }}}
 
@@ -812,7 +821,7 @@ class ReadingTest(BaseTest):
         cache = self.init_cache(self.library_path)
         opts = {1: b'binary', 2: 'unicode'}
         cache.set_conversion_options(opts, 'PIPE')
-        for book_id, val in iteritems(opts):
+        for book_id, val in opts.items():
             got = cache.conversion_options(book_id, 'PIPE')
             if not isinstance(val, bytes):
                 val = val.encode('utf-8')
@@ -945,7 +954,7 @@ def evaluate(book, ctx):
         from calibre.utils.formatter_functions import load_user_template_functions, unload_user_template_functions
         load_user_template_functions('aaaaa',
                                      [['python_stored_template',
-                                      "",
+                                      '',
                                       0,
                                       '''python:
 def evaluate(book, ctx):
@@ -959,3 +968,7 @@ def evaluate(book, ctx):
         unload_user_template_functions('aaaaa')
         self.assertEqual(set(v.split(',')), {'Tag One', 'News', 'Tag Two', 'one argument'})
     # }}}
+
+    def test_cover_cache(self):
+        from calibre.gui2.library.caches import test_cover_cache
+        test_cover_cache(self)

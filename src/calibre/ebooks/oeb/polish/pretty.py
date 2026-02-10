@@ -12,7 +12,6 @@ from calibre.ebooks.oeb.base import OEB_DOCS, OEB_STYLES, SVG, XHTML, XPNSMAP, b
 from calibre.ebooks.oeb.polish.container import OPF_NAMESPACES
 from calibre.ebooks.oeb.polish.utils import guess_type
 from calibre.utils.icu import sort_key
-from polyglot.builtins import iteritems
 
 
 def isspace(x):
@@ -42,7 +41,7 @@ def pretty_opf(root):
     def dckey(x):
         return {'title':0, 'creator':1}.get(barename(x.tag), 2)
     for metadata in root.xpath('//opf:metadata', namespaces=OPF_NAMESPACES):
-        dc_tags = metadata.xpath('./*[namespace-uri()="%s"]' % OPF_NAMESPACES['dc'])
+        dc_tags = metadata.xpath('./*[namespace-uri()="{}"]'.format(OPF_NAMESPACES['dc']))
         dc_tags.sort(key=dckey)
         for x in reversed(dc_tags):
             metadata.insert(0, x)
@@ -75,24 +74,26 @@ def pretty_opf(root):
             i = spine_ids.get(x.get('id', None), 1000000000)
         else:
             i = sort_key(href)
-        return (cat, i)
+        return cat, i
 
     for manifest in root.xpath('//opf:manifest', namespaces=OPF_NAMESPACES):
         try:
             children = sorted(manifest, key=manifest_key)
         except AttributeError:
-            continue  # There are comments so dont sort since that would mess up the comments
+            continue  # There are comments so don't sort since that would mess up the comments
         for x in reversed(children):
             manifest.insert(0, x)
 
 
 SVG_TAG = SVG('svg')
-BLOCK_TAGS = frozenset(map(XHTML, (
+NON_NAMESPACED_BLOCK_TAGS = (
     'address', 'article', 'aside', 'audio', 'blockquote', 'body', 'canvas', 'col', 'colgroup', 'dd',
     'div', 'dl', 'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'form',
-    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hgroup', 'hr', 'li',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hgroup', 'hr', 'li', 'svg',
     'noscript', 'ol', 'output', 'p', 'pre', 'script', 'section', 'style', 'table', 'tbody', 'td',
-    'tfoot', 'th', 'thead', 'tr', 'ul', 'video', 'img'))) | {SVG_TAG}
+    'tfoot', 'th', 'thead', 'tr', 'ul', 'video', 'img'
+)
+BLOCK_TAGS = frozenset(map(XHTML, NON_NAMESPACED_BLOCK_TAGS))
 
 
 def isblock(x):
@@ -220,7 +221,7 @@ def pretty_xml(container, name, raw):
 
 def fix_all_html(container):
     ' Fix any parsing errors in all HTML files in the container. Fixing is done using the HTML5 parsing algorithm. '
-    for name, mt in iteritems(container.mime_map):
+    for name, mt in container.mime_map.items():
         if mt in OEB_DOCS:
             container.parsed(name)
             container.dirty(name)
@@ -229,7 +230,7 @@ def fix_all_html(container):
 def pretty_all(container):
     ' Pretty print all HTML/CSS/XML files in the container '
     xml_types = {guess_type('a.ncx'), guess_type('a.xml'), guess_type('a.svg')}
-    for name, mt in iteritems(container.mime_map):
+    for name, mt in container.mime_map.items():
         prettied = False
         if mt in OEB_DOCS:
             pretty_html_tree(container, container.parsed(name))

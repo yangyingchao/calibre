@@ -13,6 +13,7 @@ import traceback
 import weakref
 from collections import OrderedDict
 from io import BytesIO
+from queue import Empty
 from threading import Thread
 
 from qt.core import QObject, Qt, pyqtSignal
@@ -35,12 +36,10 @@ from calibre.utils.filenames import make_long_path_useable
 from calibre.utils.icu import lower as icu_lower
 from calibre.utils.ipc.pool import Failure, Pool
 from calibre.utils.localization import ngettext
-from polyglot.builtins import iteritems, string_or_bytes
-from polyglot.queue import Empty
 
 
 def validate_source(source, parent=None):  # {{{
-    if isinstance(source, string_or_bytes):
+    if isinstance(source, (str, bytes)):
         if not os.path.exists(source):
             error_dialog(parent, _('Cannot add books'), _(
                 'The path %s does not exist') % source, show=True)
@@ -65,11 +64,7 @@ def validate_source(source, parent=None):  # {{{
 
 
 def resolve_windows_links(paths, hwnd=None):
-    try:
-        from calibre_extensions.winutil import resolve_lnk
-    except ImportError:
-        def resolve_lnk(x, *a):
-            return x
+    from calibre_extensions.winutil import resolve_lnk
     for x in paths:
         if x.lower().endswith('.lnk'):
             try:
@@ -146,7 +141,7 @@ class Adder(QObject):
         if not self.items:
             shutil.rmtree(self.tdir, ignore_errors=True)
         self.setParent(None)
-        self.find_identical_books_data = self.merged_books = self.added_duplicate_info = self.pool = self.items = self.duplicates = self.pd = self.db = self.dbref = self.tdir = self.file_groups = self.scan_thread = None  # noqa
+        self.find_identical_books_data = self.merged_books = self.added_duplicate_info = self.pool = self.items = self.duplicates = self.pd = self.db = self.dbref = self.tdir = self.file_groups = self.scan_thread = None  # noqa: E501
         self.deleteLater()
 
     def tick(self):
@@ -214,7 +209,7 @@ class Adder(QObject):
             return tdir
 
         try:
-            if isinstance(self.source, string_or_bytes):
+            if isinstance(self.source, (str, bytes)):
                 find_files(self.source)
                 self.ignore_opf = True
             else:
@@ -244,7 +239,7 @@ class Adder(QObject):
                     else:
                         a = self.report.append
                         for f in unreadable_files:
-                            a(_('Could not add %s as you do not have permission to read the file' % f))
+                            a(_('Could not add {} as you do not have permission to read the file').format(f))
                             a('')
         except Exception:
             self.scan_error = traceback.format_exc()
@@ -395,7 +390,7 @@ class Adder(QObject):
 
         self.pd.msg = mi.title
 
-        cover_path = os.path.join(self.tdir, '%s.cdata' % group_id) if has_cover else None
+        cover_path = os.path.join(self.tdir, f'{group_id}.cdata') if has_cover else None
 
         if self.db is None:
             if paths:
@@ -415,11 +410,10 @@ class Adder(QObject):
                     a(_('With error:')), a(traceback.format_exc())
             else:
                 self.add_book(mi, cover_path, paths)
+        elif duplicate_info or icu_lower(mi.title or _('Unknown')) in self.added_duplicate_info:
+            self.duplicates.append((mi, cover_path, paths))
         else:
-            if duplicate_info or icu_lower(mi.title or _('Unknown')) in self.added_duplicate_info:
-                self.duplicates.append((mi, cover_path, paths))
-            else:
-                self.add_book(mi, cover_path, paths)
+            self.add_book(mi, cover_path, paths)
 
     def merge_books(self, mi, cover_path, paths, identical_book_ids):
         self.merged_books.add((mi.title, ' & '.join(mi.authors)))
@@ -478,12 +472,12 @@ class Adder(QObject):
             # detection/automerge will fail for this book.
             traceback.print_exc()
         if DEBUG:
-            prints('Added', mi.title, 'to db in: %.1f' % (time.time() - st))
+            prints('Added', mi.title, f'to db in: {time.time()-st:.1f}')
 
     def add_formats(self, book_id, paths, mi, replace=True, is_an_add=False):
         fmap = {p.rpartition(os.path.extsep)[-1].lower():p for p in paths}
         fmt_map = {}
-        for fmt, path in iteritems(fmap):
+        for fmt, path in fmap.items():
             # The onimport plugins have already been run by the read metadata
             # worker
             if self.ignore_opf and fmt.lower() == 'opf':

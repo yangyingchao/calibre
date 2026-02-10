@@ -13,13 +13,14 @@ import time
 from calibre import __appname__, fsync, prints
 from calibre.devices.prs505 import CACHE_EXT, CACHE_THUMBNAIL, CACHE_XML, MEDIA_EXT, MEDIA_THUMBNAIL, MEDIA_XML
 from calibre.devices.usbms.books import CollectionsBookList
-from calibre.devices.usbms.driver import USBMS, debug_print
+from calibre.devices.usbms.driver import USBMS
+from calibre.prints import debug_print
 
 
 class PRS505(USBMS):
 
     name           = 'SONY Device Interface'
-    gui_name       = 'SONY Reader'
+    gui_name       = 'SONY PRS-500'
     description    = _('Communicate with Sony e-book readers older than the'
             ' PRST1.')
     author         = 'Kovid Goyal'
@@ -131,7 +132,7 @@ class PRS505(USBMS):
                     if not os.path.exists(dname):
                         try:
                             os.makedirs(dname, mode=0o777)
-                        except:
+                        except Exception:
                             time.sleep(5)
                             os.makedirs(dname, mode=0o777)
                     with open(cachep, 'wb') as f:
@@ -141,7 +142,7 @@ class PRS505(USBMS):
                             ''')
                         fsync(f)
                 return True
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
             return False
@@ -169,7 +170,7 @@ class PRS505(USBMS):
     def filename_callback(self, fname, mi):
         if getattr(mi, 'application_id', None) is not None:
             base = fname.rpartition('.')[0]
-            suffix = '_%s'%mi.application_id
+            suffix = f'_{mi.application_id}'
             if not base.endswith(suffix):
                 fname = base + suffix + '.' + fname.rpartition('.')[-1]
         return fname
@@ -182,7 +183,7 @@ class PRS505(USBMS):
                 ('card_a', CACHE_XML, CACHE_EXT, 1),
                 ('card_b', CACHE_XML, CACHE_EXT, 2)
                 ]:
-            prefix = getattr(self, '_%s_prefix'%prefix)
+            prefix = getattr(self, f'_{prefix}_prefix')
             if prefix is not None and os.path.exists(prefix):
                 paths[source_id] = os.path.join(prefix, *(path.split('/')))
                 ext_paths[source_id] = os.path.join(prefix, *(ext_path.split('/')))
@@ -236,7 +237,7 @@ class PRS505(USBMS):
                         self._upload_cover(os.path.dirname(p),
                                           os.path.splitext(os.path.basename(p))[0],
                                           book, p)
-                    except:
+                    except Exception:
                         debug_print('FAILED to upload cover',
                                 prefix, book.lpath)
         else:
@@ -265,7 +266,7 @@ class PRS505(USBMS):
         debug_print('PRS505: uploading cover')
         try:
             self._upload_cover(path, filename, metadata, filepath)
-        except:
+        except Exception:
             debug_print('FAILED to upload cover', filepath)
 
     def _upload_cover(self, path, filename, metadata, filepath):
@@ -276,25 +277,23 @@ class PRS505(USBMS):
             prefix = None
             if is_main:
                 prefix = self._main_prefix
-            else:
-                if self._card_a_prefix and \
-                    path.startswith(self._card_a_prefix):
-                    prefix = self._card_a_prefix
-                elif self._card_b_prefix and \
-                        path.startswith(self._card_b_prefix):
-                    prefix = self._card_b_prefix
+            elif self._card_a_prefix and \
+                path.startswith(self._card_a_prefix):
+                prefix = self._card_a_prefix
+            elif self._card_b_prefix and \
+                    path.startswith(self._card_b_prefix):
+                prefix = self._card_b_prefix
             if prefix is None:
                 prints('WARNING: Failed to find prefix for:', filepath)
                 return
             thumbnail_dir = os.path.join(prefix, *thumbnail_dir.split('/'))
 
             relpath = os.path.relpath(filepath, prefix)
-            if relpath.startswith('..\\'):
-                relpath = relpath[3:]
+            relpath = relpath.removeprefix('..\\')
             thumbnail_dir = os.path.join(thumbnail_dir, relpath)
             if not os.path.exists(thumbnail_dir):
                 os.makedirs(thumbnail_dir)
             cpath = os.path.join(thumbnail_dir, 'main_thumbnail.jpg')
             with open(cpath, 'wb') as f:
                 f.write(metadata.thumbnail[-1])
-            debug_print('Cover uploaded to: %r'%cpath)
+            debug_print(f'Cover uploaded to: {cpath!r}')

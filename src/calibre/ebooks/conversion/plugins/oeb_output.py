@@ -36,12 +36,12 @@ class OEBOutput(OutputFormatPlugin):
                     if key == OPF_MIME:
                         try:
                             self.workaround_nook_cover_bug(root)
-                        except:
+                        except Exception:
                             self.log.exception('Something went wrong while trying to'
                                     ' workaround Nook cover bug, ignoring')
                         try:
                             self.workaround_pocketbook_cover_bug(root)
-                        except:
+                        except Exception:
                             self.log.exception('Something went wrong while trying to'
                                     ' workaround Pocketbook cover bug, ignoring')
                         self.migrate_lang_code(root)
@@ -83,7 +83,7 @@ class OEBOutput(OutputFormatPlugin):
 
         def manifest_items_with_id(id_):
             return root.xpath('//*[local-name() = "manifest"]/*[local-name() = "item" '
-                ' and @id="%s"]'%id_)
+                f' and @id="{id_}"]')
 
         if len(cov) == 1:
             cov = cov[0]

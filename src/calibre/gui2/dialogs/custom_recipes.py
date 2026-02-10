@@ -45,7 +45,7 @@ from calibre.gui2.widgets2 import Dialog
 from calibre.utils.localization import localize_user_manual_link
 from calibre.web.feeds.recipes import compile_recipe, custom_recipes
 from calibre.web.feeds.recipes.collection import get_builtin_recipe_by_id
-from polyglot.builtins import as_bytes, as_unicode, iteritems
+from polyglot.builtins import as_bytes, as_unicode
 
 
 def is_basic_recipe(src):
@@ -99,7 +99,7 @@ class CustomRecipeModel(QAbstractListModel):  # {{{
 
     def replace_many_by_title(self, scriptmap):
         script_urn_map = {}
-        for title, script in iteritems(scriptmap):
+        for title, script in scriptmap.items():
             urn = None
             for x in self.recipe_model.custom_recipe_collection:
                 if x.get('title', False) == title:
@@ -136,7 +136,7 @@ class CustomRecipeModel(QAbstractListModel):  # {{{
             try:
                 urn = self.recipe_model.custom_recipe_collection[r].get('id')
                 urns.append(urn)
-            except:
+            except Exception:
                 pass
         self.beginResetModel()
         self.recipe_model.remove_custom_recipes(urns)
@@ -154,7 +154,7 @@ def py3_repr(x):
 
 
 def options_to_recipe_source(title, oldest_article, max_articles_per_feed, feeds):
-    classname = 'BasicUserRecipe%d' % int(time.time())
+    classname = f'BasicUserRecipe{int(time.time())}'
     title = str(title).strip() or classname
     indent = ' ' * 8
     if feeds:
@@ -165,7 +165,7 @@ def options_to_recipe_source(title, oldest_article, max_articles_per_feed, feeds
     else:
         feeds = ''
     if feeds:
-        feeds = 'feeds          = [\n%s\n    ]' % feeds
+        feeds = f'feeds          = [\n{feeds}\n    ]'
     src = textwrap.dedent('''\
     #!/usr/bin/env python
     # vim:fileencoding=utf-8
@@ -259,7 +259,7 @@ class RecipeList(QWidget):  # {{{
     def recipe_selected(self, cur, prev=None):
         if cur.isValid():
             self.stacks.setCurrentIndex(1)
-            self.title.setText('<h2 style="text-align:center">%s</h2>' % self.model.title(cur))
+            self.title.setText(f'<h2 style="text-align:center">{self.model.title(cur)}</h2>')
         else:
             self.stacks.setCurrentIndex(0)
 
@@ -342,17 +342,17 @@ class BasicRecipe(QWidget):  # {{{
 
         self.oldest_article = o = QSpinBox(self)
         o.setSuffix(' ' + _('day(s)'))
-        o.setToolTip(_("The oldest article to download"))
+        o.setToolTip(_('The oldest article to download'))
         o.setMinimum(1), o.setMaximum(36500)
         l.addRow(_('&Oldest article:'), o)
 
         self.max_articles = m = QSpinBox(self)
         m.setMinimum(5), m.setMaximum(100)
-        m.setToolTip(_("Maximum number of articles to download per feed."))
-        l.addRow(_("&Max. number of articles per feed:"), m)
+        m.setToolTip(_('Maximum number of articles to download per feed.'))
+        l.addRow(_('&Max. number of articles per feed:'), m)
 
         self.fg = fg = QGroupBox(self)
-        fg.setTitle(_("Feeds in recipe"))
+        fg.setTitle(_('Feeds in recipe'))
         self.feeds = f = QListWidget(self)
         fg.h = QHBoxLayout(fg)
         fg.h.addWidget(f)
@@ -435,7 +435,7 @@ class BasicRecipe(QWidget):  # {{{
             compile_recipe(self.recipe_source)
         except Exception as err:
             error_dialog(self, _('Invalid recipe'), _(
-                'Failed to compile the recipe, with syntax error: %s' % err), show=True)
+                'Failed to compile the recipe, with syntax error: {}').format(err), show=True)
             return False
         return True
 
@@ -488,7 +488,7 @@ class AdvancedRecipe(QWidget):  # {{{
             compile_recipe(src)
         except Exception as err:
             error_dialog(self, _('Invalid recipe'), _(
-                'Failed to compile the recipe, with syntax error: %s' % err), show=True)
+                'Failed to compile the recipe, with syntax error: {}').format(err), show=True)
             return False
         return True
 
@@ -519,7 +519,7 @@ class ChooseBuiltinRecipe(Dialog):  # {{{
 
     def __init__(self, recipe_model, parent=None):
         self.recipe_model = recipe_model
-        Dialog.__init__(self, _("Choose builtin recipe"), 'choose-builtin-recipe', parent=parent)
+        Dialog.__init__(self, _('Choose builtin recipe'), 'choose-builtin-recipe', parent=parent)
 
     def setup_ui(self):
         self.l = l = QVBoxLayout(self)
@@ -537,7 +537,7 @@ class ChooseBuiltinRecipe(Dialog):  # {{{
         self.recipe_model.searched.connect(self.search.search_done, type=Qt.ConnectionType.QueuedConnection)
         self.recipe_model.searched.connect(self.search_done)
         self.go_button = b = QToolButton(self)
-        b.setText(_("Go"))
+        b.setText(_('Go'))
         b.clicked.connect(self.search.do_search)
         h = QHBoxLayout()
         h.addWidget(s), h.addWidget(b)
@@ -572,7 +572,7 @@ class CustomRecipes(Dialog):
 
     def __init__(self, recipe_model, parent=None):
         self.recipe_model = recipe_model
-        Dialog.__init__(self, _("Add custom news source"), 'add-custom-news-source', parent=parent)
+        Dialog.__init__(self, _('Add custom news source'), 'add-custom-news-source', parent=parent)
 
     def setup_ui(self):
         self.l = l = QVBoxLayout(self)
@@ -598,9 +598,9 @@ class CustomRecipes(Dialog):
         la('document_open.png', _('Load recipe from &file'), _('Load a recipe from a file'), self.load_recipe)
         la('mimetypes/dir.png', _('&Show recipe files'), _('Show the folder containing all recipe files'), self.show_recipe_files)
         la('mimetypes/opml.png', _('Import &OPML'), _(
-            "Import a collection of RSS feeds in OPML format\n"
-            "Many RSS readers can export their subscribed RSS feeds\n"
-            "in OPML format"), self.import_opml)
+            'Import a collection of RSS feeds in OPML format\n'
+            'Many RSS readers can export their subscribed RSS feeds\n'
+            'in OPML format'), self.import_opml)
 
         s.currentChanged.connect(self.update_button_box)
         self.update_button_box()
@@ -725,7 +725,7 @@ class CustomRecipes(Dialog):
                 c = 0
                 while self.recipe_list.has_title(title):
                     c += 1
-                    title = '%s %d' % (base_title, c)
+                    title = f'{base_title} {c}'
             try:
                 src = options_to_recipe_source(title, oldest_article, max_articles_per_feed, group.feeds)
                 compile_recipe(src)
@@ -744,7 +744,7 @@ class CustomRecipes(Dialog):
         if replace_recipes:
             self.recipe_list.replace_many_by_title(replace_recipes)
         if failed_recipes:
-            det_msg = '\n'.join(f'{title}\n{tb}\n' for title, tb in iteritems(failed_recipes))
+            det_msg = '\n'.join(f'{title}\n{tb}\n' for title, tb in failed_recipes.items())
             error_dialog(self, _('Failed to create recipes'), _(
                 'Failed to create some recipes, click "Show details" for details'), show=True,
                          det_msg=det_msg)

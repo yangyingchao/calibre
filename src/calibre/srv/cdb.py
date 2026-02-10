@@ -17,10 +17,10 @@ from calibre.srv.metadata import book_as_json
 from calibre.srv.routes import endpoint, json, msgpack_or_json
 from calibre.srv.utils import get_db, get_library_data
 from calibre.utils.imghdr import what
+from calibre.utils.localization import canonicalize_lang, reverse_lang_map_for_ui
 from calibre.utils.serialize import MSGPACK_MIME, json_loads, msgpack_loads
 from calibre.utils.speedups import ReadOnlyFileBuffer
 from polyglot.binary import from_base64_bytes
-from polyglot.builtins import iteritems
 
 receive_data_methods = {'GET', 'POST'}
 
@@ -34,9 +34,9 @@ def cdb_run(ctx, rd, which, version):
     if not getattr(m, 'readonly', False):
         ctx.check_for_write_access(rd)
     if getattr(m, 'version', 0) != int(version):
-        raise HTTPNotFound(('The module {} is not available in version: {}.'
+        raise HTTPNotFound(f'The module {which} is not available in version: {version}.'
                            'Make sure the version of calibre used for the'
-                            ' server and calibredb match').format(which, version))
+                            ' server and calibredb match')
     db = get_library_data(ctx, rd, strict_library_id=True)[0]
     if ctx.restriction_for(rd, db):
         raise HTTPForbidden('Cannot use the command-line db interface with a user who has per library restrictions')
@@ -205,7 +205,12 @@ def cdb_set_fields(ctx, rd, book_id, library_id):
         db.remove_formats({book_id: list(removed_formats)})
         dirtied.add(book_id)
 
-    for field, value in iteritems(changes):
+    for field, value in changes.items():
+        if field == 'languages' and value:
+            rmap = reverse_lang_map_for_ui()
+            def to_lang_code(x):
+                return rmap.get(x, canonicalize_lang(x))
+            value = list(filter(None, map(to_lang_code, value)))
         dirtied |= db.set_field(field, {book_id: value})
     ctx.notify_changes(db.backend.library_path, metadata(dirtied))
     all_ids = dirtied if all_dirtied else (dirtied & loaded_book_ids)

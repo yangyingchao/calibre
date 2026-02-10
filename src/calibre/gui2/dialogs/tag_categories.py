@@ -6,7 +6,7 @@ from collections import defaultdict, namedtuple
 from qt.core import QApplication, QDialog, QIcon, QListWidgetItem, Qt
 
 from calibre.constants import islinux
-from calibre.gui2 import error_dialog, warning_dialog
+from calibre.gui2 import error_dialog, gprefs, warning_dialog
 from calibre.gui2.dialogs.confirm_delete import confirm
 from calibre.gui2.dialogs.tag_categories_ui import Ui_TagCategories
 from calibre.utils.icu import lower as icu_lower
@@ -14,7 +14,6 @@ from calibre.utils.icu import primary_contains, primary_sort_key, strcmp
 
 
 class TagCategories(QDialog, Ui_TagCategories):
-
     '''
     The structure of user_categories stored in preferences is
       {cat_name: [ [name, category, v], [], [] ]}, cat_name: [ [name, cat, v] ...]}
@@ -115,6 +114,7 @@ class TagCategories(QDialog, Ui_TagCategories):
         if self.current_cat_name is None:
             self.category_box.setCurrentIndex(0)
             self.select_category(0)
+        self.restore_geometry(gprefs, 'user_category_editor_dialog_geometry')
 
     def copy_category_name_to_clipboard_clicked(self):
         t = self.category_box.itemText(self.category_box.currentIndex())
@@ -129,7 +129,7 @@ class TagCategories(QDialog, Ui_TagCategories):
     def item_sort_key(self, v):
         # Add the key so the order of identical items is predictable.
         # The tab ensures that the values sort together regardless of key
-        return primary_sort_key(v.v + '\t ' + (v.k[1:] if v.k.startswith('#') else v.k))
+        return primary_sort_key(v.v + '\t ' + (v.k.removeprefix('#')))
 
     def initialize_category_lists(self):
         cfb = self.category_filter_box
@@ -229,7 +229,7 @@ class TagCategories(QDialog, Ui_TagCategories):
     def fill_applied_items(self):
         ccn = self.current_cat_name
         if ccn:
-            self.applied_items = [v for v in self.user_categories[ccn]]
+            self.applied_items = list(self.user_categories[ccn])
             self.applied_items.sort(key=self.item_sort_key)
         else:
             self.applied_items = []
@@ -369,4 +369,9 @@ class TagCategories(QDialog, Ui_TagCategories):
             for tup in self.user_categories[cat]:
                 cat_values.append([tup.v, tup.k, 0])
             self.categories[cat] = cat_values
+        super().save_geometry(gprefs, 'user_category_editor_dialog_geometry')
         QDialog.accept(self)
+
+    def reject(self):
+        super().save_geometry(gprefs, 'user_category_editor_dialog_geometry')
+        QDialog.reject(self)

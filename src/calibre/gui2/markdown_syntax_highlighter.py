@@ -6,6 +6,7 @@ import re
 
 from qt.core import QApplication, QBrush, QColor, QFont, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextLayout
 
+from calibre.ebooks.oeb.base import ENTITY_RE
 from calibre.gui2.palette import dark_link_color, light_link_color
 
 
@@ -31,64 +32,64 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         'HeaderLine': re.compile(r'(?u)^(-|=)+\s*$'),
         'HR': re.compile(r'(?u)^(\s*(\*|-|_)\s*){3,}$'),
         'Html': re.compile(r'(?u)</?[^/\s].*?(?<!\\)>'),
-        'Entity': re.compile(r'&([A-z]{2,7}|#\d{1,7}|#x[\dA-Fa-f]{1,6});'),
+        'Entity': ENTITY_RE,
     }
 
     key_theme_maps = {
-        'Bold': "bold",
-        'Italic': "emphasis",
-        'BoldItalic': "boldemphasis",
-        'uBold': "bold",
-        'uItalic': "emphasis",
-        'uBoldItalic': "boldemphasis",
-        'Link': "link",
-        'Image': "image",
-        'LinkRef': "link",
-        'Header': "header",
-        'HeaderLine': "header",
-        'CodeBlock': "codeblock",
-        'UnorderedList': "unorderedlist",
-        'UnorderedListStar': "unorderedlist",
-        'OrderedList': "orderedlist",
-        'BlockQuote': "blockquote",
-        'CodeSpan': "codespan",
-        'HR': "line",
-        'Html': "html",
-        'Entity': "entity",
+        'Bold': 'bold',
+        'Italic': 'emphasis',
+        'BoldItalic': 'boldemphasis',
+        'uBold': 'bold',
+        'uItalic': 'emphasis',
+        'uBoldItalic': 'boldemphasis',
+        'Link': 'link',
+        'Image': 'image',
+        'LinkRef': 'link',
+        'Header': 'header',
+        'HeaderLine': 'header',
+        'CodeBlock': 'codeblock',
+        'UnorderedList': 'unorderedlist',
+        'UnorderedListStar': 'unorderedlist',
+        'OrderedList': 'orderedlist',
+        'BlockQuote': 'blockquote',
+        'CodeSpan': 'codespan',
+        'HR': 'line',
+        'Html': 'html',
+        'Entity': 'entity',
     }
 
-    light_theme =  {
-        "bold": {"font-weight":"bold"},
-        "emphasis": {"font-style":"italic"},
-        "boldemphasis": {"font-weight":"bold", "font-style":"italic"},
-        "link": {"color":light_link_color.name(), "font-weight":"normal", "font-style":"normal"},
-        "image": {"color":"#cb4b16", "font-weight":"normal", "font-style":"normal"},
-        "header": {"color":"#2aa198", "font-weight":"bold", "font-style":"normal"},
-        "unorderedlist": {"color":"red", "font-weight":"normal", "font-style":"normal"},
-        "orderedlist": {"color":"red", "font-weight":"normal", "font-style":"normal"},
-        "blockquote": {"color":"red", "font-weight":"bold", "font-style":"normal"},
-        "codespan": {"color":"#ff5800", "font-weight":"normal", "font-style":"normal"},
-        "codeblock": {"color":"#ff5800", "font-weight":"normal", "font-style":"normal"},
-        "line": {"color":"#2aa198", "font-weight":"normal", "font-style":"normal"},
-        "html": {"color":"#c000c0", "font-weight":"normal", "font-style":"normal"},
-        "entity": {"color":"#006496"},
+    light_theme = {
+        'bold': {'font-weight':'bold'},
+        'emphasis': {'font-style':'italic'},
+        'boldemphasis': {'font-weight':'bold', 'font-style':'italic'},
+        'link': {'color':light_link_color.name(), 'font-weight':'normal', 'font-style':'normal'},
+        'image': {'color':'#cb4b16', 'font-weight':'normal', 'font-style':'normal'},
+        'header': {'color':'#2aa198', 'font-weight':'bold', 'font-style':'normal'},
+        'unorderedlist': {'color':'red', 'font-weight':'normal', 'font-style':'normal'},
+        'orderedlist': {'color':'red', 'font-weight':'normal', 'font-style':'normal'},
+        'blockquote': {'color':'red', 'font-weight':'bold', 'font-style':'normal'},
+        'codespan': {'color':'#ff5800', 'font-weight':'normal', 'font-style':'normal'},
+        'codeblock': {'color':'#ff5800', 'font-weight':'normal', 'font-style':'normal'},
+        'line': {'color':'#2aa198', 'font-weight':'normal', 'font-style':'normal'},
+        'html': {'color':'#c000c0', 'font-weight':'normal', 'font-style':'normal'},
+        'entity': {'color':'#006496'},
     }
 
-    dark_theme =  {
-        "bold": {"font-weight":"bold"},
-        "emphasis": {"font-style":"italic"},
-        "boldemphasis": {"font-weight":"bold", "font-style":"italic"},
-        "link": {"color":dark_link_color.name(), "font-weight":"normal", "font-style":"normal"},
-        "image": {"color":"#cb4b16", "font-weight":"normal", "font-style":"normal"},
-        "header": {"color":"#2aa198", "font-weight":"bold", "font-style":"normal"},
-        "unorderedlist": {"color":"yellow", "font-weight":"normal", "font-style":"normal"},
-        "orderedlist": {"color":"yellow", "font-weight":"normal", "font-style":"normal"},
-        "blockquote": {"color":"yellow", "font-weight":"bold", "font-style":"normal"},
-        "codespan": {"color":"#90ee90", "font-weight":"normal", "font-style":"normal"},
-        "codeblock": {"color":"#ff9900", "font-weight":"normal", "font-style":"normal"},
-        "line": {"color":"#2aa198", "font-weight":"normal", "font-style":"normal"},
-        "html": {"color":"#f653a6", "font-weight":"normal", "font-style":"normal"},
-        "entity": {"color":"#ff82ac"},
+    dark_theme = {
+        'bold': {'font-weight':'bold'},
+        'emphasis': {'font-style':'italic'},
+        'boldemphasis': {'font-weight':'bold', 'font-style':'italic'},
+        'link': {'color':dark_link_color.name(), 'font-weight':'normal', 'font-style':'normal'},
+        'image': {'color':'#cb4b16', 'font-weight':'normal', 'font-style':'normal'},
+        'header': {'color':'#2aa198', 'font-weight':'bold', 'font-style':'normal'},
+        'unorderedlist': {'color':'yellow', 'font-weight':'normal', 'font-style':'normal'},
+        'orderedlist': {'color':'yellow', 'font-weight':'normal', 'font-style':'normal'},
+        'blockquote': {'color':'yellow', 'font-weight':'bold', 'font-style':'normal'},
+        'codespan': {'color':'#90ee90', 'font-weight':'normal', 'font-style':'normal'},
+        'codeblock': {'color':'#ff9900', 'font-weight':'normal', 'font-style':'normal'},
+        'line': {'color':'#2aa198', 'font-weight':'normal', 'font-style':'normal'},
+        'html': {'color':'#f653a6', 'font-weight':'normal', 'font-style':'normal'},
+        'entity': {'color':'#ff82ac'},
     }
 
     def __init__(self, parent):
@@ -130,15 +131,15 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         cursor = QTextCursor(self.document())
         bf = cursor.blockFormat()
 
-        #Block quotes can contain all elements so process it first, internaly process recusively and return
+        # Block quotes can contain all elements so process it first, internally process recursively and return
         if self.highlightBlockQuote(text, cursor, bf):
             return
 
-        #If empty line no need to check for below elements just return
+        # If empty line no need to check for below elements just return
         if self.highlightEmptyLine(text, cursor, bf):
             return
 
-        #If horizontal line, look at pevious line to see if its a header, process and return
+        # If horizontal line, look at pevious line to see if its a header, process and return
         if self.highlightHorizontalLine(text, cursor, bf):
             return
 
@@ -186,9 +187,9 @@ class MarkdownHighlighter(QSyntaxHighlighter):
             prev = prevBlock.text()
             prevAscii = str(prev.replace('\u2029','\n'))
             if self.offset == 0 and prevAscii.strip():
-                #print "Its a header"
+                # print('Its a header')
                 prevCursor.select(QTextCursor.SelectionType.LineUnderCursor)
-                #prevCursor.setCharFormat(self.MARKDOWN_KWS_FORMAT['Header'])
+                # prevCursor.setCharFormat(self.MARKDOWN_KWS_FORMAT['Header'])
                 formatRange = QTextLayout.FormatRange()
                 formatRange.format = self.MARKDOWN_KWS_FORMAT['Header']
                 formatRange.length = prevCursor.block().length()
@@ -205,9 +206,9 @@ class MarkdownHighlighter(QSyntaxHighlighter):
     def highlightHeader(self, text, cursor, bf):
         found = False
         for mo in re.finditer(self.MARKDOWN_KEYS_REGEX['Header'],text):
-            #bf.setBackground(QBrush(QColor(7,54,65)))
-            #cursor.movePosition(QTextCursor.End)
-            #cursor.mergeBlockFormat(bf)
+            # bf.setBackground(QBrush(QColor(7,54,65)))
+            # cursor.movePosition(QTextCursor.End)
+            # cursor.mergeBlockFormat(bf)
             self.setFormat(self.offset+ mo.start(), mo.end() - mo.start(), self.MARKDOWN_KWS_FORMAT['Header'])
             found = True
         return found
@@ -257,7 +258,7 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         return self._highlightBoldEmphasis(text[offset:], cursor, bf, offset, False, False)
 
     def _highlightBoldEmphasis(self, text, cursor, bf, offset, bold, emphasis):
-        #detect and apply imbricated Bold/Emphasis
+        # detect and apply imbricated Bold/Emphasis
         found = False
 
         def apply(match, bold, emphasis):
@@ -268,7 +269,7 @@ class MarkdownHighlighter(QSyntaxHighlighter):
             elif emphasis:
                 self.setFormat(self.offset+offset+ match.start(), match.end() - match.start(), self.MARKDOWN_KWS_FORMAT['Italic'])
 
-        def recusive(match, extra_offset, bold, emphasis):
+        def recursive(match, extra_offset, bold, emphasis):
             apply(match, bold, emphasis)
             if bold and emphasis:
                 return  # max deep => return, do not process extra Bold/Italic
@@ -278,17 +279,17 @@ class MarkdownHighlighter(QSyntaxHighlighter):
             self._highlightBoldEmphasis(sub_txt, cursor, bf, sub_offset, bold, emphasis)
 
         for mo in re.finditer(self.MARKDOWN_KEYS_REGEX['Italic'],text):
-            recusive(mo, 1, bold, True)
+            recursive(mo, 1, bold, True)
             found = True
         for mo in re.finditer(self.MARKDOWN_KEYS_REGEX['uItalic'],text):
-            recusive(mo, 1, bold, True)
+            recursive(mo, 1, bold, True)
             found = True
 
         for mo in re.finditer(self.MARKDOWN_KEYS_REGEX['Bold'],text):
-            recusive(mo, 2, True, emphasis)
+            recursive(mo, 2, True, emphasis)
             found = True
         for mo in re.finditer(self.MARKDOWN_KEYS_REGEX['uBold'],text):
-            recusive(mo, 2, True, emphasis)
+            recursive(mo, 2, True, emphasis)
             found = True
 
         for mo in re.finditer(self.MARKDOWN_KEYS_REGEX['BoldItalic'],text):

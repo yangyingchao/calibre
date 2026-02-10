@@ -5,6 +5,9 @@ __license__   = 'GPL v3'
 __copyright__ = '2012, Kovid Goyal <kovid@kovidgoyal.net>'
 __docformat__ = 'restructuredtext en'
 
+from contextlib import suppress
+from functools import partial
+
 from qt.core import (
     QAbstractItemView,
     QAbstractListModel,
@@ -29,11 +32,15 @@ from qt.core import (
 from calibre.constants import ismacos
 from calibre.gui2.widgets import EnComboBox, LineEditECM
 from calibre.utils.config import tweaks
-from calibre.utils.icu import primary_contains, primary_startswith, sort_key
+from calibre.utils.icu import primary_contains, primary_find, primary_startswith, sort_key
 
 
 def containsq(x, prefix):
     return primary_contains(prefix, x)
+
+
+def hierarchy_startswith(x, prefix, sep='.'):
+    return primary_startswith(x, prefix) or primary_contains(sep + prefix, x)
 
 
 class CompleteModel(QAbstractListModel):  # {{{
@@ -44,6 +51,7 @@ class CompleteModel(QAbstractListModel):  # {{{
         self.sort_func = sort_func
         self.all_items = self.current_items = ()
         self.current_prefix = ''
+        self.use_startswith_search = tweaks['completion_mode'] == 'prefix'
 
     def set_items(self, items):
         if self.strip_completion_entries:
@@ -56,7 +64,7 @@ class CompleteModel(QAbstractListModel):  # {{{
         self.current_prefix = ''
         self.endResetModel()
 
-    def set_completion_prefix(self, prefix):
+    def set_completion_prefix(self, prefix, hierarchy_separator: str = ''):
         old_prefix = self.current_prefix
         self.current_prefix = prefix
         if prefix == old_prefix:
@@ -68,9 +76,25 @@ class CompleteModel(QAbstractListModel):  # {{{
             return
         subset = prefix.startswith(old_prefix)
         universe = self.current_items if subset else self.all_items
-        func = primary_startswith if tweaks['completion_mode'] == 'prefix' else containsq
+        func = primary_startswith if self.use_startswith_search else containsq
+        if func is primary_startswith and hierarchy_separator:
+            if hierarchy_separator != '.':
+                func = partial(hierarchy_startswith, sep=hierarchy_separator)
+            else:
+                func = hierarchy_startswith
         self.beginResetModel()
         self.current_items = tuple(x for x in universe if func(x, prefix))
+        if func is containsq:
+            def skey(x):
+                x = x.lower()
+                try:
+                    ans = primary_find(prefix, x)[0]
+                    if ans == -1:
+                        ans = len(x) + 10
+                    return ans
+                except Exception:
+                    return len(x) + 10
+            self.current_items = tuple(sorted(self.current_items, key=skey))
         self.endResetModel()
 
     def rowCount(self, *args):
@@ -78,15 +102,19 @@ class CompleteModel(QAbstractListModel):  # {{{
 
     def data(self, index, role):
         if role == Qt.ItemDataRole.DisplayRole:
-            try:
-                return self.current_items[index.row()].replace('\n', ' ')
-            except IndexError:
-                pass
+            with suppress(IndexError):
+                ans = self.current_items[index.row()].replace('\n', ' ')
+                if not self.strip_completion_entries:
+                    ls = ans.lstrip()
+                    if len(ls) < len(ans):
+                        ans = '␣'*(len(ans) - len(ls)) + ls
+                    rs = ans.rstrip()
+                    if len(rs) < len(ans):
+                        ans = rs + '␣'*(len(ans) - len(rs))
+                return ans
         if role == Qt.ItemDataRole.UserRole:
-            try:
+            with suppress(IndexError):
                 return self.current_items[index.row()]
-            except IndexError:
-                pass
 
     def index_for_prefix(self, prefix):
         for i, item in enumerate(self.current_items):
@@ -137,8 +165,8 @@ class Completer(QListView):  # {{{
         if self.isVisible():
             self.relayout_needed.emit()
 
-    def set_completion_prefix(self, prefix):
-        self.model().set_completion_prefix(prefix)
+    def set_completion_prefix(self, prefix, hierarchy_separator: str = ''):
+        self.model().set_completion_prefix(prefix, hierarchy_separator=hierarchy_separator)
         if self.isVisible():
             self.relayout_needed.emit()
 
@@ -321,6 +349,7 @@ class LineEdit(QLineEdit, LineEditECM):
         self.sep = ','
         self.space_before_sep = False
         self.add_separator = True
+        self.hierarchy_separator = ''
         self.original_cursor_pos = None
         completer_widget = (self if completer_widget is None else
                 completer_widget)
@@ -336,6 +365,9 @@ class LineEdit(QLineEdit, LineEditECM):
         self.no_popup = False
 
     # Interface {{{
+    def set_use_startswith_search(self, yes: bool) -> None:
+        self.mcompleter.model().use_startswith_search = yes
+
     def set_sort_func(self, sort_func):
         self.mcompleter.model().sort_func = sort_func
 
@@ -344,6 +376,9 @@ class LineEdit(QLineEdit, LineEditECM):
 
     def set_separator(self, sep):
         self.sep = sep
+
+    def set_hierarchy_separator(self, sep: str = '') -> None:
+        self.hierarchy_separator = sep
 
     def set_space_before_sep(self, space_before):
         self.space_before_sep = space_before
@@ -386,7 +421,7 @@ class LineEdit(QLineEdit, LineEditECM):
         orig = None
         if show_all:
             orig = self.mcompleter.model().current_prefix
-            self.mcompleter.set_completion_prefix('')
+            self.mcompleter.set_completion_prefix('', self.hierarchy_separator)
         if not self.mcompleter.model().current_items:
             self.mcompleter.hide()
             return
@@ -415,7 +450,7 @@ class LineEdit(QLineEdit, LineEditECM):
         complete_prefix = prefix.lstrip()
         if self.sep:
             complete_prefix = prefix.split(self.sep)[-1].lstrip()
-        self.mcompleter.set_completion_prefix(complete_prefix)
+        self.mcompleter.set_completion_prefix(complete_prefix, self.hierarchy_separator)
 
     def get_completed_text(self, text):
         'Get completed text in before and after parts'
@@ -488,11 +523,21 @@ class EditWithComplete(EnComboBox):
         finally:
             self.disable_popup = orig
 
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up) and not self.lineEdit().text() and not self.disable_popup:
+            e.accept()
+            self.showPopup()
+            return
+        super().keyPressEvent(e)
+
     def update_items_cache(self, complete_items):
         self.lineEdit().update_items_cache(complete_items)
 
     def set_separator(self, sep):
         self.lineEdit().set_separator(sep)
+
+    def set_hierarchy_separator(self, sep):
+        self.lineEdit().set_hierarchy_separator(sep)
 
     def set_space_before_sep(self, space_before):
         self.lineEdit().set_space_before_sep(space_before)

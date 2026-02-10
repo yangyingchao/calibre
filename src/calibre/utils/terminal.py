@@ -10,7 +10,6 @@ import sys
 
 from calibre.constants import iswindows
 from calibre.prints import is_binary
-from polyglot.builtins import iteritems
 
 if iswindows:
     import ctypes.wintypes
@@ -26,7 +25,7 @@ if iswindows:
 
 
 def fmt(code):
-    return '\033[%dm' % code
+    return f'\x1b[{code}m'
 
 
 def polyglot_write(stream, is_binary, encoding, text):
@@ -55,7 +54,7 @@ RATTRIBUTES = dict(
             'concealed'
             )
         ))
-ATTRIBUTES = {v:fmt(k) for k, v in iteritems(RATTRIBUTES)}
+ATTRIBUTES = {v:fmt(k) for k, v in RATTRIBUTES.items()}
 del ATTRIBUTES['']
 
 RBACKGROUNDS = dict(
@@ -69,7 +68,7 @@ RBACKGROUNDS = dict(
             'white'
             ),
     ))
-BACKGROUNDS = {v:fmt(k) for k, v in iteritems(RBACKGROUNDS)}
+BACKGROUNDS = {v:fmt(k) for k, v in RBACKGROUNDS.items()}
 
 RCOLORS = dict(
         zip(range(31, 38), (
@@ -82,7 +81,7 @@ RCOLORS = dict(
             'white',
             ),
         ))
-COLORS = {v:fmt(k) for k, v in iteritems(RCOLORS)}
+COLORS = {v:fmt(k) for k, v in RCOLORS.items()}
 
 RESET = fmt(0)
 
@@ -108,7 +107,7 @@ class Detect:
     def __init__(self, stream):
         self.stream = stream or sys.stdout
         self.is_binary = is_binary(self.stream)
-        self.isatty = getattr(self.stream, 'isatty', lambda : False)()
+        self.isatty = getattr(self.stream, 'isatty', lambda: False)()
         force_ansi = 'CALIBRE_FORCE_ANSI' in os.environ
         if not self.isatty and force_ansi:
             self.isatty = True
@@ -125,9 +124,8 @@ class ColoredStream(Detect):
         if self.is_binary:
             if not isinstance(what, bytes):
                 what = what.encode('utf-8')
-        else:
-            if isinstance(what, bytes):
-                what = what.decode('utf-8', 'replace')
+        elif isinstance(what, bytes):
+            what = what.decode('utf-8', 'replace')
         self.stream.write(what)
 
     def __enter__(self):
@@ -196,32 +194,29 @@ def windows_terminfo():
     from ctypes.wintypes import SHORT, WORD
 
     class COORD(Structure):
-
-        """struct in wincon.h"""
+        '''struct in wincon.h'''
         _fields_ = [
             ('X', SHORT),
             ('Y', SHORT),
         ]
 
     class SMALL_RECT(Structure):
-
-        """struct in wincon.h."""
+        '''struct in wincon.h.'''
         _fields_ = [
-            ("Left", SHORT),
-            ("Top", SHORT),
-            ("Right", SHORT),
-            ("Bottom", SHORT),
+            ('Left', SHORT),
+            ('Top', SHORT),
+            ('Right', SHORT),
+            ('Bottom', SHORT),
         ]
 
     class CONSOLE_SCREEN_BUFFER_INFO(Structure):
-
-        """struct in wincon.h."""
+        '''struct in wincon.h.'''
         _fields_ = [
-            ("dwSize", COORD),
-            ("dwCursorPosition", COORD),
-            ("wAttributes", WORD),
-            ("srWindow", SMALL_RECT),
-            ("dwMaximumWindowSize", COORD),
+            ('dwSize', COORD),
+            ('dwCursorPosition', COORD),
+            ('wAttributes', WORD),
+            ('srWindow', SMALL_RECT),
+            ('dwMaximumWindowSize', COORD),
         ]
     csbi = CONSOLE_SCREEN_BUFFER_INFO()
     import msvcrt
@@ -268,7 +263,7 @@ def geometry():
 
             ti = windows_terminfo()
             return (ti.dwSize.X or 80, ti.dwSize.Y or 25)
-        except:
+        except Exception:
             return 80, 25
     else:
         try:
@@ -286,7 +281,7 @@ def test():
     text = [colored(t, fg=t)+'. '+colored(t, fg=t, bold=True)+'.' for t in
             ('red', 'yellow', 'green', 'white', 'cyan', 'magenta', 'blue',)]
     s.write('\n'.join(text))
-    u = '\u041c\u0438\u0445\u0430\u0438\u043b fällen'
+    u = 'Михаил fällen'
     print()
     s.write(u)
     print()

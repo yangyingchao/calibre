@@ -40,7 +40,7 @@ from calibre.utils.localization import _
 
 class Action:
 
-    __slots__ = ('icon', 'text', 'shortcut_action')
+    __slots__ = ('icon', 'shortcut_action', 'text')
 
     def __init__(self, icon=None, text=None, shortcut_action=None):
         self.icon, self.text, self.shortcut_action = QIcon.ic(icon), text, shortcut_action
@@ -290,14 +290,13 @@ class ActionsToolBar(ToolBar):
                 except Exception:
                     import traceback
                     traceback.print_exc()
-        else:
-            if self.prevent_sleep_cookie is not None:
-                try:
-                    allow_sleep(self.prevent_sleep_cookie)
-                except Exception:
-                    import traceback
-                    traceback.print_exc()
-                self.prevent_sleep_cookie = None
+        elif self.prevent_sleep_cookie is not None:
+            try:
+                allow_sleep(self.prevent_sleep_cookie)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+            self.prevent_sleep_cookie = None
 
     def update_autoscroll_action(self, active):
         self.autoscroll_action.setChecked(active)
@@ -558,7 +557,7 @@ class ConfigureToolBar(Dialog):
         self.available_actions.add_names(names)
 
     def remove_item(self, item):
-        names = self.current_actions.remove_item(item),
+        names = (self.current_actions.remove_item(item),)
         self.available_actions.add_names(names)
 
     def add_actions(self):
@@ -566,7 +565,7 @@ class ConfigureToolBar(Dialog):
         self.current_actions.add_names(names)
 
     def add_item(self, item):
-        names = self.available_actions.remove_item(item),
+        names = (self.available_actions.remove_item(item),)
         self.current_actions.add_names(names)
 
     def restore_defaults(self):

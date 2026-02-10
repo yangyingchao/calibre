@@ -45,7 +45,7 @@ if iswindows:
                 break
             try:
                 recycle_path(path)
-            except:
+            except Exception:
                 eintr_retry_call(stdout.write, b'KO\n')
                 stdout.flush()
                 try:
@@ -59,7 +59,7 @@ if iswindows:
 
     def delegate_recycle(path):
         if '\n' in path:
-            raise ValueError('Cannot recycle paths that have newlines in them (%r)' % path)
+            raise ValueError(f'Cannot recycle paths that have newlines in them ({path!r})')
         with rlock:
             start_recycler()
             recycler.stdin.write(path.encode('utf-8'))
@@ -70,7 +70,7 @@ if iswindows:
             # so I am leaving it as blocking.
             result = eintr_retry_call(recycler.stdout.readline)
             if result.rstrip() != b'OK':
-                raise RuntimeError('recycler failed to recycle: %r' % path)
+                raise RuntimeError(f'recycler failed to recycle: {path!r}')
 
     def recycle(path):
         # We have to run the delete to recycle bin in a separate process as the
@@ -123,7 +123,7 @@ def delete_file(path, permanent=False):
         try:
             recycle(path)
             return
-        except:
+        except Exception:
             import traceback
             traceback.print_exc()
     os.remove(path)
@@ -136,7 +136,7 @@ def delete_tree(path, permanent=False):
             # leading to access errors. If we get an exception, wait and hope
             # that whatever has the file (Antivirus, DropBox?) lets go of it.
             shutil.rmtree(path)
-        except:
+        except Exception:
             import traceback
             traceback.print_exc()
             time.sleep(1)
@@ -146,7 +146,7 @@ def delete_tree(path, permanent=False):
             try:
                 recycle(path)
                 return
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
         delete_tree(path, permanent=True)

@@ -25,7 +25,7 @@ def strptime(src):
 
 
 def strftime(epoch, zone=time.gmtime):
-    src = time.strftime("%w, %d %m %Y %H:%M:%S GMT", zone(epoch)).split()
+    src = time.strftime('%w, %d %m %Y %H:%M:%S GMT', zone(epoch)).split()
     src[0] = INVERSE_DAY_MAP[int(src[0][:-1])]+','
     src[2] = INVERSE_MONTH_MAP[int(src[2])]
     return ' '.join(src)
@@ -52,7 +52,7 @@ def get_connected_device():
     for det, d in connected_devices:
         try:
             d.open(det, None)
-        except:
+        except Exception:
             continue
         else:
             dev = d
@@ -89,8 +89,8 @@ def debug(ioreg_to_tmp=False, buf=None, plugins=None,
         for d in devplugins:
             try:
                 d.startup()
-            except:
-                out('Startup failed for device plugin: %s'%d)
+            except Exception:
+                out(f'Startup failed for device plugin: {d}')
 
     if disabled_plugins is None:
         disabled_plugins = list(disabled_device_plugins())
@@ -113,7 +113,7 @@ def debug(ioreg_to_tmp=False, buf=None, plugins=None,
         ioreg = None
         if ismacos:
             from calibre.devices.usbms.device import Device
-            mount = '\n'.join(repr(x) for x in Device.osx_run_mount().splitlines())
+            mount = Device.osx_run_mount()
             drives = pprint.pformat(Device.osx_get_usb_drives())
             ioreg = 'Output from mount:\n'+mount+'\n\n'
             ioreg += 'Output from osx_get_usb_drives:\n'+drives+'\n\n'
@@ -165,7 +165,7 @@ def debug(ioreg_to_tmp=False, buf=None, plugins=None,
                     dev.reset(detected_device=det)
                     dev.open(det, None)
                     out('OK')
-                except:
+                except Exception:
                     import traceback
                     errors[dev] = traceback.format_exc()
                     out('failed')
@@ -188,7 +188,7 @@ def debug(ioreg_to_tmp=False, buf=None, plugins=None,
                 out(' ')
                 if ioreg_to_tmp:
                     open('/tmp/ioreg.txt', 'w').write(ioreg)
-                    out('Dont forget to send the contents of /tmp/ioreg.txt')
+                    out("Don't forget to send the contents of /tmp/ioreg.txt")
                     out('You can open it with the command: open /tmp/ioreg.txt')
                 else:
                     out(ioreg)
@@ -203,7 +203,7 @@ def debug(ioreg_to_tmp=False, buf=None, plugins=None,
             for d in devplugins:
                 try:
                     d.shutdown()
-                except:
+                except Exception:
                     pass
 
 

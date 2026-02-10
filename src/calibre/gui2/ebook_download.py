@@ -17,7 +17,7 @@ from calibre.gui2.threaded_jobs import ThreadedJob
 from calibre.ptempfile import PersistentTemporaryDirectory
 from calibre.utils.filenames import ascii_filename
 from calibre.web import get_download_filename_from_response
-from polyglot.builtins import as_unicode, string_or_bytes
+from polyglot.builtins import as_unicode
 
 
 class DownloadInfo(MessageBox):
@@ -89,7 +89,7 @@ class EbookDownload:
             try:
                 if dfilename:
                     os.remove(dfilename)
-            except:
+            except Exception:
                 pass
 
     def _download(self, cookie_file, url, filename, save_loc, add_to_lib, create_browser):
@@ -117,6 +117,17 @@ class EbookDownload:
                 mi = get_metadata(f, ext, force_read_metadata=True)
             mi.tags.extend(tags)
             db = gui.current_db
+            if gprefs.get('tag_map_on_add_rules'):
+                from calibre.ebooks.metadata.tag_mapper import map_tags
+                mi.tags = map_tags(mi.tags, gprefs['tag_map_on_add_rules'])
+            if gprefs.get('author_map_on_add_rules'):
+                from calibre.ebooks.metadata.author_mapper import compile_rules as acr
+                from calibre.ebooks.metadata.author_mapper import map_authors
+                author_map_rules = acr(gprefs['author_map_on_add_rules'])
+                new_authors = map_authors(mi.authors, author_map_rules)
+                if new_authors != mi.authors:
+                    mi.authors = new_authors
+                    mi.author_sort = db.new_api.author_sort_from_authors(mi.authors)
             book_id = db.create_book_entry(mi)
             db.new_api.add_format(book_id, ext.upper(), path)
         gui.library_view.model().books_added(1)
@@ -146,7 +157,7 @@ class EbookDownloadMixin:
 
     def download_ebook(self, url='', cookie_file=None, filename='', save_loc='', add_to_lib=True, tags=[], create_browser=None):
         if tags:
-            if isinstance(tags, string_or_bytes):
+            if isinstance(tags, (str, bytes)):
                 tags = tags.split(',')
         start_ebook_download(Dispatcher(self.downloaded_ebook), self.job_manager, self, cookie_file, url, filename, save_loc, add_to_lib, tags, create_browser)
         self.status_bar.show_message(_('Downloading') + ' ' + as_unicode(filename or url, errors='replace'), 3000)

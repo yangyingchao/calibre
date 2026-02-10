@@ -10,6 +10,7 @@ from itertools import product
 
 from qt.core import (
     QAction,
+    QApplication,
     QDockWidget,
     QEvent,
     QHBoxLayout,
@@ -59,7 +60,6 @@ from calibre.gui2.widgets2 import MessagePopup
 from calibre.utils.icu import ord_string, sort_key
 from calibre.utils.localization import localize_user_manual_link, localize_website_link, pgettext
 from calibre.utils.unicode_names import character_name_from_code
-from polyglot.builtins import iteritems, itervalues
 
 
 def open_donate():
@@ -113,7 +113,7 @@ class Central(QStackedWidget):  # {{{
     @property
     def tab_order(self):
         ans = []
-        rmap = {v:k for k, v in iteritems(editors)}
+        rmap = {v:k for k, v in editors.items()}
         for i in range(self.editor_tabs.count()):
             name = rmap.get(self.editor_tabs.widget(i))
             if name is not None:
@@ -188,7 +188,7 @@ class Central(QStackedWidget):  # {{{
     def save_state(self):
         tprefs.set('search-panel-visible', self.search_panel.isVisible())
         self.search_panel.save_state()
-        for ed in itervalues(editors):
+        for ed in editors.values():
             ed.save_state()
         if self.current_editor is not None:
             self.current_editor.save_state()  # Ensure the current editor saves it state last
@@ -285,7 +285,8 @@ class Main(MainWindow):
             traceback.print_exc()
         self.setWindowTitle(self.APP_NAME)
         self.boss = Boss(self, notify=notify)
-        self.setWindowIcon(QIcon.ic('tweak.png'))
+        if not ismacos:
+            self.setWindowIcon(QApplication.instance().windowIcon())
         self.opts = opts
         self.path_to_ebook = None
         self.container = None
@@ -335,8 +336,8 @@ class Main(MainWindow):
         for v, h in product(('top', 'bottom'), ('left', 'right')):
             p = f'dock_{v}_{h}'
             pref = tprefs[p] or tprefs.defaults[p]
-            area = getattr(Qt.DockWidgetArea, '%sDockWidgetArea' % capitalize({'vertical':h, 'horizontal':v}[pref]))
-            self.setCorner(getattr(Qt.Corner, '%s%sCorner' % tuple(map(capitalize, (v, h)))), area)
+            area = getattr(Qt.DockWidgetArea, '{}DockWidgetArea'.format(capitalize({'vertical':h, 'horizontal':v}[pref])))
+            self.setCorner(getattr(Qt.Corner, '{}{}Corner'.format(*tuple(map(capitalize, (v, h))))), area)
         self.preview.apply_settings()
         self.live_css.apply_theme()
         for bar in (self.global_bar, self.tools_bar, self.plugins_bar):
@@ -401,7 +402,7 @@ class Main(MainWindow):
         self.action_save.setEnabled(False)
         self.action_save_copy = treg('save.png', _('Save a &copy'), self.boss.save_copy, 'save-copy', 'Ctrl+Alt+S', _('Save a copy of the book'))
         self.action_save_copy_edit = treg('save.png', _('Save a &copy and edit in new window'), partial(self.boss._save_copy, 'edit'), 'save-copy-edit',
-                                          'Ctrl+Shift+S', _( 'Save a copy of the book and edit it in a new window'))
+                                          'Ctrl+Shift+S', _('Save a copy of the book and edit it in a new window'))
         self.action_save_copy_replace = treg('save.png', _('Save a &copy and edit here'), partial(self.boss._save_copy, 'replace'),
                                              'save-copy-replace', 'Ctrl+Alt+Shift+S', _('Save a copy of the book and edit it in this window'))
         self.action_quit = treg('window-close.png', _('&Quit'), self.boss.quit, 'quit', 'Ctrl+Q', _('Quit'))
@@ -411,6 +412,9 @@ class Main(MainWindow):
                                       self.boss.import_book, 'import-book', (), _('Import an HTML or DOCX file as a new book'))
         self.action_quick_edit = treg('modified.png', _('&Quick open a file to edit'), self.boss.quick_open, 'quick-open', ('Ctrl+T'), _(
             'Quickly open a file from the book to edit it'))
+        self.action_editor_toggle_wrap = treg(
+            'format-justify-fill.png', _('Toggle code line &wrapping'), self.boss.toggle_line_wrapping_in_all_editors, 'editor-toggle-wrap', (), _(
+                'Toggle line wrapping in all code editor tabs'))
 
         # Editor actions
         group = _('Editor actions')
@@ -465,6 +469,8 @@ class Main(MainWindow):
         self.action_get_ext_resources = treg('download-metadata.png', _('Download external &resources'),
                                              self.boss.get_external_resources, 'get-external-resources', (), _(
             'Download external resources in the book (images/stylesheets/etc/ that are not included in the book)'))
+        self.action_embed_tts = treg('bullhorn.png', _('Add Text-to-speech narration'), self.boss.embed_tts, 'embed-tts', (), _(
+            'Add audio narration for all the book text using Text-to-speech generation'))
 
         def ereg(icon, text, target, sid, keys, description):
             return reg(icon, text, partial(self.boss.editor_action, target), sid, keys, description)
@@ -499,6 +505,8 @@ class Main(MainWindow):
             'Split file in the preview panel'))
         self.action_find_next_preview = reg('arrow-down.png', _('Find next'), None, 'find-next-preview', (), _('Find next in preview'))
         self.action_find_prev_preview = reg('arrow-up.png', _('Find previous'), None, 'find-prev-preview', (), _('Find previous in preview'))
+        self.action_copy_from_preview = reg('edit-copy.png', _('Copy from preview'), None, 'copy-from-preview', ('Ctrl+Alt+c',), _(
+            'Copy the current selection from the preview panel to the clipboard'))
 
         # Search actions
         group = _('Search')
@@ -556,7 +564,7 @@ class Main(MainWindow):
             'edit-clear.png', _('Close tabs to the &right'), self.central.close_to_right_of_current_editor, 'close-tabs-to-right-of', 'Ctrl+Shift+W', _(
                 'Close tabs to the right of the current tab'))
         self.action_help = treg(
-            'help.png', _('User &Manual'), lambda : open_url(QUrl(localize_user_manual_link(
+            'help.png', _('User &Manual'), lambda: open_url(QUrl(localize_user_manual_link(
                 'https://manual.calibre-ebook.com/edit.html'))), 'user-manual', 'F1', _(
                 'Show User Manual'))
         self.action_browse_images = treg(
@@ -636,6 +644,7 @@ class Main(MainWindow):
         e.addAction(self.action_transform_styles)
         e.addAction(self.action_transform_html)
         e.addAction(self.action_fix_html_all)
+        e.addAction(self.action_embed_tts)
         e.addAction(self.action_pretty_all)
         e.addAction(self.action_rationalize_folders)
         e.addAction(self.action_add_cover)
@@ -652,7 +661,7 @@ class Main(MainWindow):
         e = b.addMenu(_('&View'))
         t = e.addMenu(_('Tool&bars'))
         e.addSeparator()
-        for name in sorted(actions, key=lambda x:sort_key(actions[x].text())):
+        for name in sorted(actions, key=lambda x: sort_key(actions[x].text())):
             ac = actions[name]
             if name.endswith('-dock'):
                 e.addAction(ac)
@@ -688,7 +697,7 @@ class Main(MainWindow):
 
         if self.plugin_menu_actions:
             e = b.addMenu(_('&Plugins'))
-            for ac in sorted(self.plugin_menu_actions, key=lambda x:sort_key(str(x.text()))):
+            for ac in sorted(self.plugin_menu_actions, key=lambda x: sort_key(str(x.text()))):
                 e.addAction(ac)
 
         e = b.addMenu(_('&Help'))
@@ -846,7 +855,7 @@ class Main(MainWindow):
         cc = current_container()
         if cc is not None:
             fname = os.path.basename(cc.path_to_ebook)
-            self.setWindowTitle(self.current_metadata.title + ' [%s] :: %s :: %s' %(cc.book_type_for_display, fname, self.APP_NAME))
+            self.setWindowTitle(self.current_metadata.title + f' [{cc.book_type_for_display}] :: {fname} :: {self.APP_NAME}')
         else:
             self.setWindowTitle(self.APP_NAME)
 

@@ -1,5 +1,8 @@
 #define UNICODE
 #define PY_SSIZE_T_CLEAN
+#ifndef _FILE_OFFSET_BITS
+#define _FILE_OFFSET_BITS 64
+#endif
 
 #include <Python.h>
 #include <datetime.h>
@@ -28,6 +31,34 @@ typedef unsigned __int8 uint8_t;
 #else
 #include <stdint.h>
 #endif
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
+static PyObject*
+barename(PyObject *self, PyObject *tag) {
+    if (!PyUnicode_Check(tag)) { PyErr_Format(PyExc_TypeError, "%R is not a unicode string", tag); return NULL; }
+    Py_ssize_t pos = PyUnicode_FindChar(tag, '}', 0, PyUnicode_GetLength(tag), -1);
+    switch(pos) {
+        case -2: return NULL;
+        case -1: Py_INCREF(tag); return tag;
+        default: return PyUnicode_Substring(tag, pos + 1, PyUnicode_GetLength(tag));
+    }
+}
+
+static PyObject*
+namespace(PyObject *self, PyObject *tag) {
+    if (!PyUnicode_Check(tag)) { PyErr_Format(PyExc_TypeError, "%R is not a unicode string", tag); return NULL; }
+    Py_ssize_t pos = PyUnicode_FindChar(tag, '}', 0, PyUnicode_GetLength(tag), -1);
+    switch(pos) {
+        case -2: return NULL;
+        case -1: return PyUnicode_FromString("");
+        default: return PyUnicode_Substring(tag, 1, pos);
+    }
+}
+
 
 static PyObject *
 speedup_parse_date(PyObject *self, PyObject *args) {
@@ -489,47 +520,270 @@ set_thread_name(PyObject *self, PyObject *args) {
 
 #define char_is_ignored(ch) (ch <= 32)
 
+typedef struct udata {
+    void *data; int kind; Py_ssize_t len;
+} udata;
+
 static size_t
-count_chars_in(PyObject *text) {
-	size_t ans = 0;
-	if (PyUnicode_READY(text) != 0) return 0;
-	int kind = PyUnicode_KIND(text);
-	void *data = PyUnicode_DATA(text);
-	Py_ssize_t len = PyUnicode_GET_LENGTH(text);
-	ans = len;
-	for (Py_ssize_t i = 0; i < len; i++) {
-		if (char_is_ignored(PyUnicode_READ(kind, data, i))) ans--;
-	}
+count_chars_in(udata *text) {
+	size_t ans = text->len;
+	for (Py_ssize_t i = 0; i < text->len; i++) if (char_is_ignored(PyUnicode_READ(text->kind, text->data, i))) ans--;
 	return ans;
 }
 
-static PyObject*
-get_element_char_length(PyObject *self, PyObject *args) {
-	(void)(self);
-	const char *tag_name;
-	PyObject *text, *tail;
-	if (!PyArg_ParseTuple(args, "sOO", &tag_name, &text, &tail)) return NULL;
-	const char *b = strrchr(tag_name, '}');
-	if (b) tag_name = b + 1;
-	char ltagname[16];
-	const size_t tag_name_len = strnlen(tag_name, sizeof(ltagname)-1);
-	for (size_t i = 0; i < tag_name_len; i++) {
-		if ('A' <= tag_name[i] && tag_name[i] <= 'Z') ltagname[i] = 32 + tag_name[i];
-		else ltagname[i] = tag_name[i];
-	}
-	int is_ignored_tag = 0;
+static size_t
+count_chars(const char *tag_name, Py_ssize_t tag_len, udata *text, udata *tail) {
 	size_t ans = 0;
-#define EQ(x) memcmp(ltagname, #x, sizeof(#x) - 1) == 0
-	if (EQ(script) || EQ(noscript) || EQ(style) || EQ(title)) is_ignored_tag = 1;
-	if (EQ(img) || EQ(svg)) ans += 1000;
+    int is_ignored_tag = 0;
+    char ltagname[16];
+    if (tag_name) {
+        const char *b = memchr(tag_name, '}', tag_len);
+        if (b) {
+            b++;
+            tag_len -= b - tag_name;
+            tag_name = b;
+        }
+        if (tag_len < sizeof(ltagname)) {
+            memcpy(ltagname, tag_name, tag_len);
+            for (size_t i = 0; i < tag_len; i++) if ('A' <= ltagname[i] && ltagname[i] <= 'Z') ltagname[i] += 32;
+#define EQ(x) (tag_len + 1 == sizeof(#x) && memcmp(ltagname, #x, tag_len) == 0)
+            switch(ltagname[0]) {
+                case 's':
+                    if (EQ(script) || EQ(style)) is_ignored_tag = 1;
+                    else if (EQ(svg)) ans += 1000;
+                    break;
+                case 'n':
+                    if (EQ(noscript)) is_ignored_tag = 1;
+                    break;
+                case 't':
+                    if (EQ(title)) is_ignored_tag = 1;
+                    break;
+                case 'i':
+                    if (EQ(img)) ans += 1000;
+                    break;
+                case 'v':
+                    if (EQ(video)) ans += 2000;
+                    break;
+            }
+        }
+    }
 #undef EQ
-	if (tail != Py_None) ans += count_chars_in(tail);
-	if (text != Py_None && !is_ignored_tag) ans += count_chars_in(text);
+	ans += count_chars_in(tail);
+	if (!is_ignored_tag) ans += count_chars_in(text);
+    return ans;
+}
+
+static PyObject*
+get_num_of_significant_chars(PyObject *self, PyObject *elem) {
+	(void)(self);
+	const char *tag_name = NULL;
+    Py_ssize_t tag_len = 0;
+    PyObject *ptn = PyObject_GetAttrString(elem, "tag"), *text = NULL;
+    if (ptn && PyUnicode_Check(ptn)) tag_name = PyUnicode_AsUTF8AndSize(ptn, &tag_len);
+    udata xdata = {0}, tdata = {0};
+    if (tag_name) {
+        text = PyObject_GetAttrString(elem, "text");
+        if (text && PyUnicode_Check(text)) {
+            xdata.len = PyUnicode_GET_LENGTH(text); xdata.kind = PyUnicode_KIND(text); xdata.data = PyUnicode_DATA(text);
+        }
+    }
+    PyObject *tail = PyObject_GetAttrString(elem, "tail");
+    if (tail && PyUnicode_Check(tail)) {
+        tdata.len = PyUnicode_GET_LENGTH(tail); tdata.kind = PyUnicode_KIND(tail); tdata.data = PyUnicode_DATA(tail);
+    }
+    size_t ans;
+    Py_BEGIN_ALLOW_THREADS
+        ans = count_chars(tag_name, tag_len, &xdata, &tdata);
+    Py_END_ALLOW_THREADS;
+    Py_XDECREF(ptn); Py_XDECREF(text); Py_XDECREF(tail);
 	return PyLong_FromSize_t(ans);
 }
 
 
+typedef struct deepcopy_data {
+    PyObject *python_deepcopy, *memo;
+} deepcopy_data;
+
+static PyObject* deepcopy_object(PyObject *, deepcopy_data *);
+
+static PyObject*
+insert_into_cache(PyObject *o, deepcopy_data *d) {
+    if (!o) return NULL;
+    PyObject *key = PyLong_FromVoidPtr(o);
+    if (!key) { Py_DECREF(o); return NULL; }
+    if (PyDict_SetItem(d->memo, key, o) != 0) { Py_DECREF(key); Py_DECREF(o); return NULL; }
+    return o;
+}
+
+static PyObject*
+deepcopy_list(PyObject *o, deepcopy_data *d) {
+    PyObject *ans = insert_into_cache(PyList_New(PyList_GET_SIZE(o)), d);
+    if (!ans) return NULL;
+    for (Py_ssize_t i = 0; i < PyList_GET_SIZE(o); i++) {
+        PyObject *t = deepcopy_object(PyList_GET_ITEM(o, i), d);
+        if (!t) { Py_CLEAR(t); return NULL; }
+        PyList_SET_ITEM(ans, i, t);
+    }
+    return ans;
+}
+
+static PyObject*
+deepcopy_tuple(PyObject *o, deepcopy_data *d) {
+    PyObject *ans = insert_into_cache(PyTuple_New(PyTuple_GET_SIZE(o)), d);
+    if (!ans) return NULL;
+    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(o); i++) {
+        PyObject *t = deepcopy_object(PyTuple_GET_ITEM(o, i), d);
+        if (!t) { Py_CLEAR(ans); return NULL; }
+        PyTuple_SET_ITEM(ans, i, t);
+    }
+    return ans;
+}
+
+
+static PyObject*
+deepcopy_dict(PyObject *o, deepcopy_data *d) {
+    PyObject *key, *value;
+    Py_ssize_t pos = 0;
+    PyObject *ans = insert_into_cache(PyDict_New(), d);
+    if (!ans) return NULL;
+
+    while (PyDict_Next(o, &pos, &key, &value)) {
+        PyObject *tk = deepcopy_object(key, d);
+        if (!tk) break;
+        PyObject *tv = deepcopy_object(value, d);
+        if (!tv) { Py_DECREF(tk); break; }
+        int ok = PyDict_SetItem(ans, tk, tv) == 0;
+        Py_DECREF(tk); Py_DECREF(tv);
+        if (!ok) break;
+    }
+    if (PyErr_Occurred()) { Py_DECREF(ans); return NULL; }
+    return ans;
+}
+
+static PyObject*
+deepcopy_set(PyObject *o, deepcopy_data *d, int is_frozen) {
+    PyObject *ans = insert_into_cache(is_frozen ? PyFrozenSet_New(NULL) : PySet_New(NULL), d);
+    if (!ans) return NULL;
+    PyObject *iter = PyObject_GetIter(o);
+    if (!iter) { Py_DECREF(ans); return NULL; }
+    PyObject *key;
+    while ((key = PyIter_Next(iter)) != NULL) {
+        PyObject *t = deepcopy_object(key, d);
+        if (!t) break;
+        if (PySet_Add(ans, t) != 0) { Py_DECREF(t); break; }
+    }
+    Py_DECREF(iter);
+    if (PyErr_Occurred()) { Py_DECREF(ans); return NULL; }
+    return ans;
+}
+
+static PyObject*
+deepcopy_object(PyObject *o, deepcopy_data *d) {
+    PyObject *key = PyLong_FromVoidPtr(o);
+    if (!key) return NULL;
+    PyObject *cached = PyDict_GetItem(d->memo, key);
+    Py_DECREF(key);
+    if (cached) return Py_NewRef(cached);
+    PyTypeObject *type;
+    // Fast case for builtin immutable types
+    if (
+        o == Py_None || o == Py_True || o == Py_False || (type = Py_TYPE(o)) == &PyUnicode_Type ||
+        type == &PyBytes_Type || type == &PyLong_Type || type == &PyFloat_Type || type == &PyMemoryView_Type ||
+        type == &PyComplex_Type || type == &PyType_Type || type == &PyFunction_Type || type == &PyCode_Type ||
+        o == Py_Ellipsis || o == Py_NotImplemented
+    ) return Py_NewRef(o);
+    if (type == &PyList_Type) return deepcopy_list(o, d);
+    if (type == &PyTuple_Type) return deepcopy_tuple(o, d);
+    if (type == &PyDict_Type) return deepcopy_dict(o, d);
+    if (type == &PySet_Type) return deepcopy_set(o, d, 0);
+    if (type == &PyFrozenSet_Type) return deepcopy_set(o, d, 1);
+    if (PyWeakref_Check(o)) return Py_NewRef(o);
+    return PyObject_CallFunctionObjArgs(d->python_deepcopy, o, d->memo);
+}
+
+static PyObject*
+deepcopy(PyObject *self, PyObject *o) {
+    PyObject *memo = PyDict_New();
+    if (!memo) return NULL;
+    PyObject *copy_module = PyImport_ImportModule("copy");
+    if (!copy_module) { Py_DECREF(memo); return NULL; }
+    PyObject *python_deepcopy = PyObject_GetAttrString(copy_module, "deepcopy");
+    Py_DECREF(copy_module);
+    if (!python_deepcopy) { Py_DECREF(memo); return NULL; }
+    deepcopy_data d = {.python_deepcopy = python_deepcopy, .memo = memo};
+    PyObject *ans = deepcopy_object(o, &d);
+    Py_DECREF(python_deepcopy); Py_DECREF(memo);
+    return ans;
+}
+
+
+static PyObject*
+pread_all(PyObject *self, PyObject *args) {
+    int fd; unsigned long long n, offset = 0;
+    if (!PyArg_ParseTuple(args, "iK|K", &fd, &n, &offset)) return NULL;
+#ifdef _WIN32
+    PyObject *msvcrt = PyImport_ImportModule("msvcrt");
+    if (!msvcrt) return NULL;
+    PyObject *get_osfhandle = PyObject_GetAttrString(msvcrt, "get_osfhandle");
+    Py_CLEAR(msvcrt);
+    if (!get_osfhandle) return NULL;
+    PyObject *ret = PyObject_CallFunctionObjArgs(get_osfhandle, PyTuple_GET_ITEM(args, 0), NULL);
+    Py_CLEAR(get_osfhandle);
+    if (!ret) return NULL;
+    HANDLE file = (HANDLE)PyLong_AsUnsignedLongLong(ret);
+    Py_CLEAR(ret);
+#endif
+    PyObject *output = PyBytes_FromStringAndSize(NULL, n);
+    if (!output || !n) return output;
+    size_t pos = 0;
+    char *buf = PyBytes_AS_STRING(output);
+    int saved_errno = 0;
+    Py_BEGIN_ALLOW_THREADS;
+    while (pos < n) {
+#ifdef _WIN32
+        DWORD nr = 0;
+        OVERLAPPED overlapped;
+        memset(&overlapped, 0, sizeof(OVERLAPPED));
+        overlapped.OffsetHigh = (uint32_t)((offset & 0xFFFFFFFF00000000LL) >> 32);
+        overlapped.Offset = (uint32_t)(offset & 0xFFFFFFFFLL);
+        SetLastError(0);
+        BOOL ok = ReadFile(file, buf + pos, n - pos, &nr, &overlapped);
+        if (!ok) {
+            DWORD err = GetLastError();
+            if (err != ERROR_HANDLE_EOF) saved_errno = err;
+            break;
+        }
+#else
+        ssize_t nr = pread(fd, buf + pos, n - pos, offset);
+        if (nr < 0) {
+            if (errno == EINTR || errno == EAGAIN) continue;
+            saved_errno = errno;
+            break;
+        } else if (nr == 0) break;
+#endif
+        pos += nr;
+        offset += nr;
+    }
+    Py_END_ALLOW_THREADS
+    if (saved_errno != 0) {
+        Py_CLEAR(output);
+#ifdef _WIN32
+        PyErr_SetFromWindowsErr(saved_errno);
+#else
+        errno = saved_errno;
+        PyErr_SetFromErrno(PyExc_OSError);
+#endif
+        return NULL;
+    }
+    if (pos < n && _PyBytes_Resize(&output, pos) != 0) return NULL;
+    return output;
+}
+
 static PyMethodDef speedup_methods[] = {
+    {"deepcopy", deepcopy, METH_O,
+        "deepcopy(object)\n\nFast implementation of deepcopy()"
+    },
+
     {"parse_date", speedup_parse_date, METH_VARARGS,
         "parse_date()\n\nParse ISO dates faster (specialized for dates stored in the calibre db)."
     },
@@ -572,8 +826,23 @@ static PyMethodDef speedup_methods[] = {
 		"set_thread_name(name)\n\nWrapper for pthread_setname_np"
 	},
 
-	{"get_element_char_length", get_element_char_length, METH_VARARGS,
-		"get_element_char_length(tag_name, text, tail)\n\nGet the number of chars in specified tag"
+	{"pread_all", pread_all, METH_VARARGS,
+		"pread_all(fd, n, offset)\n\nRead upto n bytes from the specified fd at offset in a thread safe manner."
+        " If less than n bytes are returned it means there were less than n bytes in the file at offset."
+        " Only works with seekable regular files, not sockets/ttys/etc. Note that on Windows it moves the file pointer"
+        " so cannot be mixed with calls to tell() or ordinary reads."
+	},
+
+	{"get_num_of_significant_chars", get_num_of_significant_chars, METH_O,
+		"get_num_of_significant_chars(elem)\n\nGet the number of chars in specified tag"
+	},
+
+	{"barename", barename, METH_O,
+		"barename(tag)\n\nGet bare tag name without namespace"
+	},
+
+	{"namespace", namespace, METH_O,
+		"namespace(tag)\n\nGet namespace of the tag"
 	},
 
     {NULL, NULL, 0, NULL}

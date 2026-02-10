@@ -62,6 +62,8 @@ class ViewAction(InterfaceAction):
         cm = partial(self.create_menu_action, self.view_menu)
         self.view_specific_action = cm('specific', _('View specific format'),
                 shortcut='Alt+V', triggered=self.view_specific_format)
+        self.llm_action = cm('llm-book', _('Discuss selected book(s) with AI'), triggered=self.ask_ai, icon='ai.png', shortcut=False)
+        self.llm_action.setVisible(not tweaks['hide_ai_features'])
         self.internal_view_action = cm('internal', _('View with calibre E-book viewer'), icon='viewer.png', triggered=self.view_internal)
         self.action_pick_random = cm('pick random', _('Read a random book'),
                 icon='random.png', triggered=self.view_random)
@@ -74,10 +76,17 @@ class ViewAction(InterfaceAction):
         self.action_view_last_read = ac = self.create_action(
             spec=(_('Continue reading previous book'), None, _('Continue reading the last opened book'), 'shift+v'), attr='action_view_last_read')
         ac.triggered.connect(self.view_last_read)
+        self.view_menu.aboutToShow.connect(self.about_to_show_menu)
         self.gui.addAction(ac)
 
     def initialization_complete(self):
         self.build_menus(self.gui.current_db)
+
+    def about_to_show_menu(self):
+        from qt.core import QKeySequence
+        t = self.llm_action.text().split('\t')[0]
+        sc = self.gui.iactions['Discuss book with AI'].menuless_qaction.shortcut()
+        self.llm_action.setText(t + '\t' + sc.toString(QKeySequence.SequenceFormat.NativeText))
 
     def build_menus(self, db):
         for ac in self.history_actions:
@@ -136,7 +145,8 @@ class ViewAction(InterfaceAction):
                 merge_annotations(other_annotations_map, annotations_map, merge_last_read=False)
         return {
             'book_id': book_id, 'uuid': db.field_for('uuid', book_id), 'fmt': fmt.upper(),
-            'annotations_map': annotations_map, 'library_id': getattr(self.gui.current_db.new_api, 'server_library_id', None)
+            'annotations_map': annotations_map, 'library_id': getattr(self.gui.current_db.new_api, 'server_library_id', None),
+            'calibre_pid': os.getpid(),
         }
 
     def view_format_by_id(self, id_, format, open_at=None):
@@ -205,6 +215,9 @@ class ViewAction(InterfaceAction):
         internal = self.force_internal_viewer or ext in config['internally_viewed_formats'] or open_at is not None
         self._launch_viewer(name, viewer, internal, calibre_book_data=calibre_book_data, open_at=open_at)
 
+    def ask_ai(self):
+        self.gui.iactions['Discuss book with AI'].ask_ai()
+
     def view_specific_format(self, triggered):
         rows = list(self.gui.library_view.selectionModel().selectedRows())
         if not rows or len(rows) == 0:
@@ -222,7 +235,7 @@ class ViewAction(InterfaceAction):
                 for f in x:
                     all_fmts.add(f)
         if not all_fmts:
-            error_dialog(self.gui,  _('Format unavailable'),
+            error_dialog(self.gui, _('Format unavailable'),
                     _('Selected books have no formats'), show=True)
             return
         d = ChooseFormatDialog(self.gui, _('Choose the format to view'),
@@ -326,6 +339,10 @@ class ViewAction(InterfaceAction):
     def view_specific_book(self, index):
         self._view_books([index])
 
+    def view_specific_calibre_book(self, index):
+        ids = [self.gui.library_view.model().id(index)]
+        self._view_calibre_books(ids)
+
     def view_random(self, *args):
         self.gui.iactions['Pick Random Book'].pick_random()
         self._view_books([self.gui.library_view.currentIndex()])
@@ -336,7 +353,7 @@ class ViewAction(InterfaceAction):
         for id_ in ids:
             try:
                 title = db.title(id_, index_is_id=True)
-            except:
+            except Exception:
                 error_dialog(self.gui, _('Cannot view'),
                     _('This book no longer exists in your library'), show=True)
                 self.update_history([], remove={id_})

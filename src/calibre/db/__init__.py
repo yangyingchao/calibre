@@ -9,8 +9,6 @@ SPOOL_SIZE = 30*1024*1024
 
 import numbers
 
-from polyglot.builtins import iteritems
-
 
 class FTSQueryError(ValueError):
 
@@ -38,12 +36,12 @@ def _get_next_series_num_for_list(series_indices, unwrap=True):
                 return i
         # really shouldn't get here.
     if tweaks['series_index_auto_increment'] == 'next_free':
-        for i in range(int(ceil(series_indices[0])), 10000):
+        for i in range(ceil(series_indices[0]), 10000):
             if i not in series_indices:
                 return i
         # really shouldn't get here.
     if tweaks['series_index_auto_increment'] == 'last_free':
-        for i in range(int(ceil(series_indices[-1])), 0, -1):
+        for i in range(ceil(series_indices[-1]), 0, -1):
             if i not in series_indices:
                 return i
         return series_indices[-1] + 1
@@ -56,16 +54,16 @@ def _get_series_values(val):
     import re
     series_index_pat = re.compile(r'(.*)\s+\[([.0-9]+)\]$')
     if not val:
-        return (val, None)
+        return val, None
     match = series_index_pat.match(val.strip())
     if match is not None:
         idx = match.group(2)
         try:
             idx = float(idx)
-            return (match.group(1).strip(), idx)
-        except:
+            return match.group(1).strip(), idx
+        except Exception:
             pass
-    return (val, None)
+    return val, None
 
 
 def get_data_as_dict(self, prefix=None, authors_as_string=False, ids=None, convert_to_local_tz=True):
@@ -91,9 +89,9 @@ def get_data_as_dict(self, prefix=None, authors_as_string=False, ids=None, conve
         'rating', 'timestamp', 'size', 'tags', 'comments', 'series',
         'series_index', 'uuid', 'pubdate', 'last_modified', 'identifiers',
         'languages'}.union(set(fdata))
-    for x, data in iteritems(fdata):
+    for x, data in fdata.items():
         if data['datatype'] == 'series':
-            FIELDS.add('%d_index'%x)
+            FIELDS.add(f'{x}_index')
     data = []
     for record in self.data:
         if record is None:

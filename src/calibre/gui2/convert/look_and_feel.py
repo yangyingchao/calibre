@@ -13,7 +13,6 @@ from calibre.ebooks.conversion.config import OPTIONS
 from calibre.gui2.convert import Widget
 from calibre.gui2.convert.look_and_feel_ui import Ui_Form
 from calibre.startup import connect_lambda
-from polyglot.builtins import iteritems
 
 
 class LookAndFeelWidget(Widget, Ui_Form):
@@ -59,8 +58,8 @@ class LookAndFeelWidget(Widget, Ui_Form):
             return ans
         if g is self.opt_filter_css:
             ans = set()
-            for key, item in iteritems(self.FILTER_CSS):
-                w = getattr(self, 'filter_css_%s'%key)
+            for key, item in self.FILTER_CSS.items():
+                w = getattr(self, f'filter_css_{key}')
                 if w.isChecked():
                     ans = ans.union(item)
             ans = ans.union({x.strip().lower() for x in
@@ -86,8 +85,8 @@ class LookAndFeelWidget(Widget, Ui_Form):
             if not val:
                 val = ''
             items = frozenset(x.strip().lower() for x in val.split(','))
-            for key, vals in iteritems(self.FILTER_CSS):
-                w = getattr(self, 'filter_css_%s'%key)
+            for key, vals in self.FILTER_CSS.items():
+                w = getattr(self, f'filter_css_{key}')
                 if not vals - items:
                     items = items - vals
                     w.setChecked(True)
@@ -102,7 +101,7 @@ class LookAndFeelWidget(Widget, Ui_Form):
     def connect_gui_obj_handler(self, gui_obj, slot):
         if gui_obj is self.opt_filter_css:
             for key in self.FILTER_CSS:
-                w = getattr(self, 'filter_css_%s'%key)
+                w = getattr(self, f'filter_css_{key}')
                 w.stateChanged.connect(slot)
             self.filter_css_others.textChanged.connect(slot)
             return
@@ -116,6 +115,6 @@ class LookAndFeelWidget(Widget, Ui_Form):
         d = FontKeyChooser(self, self.opt_base_font_size.value(),
                 str(self.opt_font_size_mapping.text()).strip())
         if d.exec() == QDialog.DialogCode.Accepted:
-            self.opt_font_size_mapping.setText(', '.join(['%.1f'%x for x in
+            self.opt_font_size_mapping.setText(', '.join([f'{x:.1f}' for x in
                 d.fsizes]))
             self.opt_base_font_size.setValue(d.dbase)

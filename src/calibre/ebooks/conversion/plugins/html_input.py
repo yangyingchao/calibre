@@ -229,7 +229,7 @@ class HTMLInput(InputFormatPlugin):
             title = re.sub(r'\s+', ' ', title.strip())
             if title:
                 titles.append(title)
-            headers.append('(unlabled)')
+            headers.append('(unlabeled)')
             for tag in ('h1', 'h2', 'h3', 'h4', 'h5', 'strong'):
                 expr = '/h:html/h:body//h:%s[position()=1]/text()'
                 header = ''.join(xpath(html, expr % tag))
@@ -253,16 +253,16 @@ class HTMLInput(InputFormatPlugin):
         if not isinstance(link_, str):
             try:
                 link_ = link_.decode('utf-8', 'error')
-            except:
-                self.log.warn('Failed to decode link %r. Ignoring'%link_)
+            except Exception:
+                self.log.warn(f'Failed to decode link {link_!r}. Ignoring')
                 return None, None
         if self.root_dir_for_absolute_links and link_.startswith('/'):
             link_ = link_.lstrip('/')
             base = self.root_dir_for_absolute_links
         try:
             l = Link(link_, base if base else os.getcwd())
-        except:
-            self.log.exception('Failed to process link: %r'%link_)
+        except Exception:
+            self.log.exception(f'Failed to process link: {link_!r}')
             return None, None
         if l.path is None:
             # Not a local resource
@@ -281,7 +281,7 @@ class HTMLInput(InputFormatPlugin):
         return link, frag
 
     def resource_adder(self, link_, base=None):
-        from polyglot.urllib import quote
+        from urllib.parse import quote
         link, frag = self.link_to_local_path(link_, base=base)
         if link is None:
             return link_
@@ -289,7 +289,7 @@ class HTMLInput(InputFormatPlugin):
             if base and not os.path.isabs(link):
                 link = os.path.join(base, link)
             link = os.path.abspath(link)
-        except:
+        except Exception:
             return link_
         if not os.access(link, os.R_OK):
             corrected = False
@@ -311,7 +311,7 @@ class HTMLInput(InputFormatPlugin):
             bhref = os.path.basename(link)
             id, href = self.oeb.manifest.generate(id='added', href=sanitize_file_name(bhref))
             if media_type == 'text/plain':
-                self.log.warn('Ignoring link to text file %r'%link_)
+                self.log.warn(f'Ignoring link to text file {link_!r}')
                 return None
             if media_type == self.BINARY_MIME:
                 # Check for the common case, images

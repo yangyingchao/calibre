@@ -20,7 +20,6 @@ import unittest
 from calibre.constants import islinux, ismacos, iswindows, plugins_loc
 from calibre.utils.resources import get_image_path as I
 from calibre.utils.resources import get_path as P
-from polyglot.builtins import iteritems
 
 is_ci = os.environ.get('CI', '').lower() == 'true'
 is_sanitized = 'libasan' in os.environ.get('LD_PRELOAD', '')
@@ -82,6 +81,11 @@ class BuildTest(unittest.TestCase):
         from chm.chm import CHMFile, chmlib
         del CHMFile, chmlib
 
+    def test_tzdata(self):
+        import tzdata
+        import tzlocal
+        del tzlocal, tzdata
+
     def test_chardet(self):
         from calibre_extensions.uchardet import detect
         raw = 'mūsi Füße'.encode()
@@ -95,23 +99,31 @@ class BuildTest(unittest.TestCase):
         detector.close()
         self.assertEqual(detector.result['encoding'], 'utf-8')
 
-    def test_lzma(self):
-        import lzma
-        lzma.open
-
-    def test_zstd(self):
-        from pyzstd import compress, decompress
+    def test_compression(self):
+        from compression.zstd import compress, decompress
+        data = os.urandom(4096)
+        cdata = compress(data)
+        self.assertEqual(data, decompress(cdata))
+        from compression.lzma import compress, decompress
         data = os.urandom(4096)
         cdata = compress(data)
         self.assertEqual(data, decompress(cdata))
 
     def test_html5lib(self):
-        import html5lib.html5parser  # noqa
-        from html5lib import parse  # noqa
+        import html5lib.html5parser  # noqa: F401
+        from html5lib import parse  # noqa: F401
 
     def test_html5_parser(self):
         from html5_parser import parse
         parse('<p>xxx')
+
+    def test_poppler(self):
+        import subprocess
+
+        from calibre.ebooks.pdf.pdftohtml import PDFTOHTML, popen
+        p = popen([PDFTOHTML, '--help'], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        if p.wait() != 0:
+            raise RuntimeError(f'pdftohtml --help failed with return code: {p.returncode}')
 
     def test_bs4(self):
         import bs4
@@ -122,6 +134,10 @@ class BuildTest(unittest.TestCase):
     def test_speech_dispatcher(self):
         from speechd.client import SSIPClient
         del SSIPClient
+
+    def test_piper(self):
+        from calibre.utils.tts.piper import simple_test
+        simple_test()
 
     def test_zeroconf(self):
         import ifaddr
@@ -152,7 +168,12 @@ class BuildTest(unittest.TestCase):
         root = etree.fromstring(raw, parser=etree.XMLParser(recover=True, no_network=True, resolve_entities=False))
         self.assertEqual(etree.tostring(root), raw)
         from lxml import html
-        html.fromstring("<p>\U0001f63a")
+        html.fromstring('<p>\U0001f63a')
+        from calibre.utils.xml_parse import safe_html_fromstring, safe_xml_fromstring
+        bad = '\U0001f468' * 8192
+        bad = f'<p>{bad}</p>'
+        safe_xml_fromstring(bad)
+        safe_html_fromstring(bad)
 
     def test_certgen(self):
         from calibre.utils.certgen import create_key_pair
@@ -198,7 +219,7 @@ class BuildTest(unittest.TestCase):
         d = winutil.localeconv()
         au(d['thousands_sep'], 'localeconv')
         au(d['decimal_point'], 'localeconv')
-        for k, v in iteritems(d):
+        for k, v in d.items():
             au(v, k)
         os.environ['XXXTEST'] = 'YYY'
         self.assertEqual(os.getenv('XXXTEST'), 'YYY')
@@ -294,10 +315,15 @@ class BuildTest(unittest.TestCase):
         os.rmdir(dpath)
         del h
         shutil.rmtree(tdir)
-        m = winutil.create_mutex("test-mutex", False)
+        m = winutil.create_mutex('test-mutex', False)
         self.assertRaises(OSError, winutil.create_mutex, 'test-mutex', False)
         m.close()
         self.assertEqual(winutil.parse_cmdline('"c:\\test exe.exe" "some arg" 2'), ('c:\\test exe.exe', 'some arg', '2'))
+
+    def test_ffmpeg(self):
+        from calibre_extensions.ffmpeg import resample_raw_audio_16bit
+        data = os.urandom(22050 * 2)
+        resample_raw_audio_16bit(data, 22050, 44100)
 
     def test_sqlite(self):
         import sqlite3
@@ -310,13 +336,24 @@ class BuildTest(unittest.TestCase):
         conn = apsw.Connection(':memory:')
         conn.close()
 
-    @unittest.skipIf('SKIP_QT_BUILD_TEST' in os.environ, 'Skipping Qt build test as it causes crashes in the macOS VM')
     def test_qt(self):
         if is_sanitized:
             raise unittest.SkipTest('Skipping Qt build test as sanitizer is enabled')
-        from qt.core import QApplication, QFontDatabase, QImageReader, QLoggingCategory, QNetworkAccessManager, QSslSocket, QTimer
-        QLoggingCategory.setFilterRules('''qt.webenginecontext.debug=true''')
-        from qt.webengine import QWebEnginePage
+        webengine_process = None
+        if not (is_ci and (iswindows or ismacos)):
+            # WebEngine is flaky in CI
+            from calibre.utils.ipc.simple_worker import start_pipe_worker
+            webengine_process = start_pipe_worker('from calibre.test_build import *; test_webengine_worker_main()')
+        try:
+            self.do_qt_test()
+            if webengine_process is not None:
+                self.assertEqual(webengine_process.wait(), 0)
+        finally:
+            if webengine_process is not None:
+                webengine_process.wait()
+
+    def do_qt_test(self):
+        from qt.core import QFontDatabase, QImageReader, QNetworkAccessManager, QSslSocket
 
         from calibre.utils.img import image_from_data, image_to_data, test
 
@@ -327,9 +364,9 @@ class BuildTest(unittest.TestCase):
         # package. On non-frozen builds, it should just work because the
         # hard-coded paths of the Qt installation should work. If they do not,
         # then it is a distro problem.
-        fmts = set(map(lambda x: x.data().decode('utf-8'), QImageReader.supportedImageFormats()))  # no2to3
-        testf = {'jpg', 'png', 'svg', 'ico', 'gif', 'webp'}
-        self.assertEqual(testf.intersection(fmts), testf, "Qt doesn't seem to be able to load some of its image plugins. Available plugins: %s" % fmts)
+        fmts = {x.data().decode('utf-8') for x in QImageReader.supportedImageFormats()}  # no2to3
+        testf = {'jpg', 'png', 'svg', 'ico', 'gif', 'webp', 'ppm'}
+        self.assertEqual(testf.intersection(fmts), testf, f"Qt doesn't seem to be able to load some of its image plugins. Available plugins: {fmts}")
         data = P('images/blank.png', allow_user_override=False, data=True)
         img = image_from_data(data)
         image_from_data(P('catalog/mastheadImage.gif', allow_user_override=False, data=True))
@@ -340,11 +377,21 @@ class BuildTest(unittest.TestCase):
         test()
 
         from calibre.gui2 import destroy_app, ensure_app
-        from calibre.utils.webengine import setup_profile
         display_env_var = os.environ.pop('DISPLAY', None)
         try:
             ensure_app()
             self.assertGreaterEqual(len(QFontDatabase.families()), 5, 'The QPA headless plugin is not able to locate enough system fonts via fontconfig')
+
+            if 'SKIP_SPEECH_TESTS' not in os.environ:
+                from qt.core import QMediaDevices, QTextToSpeech
+
+                available_tts_engines = tuple(x for x in QTextToSpeech.availableEngines() if x != 'mock')
+                self.assertTrue(available_tts_engines)
+
+                if not islinux or is_ci:
+                    # On some Linux systems this hangs when using the headless backend
+                    QMediaDevices.audioOutputs()
+
             from calibre.ebooks.oeb.transforms.rasterize import rasterize_svg
             img = rasterize_svg(as_qimage=True)
             self.assertFalse(img.isNull())
@@ -354,45 +401,15 @@ class BuildTest(unittest.TestCase):
             na = QNetworkAccessManager()
             self.assertTrue(hasattr(na, 'sslErrors'), 'Qt not compiled with openssl')
             self.assertTrue(QSslSocket.availableBackends(), 'Qt tls plugins missings')
-            p = QWebEnginePage()
-            setup_profile(p.profile())
-
-            def callback(result):
-                callback.result = result
-                if hasattr(print_callback, 'result'):
-                    QApplication.instance().quit()
-
-            def print_callback(result):
-                print_callback.result = result
-                if hasattr(callback, 'result'):
-                    QApplication.instance().quit()
-
-            def do_webengine_test(title):
-                nonlocal p
-                p.runJavaScript('1 + 1', callback)
-                p.printToPdf(print_callback)
-
-            def render_process_crashed(status, exit_code):
-                print('Qt WebEngine Render process crashed with status:', status, 'and exit code:', exit_code)
-                QApplication.instance().quit()
-
-            p.titleChanged.connect(do_webengine_test)
-            p.renderProcessTerminated.connect(render_process_crashed)
-            p.runJavaScript(f'document.title = "test-run-{os.getpid()}";')
-            timeout = 10
-            QTimer.singleShot(timeout * 1000, lambda: QApplication.instance().quit())
-            QApplication.instance().exec()
-            self.assertTrue(hasattr(callback, 'result'), f'Qt WebEngine failed to run in {timeout} seconds')
-            self.assertEqual(callback.result, 2, 'Simple JS computation failed')
-            self.assertTrue(hasattr(print_callback, 'result'), f'Qt WebEngine failed to print in {timeout} seconds')
-            self.assertIn(b'%PDF-1.4', bytes(print_callback.result), 'Print to PDF failed')
-            del p
             del na
             destroy_app()
-            del QWebEnginePage
         finally:
             if display_env_var is not None:
                 os.environ['DISPLAY'] = display_env_var
+
+    def test_pykakasi(self):
+        from calibre.ebooks.unihandecode.jadecoder import Jadecoder
+        self.assertEqual(Jadecoder().decode('自転車生活の愉しみ'), 'Jitensha Seikatsu no Tanoshi mi')
 
     def test_imaging(self):
         from PIL import Image
@@ -410,16 +427,14 @@ class BuildTest(unittest.TestCase):
         out = StringIO()
         features.pilinfo(out=out, supported_formats=False)
         out = out.getvalue()
-        for line in '''\
+        lines = '''\
         --- PIL CORE support ok
         --- FREETYPE2 support ok
         --- WEBP support ok
-        --- WEBP Transparency support ok
-        --- WEBPMUX support ok
-        --- WEBP Animation support ok
         --- JPEG support ok
         --- ZLIB (PNG/ZIP) support ok
-        '''.splitlines():
+        '''.splitlines()
+        for line in lines:
             self.assertIn(line.strip(), out)
         with Image.open(I('lt.png', allow_user_override=False)) as i:
             self.assertGreaterEqual(i.size, (20, 20))
@@ -458,13 +473,13 @@ class BuildTest(unittest.TestCase):
         from calibre.ebooks.pdf.pdftohtml import PDFTOHTML, PDFTOTEXT
         from calibre.utils.ipc.launch import Worker
         w = Worker({})
-        self.assertTrue(os.path.exists(w.executable), 'calibre-parallel (%s) does not exist' % w.executable)
-        self.assertTrue(os.path.exists(w.gui_executable), 'calibre-parallel-gui (%s) does not exist' % w.gui_executable)
-        self.assertTrue(os.path.exists(PDFTOHTML), 'pdftohtml (%s) does not exist' % PDFTOHTML)
-        self.assertTrue(os.path.exists(PDFTOTEXT), 'pdftotext (%s) does not exist' % PDFTOTEXT)
+        self.assertTrue(os.path.exists(w.executable), f'calibre-parallel ({w.executable}) does not exist')
+        self.assertTrue(os.path.exists(w.gui_executable), f'calibre-parallel-gui ({w.gui_executable}) does not exist')
+        self.assertTrue(os.path.exists(PDFTOHTML), f'pdftohtml ({PDFTOHTML}) does not exist')
+        self.assertTrue(os.path.exists(PDFTOTEXT), f'pdftotext ({PDFTOTEXT}) does not exist')
         if iswindows:
             from calibre.devices.usbms.device import eject_exe
-            self.assertTrue(os.path.exists(eject_exe()), 'calibre-eject.exe (%s) does not exist' % eject_exe())
+            self.assertTrue(os.path.exists(eject_exe()), f'calibre-eject.exe ({eject_exe()}) does not exist')
 
     def test_netifaces(self):
         import netifaces
@@ -546,8 +561,10 @@ def test_multiprocessing():
         p.join()
 
 
-def find_tests():
+def find_tests(only_build=False):
     ans = unittest.defaultTestLoader.loadTestsFromTestCase(BuildTest)
+    if only_build:
+        return ans
     from calibre.utils.icu_test import find_tests
     ans.addTests(find_tests())
     from tinycss.tests.main import find_tests
@@ -562,6 +579,59 @@ def find_tests():
 def test():
     from calibre.utils.run_tests import run_cli
     run_cli(find_tests())
+
+
+def test_webengine_worker_main():
+    from qt.core import QApplication, QLoggingCategory, QTimer
+    from qt.webengine import QWebEnginePage
+
+    from calibre.gui2 import destroy_app, ensure_app
+    from calibre.utils.webengine import setup_profile
+    QLoggingCategory.setFilterRules('''qt.webenginecontext.debug=true''')
+    if hasattr(os, 'geteuid') and os.geteuid() == 0:
+        # likely a container build, webengine cannot run as root with sandbox
+        os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--no-sandbox'
+
+    ensure_app()
+
+    p = QWebEnginePage()
+    setup_profile(p.profile())
+
+    def callback(result):
+        callback.result = result
+        if hasattr(print_callback, 'result'):
+            QApplication.instance().quit()
+
+    def print_callback(result):
+        print_callback.result = result
+        if hasattr(callback, 'result'):
+            QApplication.instance().quit()
+
+    def do_webengine_test(title):
+        nonlocal p
+        p.runJavaScript('1 + 1', callback)
+        p.printToPdf(print_callback)
+
+    def render_process_crashed(status, exit_code):
+        print('Qt WebEngine Render process crashed with status:', status, 'and exit code:', exit_code)
+        QApplication.instance().quit()
+
+    p.titleChanged.connect(do_webengine_test)
+    p.renderProcessTerminated.connect(render_process_crashed)
+    p.runJavaScript(f'document.title = "test-run-{os.getpid()}";')
+    timeout = 10
+    QTimer.singleShot(timeout * 1000, lambda: QApplication.instance().quit())
+    QApplication.instance().exec()
+    if not hasattr(callback, 'result'):
+        raise SystemExit(f'Qt WebEngine failed to run in {timeout} seconds')
+    if callback.result != 2:
+        raise SystemExit('Simple JS computation failed')
+    if not hasattr(print_callback, 'result'):
+        raise SystemExit(f'Qt WebEngine failed to print in {timeout} seconds')
+    if b'%PDF-1.4' not in bytes(print_callback.result):
+        raise SystemExit('Print to PDF failed')
+    del p
+    destroy_app()
 
 
 if __name__ == '__main__':

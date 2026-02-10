@@ -8,6 +8,7 @@ import errno
 import os
 import shutil
 import stat
+from queue import Empty, LifoQueue
 from threading import Thread
 
 from qt.core import QHBoxLayout, QLabel, QObject, QSize, Qt, QWidget, pyqtSignal
@@ -17,14 +18,13 @@ from calibre.gui2.progress_indicator import ProgressIndicator
 from calibre.ptempfile import PersistentTemporaryFile
 from calibre.utils import join_with_timeout
 from calibre.utils.filenames import atomic_rename, format_permissions
-from polyglot.queue import Empty, LifoQueue
 
 
 def save_dir_container(container, path):
     if not os.path.exists(path):
         os.makedirs(path)
     if not os.path.isdir(path):
-        raise ValueError('%s is not a folder, cannot save a directory based container to it' % path)
+        raise ValueError(f'{path} is not a folder, cannot save a directory based container to it')
     container.commit(path)
 
 
@@ -33,7 +33,7 @@ def save_container(container, path):
         return save_dir_container(container, path)
     temp = PersistentTemporaryFile(
         prefix=('_' if iswindows else '.'), suffix=os.path.splitext(path)[1], dir=os.path.dirname(path))
-    if hasattr(os, 'fchmod'):
+    if hasattr(os, 'fchown'):
         # Ensure file permissions and owner information is preserved
         fno = temp.fileno()
         st = None
@@ -56,8 +56,8 @@ def save_container(container, path):
             except OSError as err:
                 if err.errno != errno.EPERM:
                     raise
-                raise OSError('Failed to change permissions of {} to {} ({}), with error: {}. Most likely the {} directory has a restrictive umask'.format(
-                    temp.name, oct(st.st_mode), format_permissions(st.st_mode), errno.errorcode[err.errno], os.path.dirname(temp.name)))
+                raise OSError(f'Failed to change permissions of {temp.name} to {oct(st.st_mode)} ({format_permissions(st.st_mode)}), '
+                              f'with error: {errno.errorcode[err.errno]}. Most likely the {os.path.dirname(temp.name)} directory has a restrictive umask')
             try:
                 os.fchown(fno, st.st_uid, st.st_gid)
             except OSError as err:
@@ -157,7 +157,7 @@ class SaveManager(QObject):
             try:
                 count, tdir, container = x
                 error_occurred = self.process_save(count, tdir, container)
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
             finally:
@@ -193,7 +193,7 @@ class SaveManager(QObject):
         error_occurred = False
         try:
             self.do_save(tdir, container)
-        except:
+        except Exception:
             import traceback
             self.report_error.emit(traceback.format_exc())
             error_occurred = True

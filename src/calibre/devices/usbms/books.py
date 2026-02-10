@@ -14,9 +14,10 @@ from calibre.devices.interface import BookList as _BookList
 from calibre.devices.mime import mime_type_ext
 from calibre.ebooks.metadata import title_sort
 from calibre.ebooks.metadata.book.base import Metadata
+from calibre.prints import debug_print
 from calibre.utils.config_base import tweaks
 from calibre.utils.icu import sort_key
-from polyglot.builtins import cmp, iteritems, itervalues, string_or_bytes
+from polyglot.builtins import cmp
 
 
 def none_cmp(xx, yy):
@@ -32,7 +33,7 @@ def none_cmp(xx, yy):
         return 1
     if y is None:
         return -1
-    if isinstance(x, string_or_bytes) and isinstance(y, string_or_bytes):
+    if isinstance(x, (str, bytes)) and isinstance(y, (str, bytes)):
         x, y = sort_key(force_unicode(x)), sort_key(force_unicode(y))
     try:
         c = cmp(x, y)
@@ -66,7 +67,7 @@ class Book(Metadata):
         self.size = size  # will be set later if None
         try:
             self.datetime = time.gmtime(os.path.getctime(self.path))
-        except:
+        except Exception:
             self.datetime = time.gmtime()
         if other:
             self.smart_update(other)
@@ -158,7 +159,6 @@ class CollectionsBookList(BookList):
         return cat_name.strip()
 
     def get_collections(self, collection_attributes):
-        from calibre.devices.usbms.driver import debug_print
         from calibre.utils.config import device_prefs
         debug_print('Starting get_collections:', device_prefs['manage_device_metadata'])
         debug_print('Renaming rules:', tweaks['sony_collection_renaming_rules'])
@@ -285,9 +285,8 @@ class CollectionsBookList(BookList):
                         else:
                             collections[cat_name][lpath] = \
                                 (book, book.get(attr+'_index', sys.maxsize), tsval)
-                    else:
-                        if lpath not in collections[cat_name]:
-                            collections[cat_name][lpath] = (book, tsval, tsval)
+                    elif lpath not in collections[cat_name]:
+                        collections[cat_name][lpath] = (book, tsval, tsval)
 
             # All books by author
             if all_by_author:
@@ -299,7 +298,7 @@ class CollectionsBookList(BookList):
                 if all_by_title not in collections:
                     collections[all_by_title] = {}
                 collections[all_by_title][lpath] = (book, tsval, asval)
-            for (n, sb) in all_by_something:
+            for n,sb in all_by_something:
                 if n not in collections:
                     collections[n] = {}
                 collections[n][lpath] = (book, book.get(sb, ''), tsval)
@@ -307,8 +306,8 @@ class CollectionsBookList(BookList):
         # Sort collections
         result = {}
 
-        for category, lpaths in iteritems(collections):
-            books = sorted(itervalues(lpaths), key=cmp_to_key(none_cmp))
+        for category, lpaths in collections.items():
+            books = sorted(lpaths.values(), key=cmp_to_key(none_cmp))
             result[category] = [x[0] for x in books]
         return result
 

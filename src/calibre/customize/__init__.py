@@ -6,9 +6,15 @@ import importlib
 import os
 import sys
 import zipfile
+from typing import TYPE_CHECKING
 
 from calibre.constants import ismacos, iswindows, numeric_version
 from calibre.ptempfile import PersistentTemporaryFile
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+
+    from calibre.ai import ChatMessage, ChatResponse
 
 if iswindows:
     platform = 'windows'
@@ -149,17 +155,32 @@ class Plugin:  # {{{
 
         from calibre.gui2 import gprefs
 
+        class ConfigDialog(QDialog):
+
+            def __init__(self, parent, config_widget):
+                super().__init__(parent)
+                self.config_widget = config_widget
+
+            def accept(self):
+                if ((validate := getattr(self.config_widget, 'validate', None)) and
+                        getattr(self.config_widget, 'validate_before_accept', False)):
+                    if not validate():
+                        return
+                super().accept()
+
+        try:
+            config_widget = self.config_widget()
+        except NotImplementedError:
+            config_widget = None
+
         prefname = 'plugin config dialog:'+self.type + ':' + self.name
-        config_dialog = QDialog(parent)
+
+        config_dialog = ConfigDialog(parent, config_widget)
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         v = QVBoxLayout(config_dialog)
         button_box.accepted.connect(config_dialog.accept)
         button_box.rejected.connect(config_dialog.reject)
         config_dialog.setWindowTitle(_('Customize') + ' ' + self.name)
-        try:
-            config_widget = self.config_widget()
-        except NotImplementedError:
-            config_widget = None
 
         if isinstance(config_widget, tuple):
             from calibre.gui2 import warning_dialog
@@ -322,8 +343,7 @@ class Plugin:  # {{{
         interface. It is called when the user does: calibre-debug -r "Plugin
         Name". Any arguments passed are present in the args variable.
         '''
-        raise NotImplementedError('The %s plugin has no command line interface'
-                                  %self.name)
+        raise NotImplementedError(f'The {self.name} plugin has no command line interface')
 
 # }}}
 
@@ -474,7 +494,8 @@ class MetadataReaderPlugin(Plugin):  # {{{
             in :attr:`file_types`.
         :return: A :class:`calibre.ebooks.metadata.book.Metadata` object
         '''
-        return None
+        return
+
 # }}}
 
 
@@ -539,7 +560,7 @@ class CatalogPlugin(Plugin):  # {{{
         Custom fields sort after standard fields
         '''
         if key.startswith('#'):
-            return '~%s' % key[1:]
+            return f'~{key[1:]}'
         else:
             return key
 
@@ -573,11 +594,10 @@ class CatalogPlugin(Plugin):  # {{{
             # Validate requested_fields
             if requested_fields - all_fields:
                 from calibre.library import current_library_name
-                invalid_fields = sorted(list(requested_fields - all_fields))
-                print("invalid --fields specified: %s" % ', '.join(invalid_fields))
-                print("available fields in '%s': %s" %
-                      (current_library_name(), ', '.join(sorted(list(all_fields)))))
-                raise ValueError("unable to generate catalog with specified fields")
+                invalid_fields = sorted(requested_fields - all_fields)
+                print('invalid --fields specified: {}'.format(', '.join(invalid_fields)))
+                print("available fields in '{}': {}".format(current_library_name(), ', '.join(sorted(all_fields))))
+                raise ValueError('unable to generate catalog with specified fields')
 
             fields = [x for x in of if x in all_fields]
         else:
@@ -600,7 +620,7 @@ class CatalogPlugin(Plugin):  # {{{
         from calibre.ptempfile import PersistentTemporaryDirectory
 
         if type(self) not in builtin_plugins and self.name not in config['disabled_plugins']:
-            files_to_copy = [f"{self.name.lower()}.{ext}" for ext in ["ui","py"]]
+            files_to_copy = [f'{self.name.lower()}.{ext}' for ext in ['ui','py']]
             resources = zipfile.ZipFile(self.plugin_path,'r')
 
             if self.resources_path is None:
@@ -609,8 +629,8 @@ class CatalogPlugin(Plugin):  # {{{
             for file in files_to_copy:
                 try:
                     resources.extract(file, self.resources_path)
-                except:
-                    print(f" customize:__init__.initialize(): {file} not found in {os.path.basename(self.plugin_path)}")
+                except Exception:
+                    print(f' customize:__init__.initialize(): {file} not found in {os.path.basename(self.plugin_path)}')
                     continue
             resources.close()
 
@@ -641,7 +661,6 @@ class InterfaceActionBase(Plugin):  # {{{
     supported_platforms = ['windows', 'osx', 'linux']
     author         = 'Kovid Goyal'
     type = _('User interface action')
-    can_be_disabled = False
 
     actual_plugin = None
 
@@ -676,7 +695,6 @@ class PreferencesPlugin(Plugin):  # {{{
     supported_platforms = ['windows', 'osx', 'linux']
     author         = 'Kovid Goyal'
     type = _('Preferences')
-    can_be_disabled = False
 
     #: Import path to module that contains a class named ConfigWidget
     #: which implements the ConfigWidgetInterface. Used by
@@ -802,4 +820,76 @@ class LibraryClosedPlugin(Plugin):  # {{{
         '''
         raise NotImplementedError('LibraryClosedPlugin '
                 'run method must be overridden in subclass')
+# }}}
+
+
+class AIProviderPlugin(Plugin):  # {{{
+    '''
+    AIProvider plugins abstract AI services that can be used by the rest of calibre.
+    '''
+    type = _('AI provider')
+
+    # minimum version when support for this plugin type was added
+    minimum_calibre_version = (8, 10, 0)
+
+    # Used by builtin AI Provider plugins to live load the backend code
+    builtin_live_module_name = ''
+
+    # See the AICapabilities enum. Sub-classes *must* implement this to the
+    # capabilities they support. Note this is independent of configuration.
+    @property
+    def capabilities(self):
+        raise NotImplementedError()
+
+    @property
+    def builtin_live_module(self):
+        if not self.builtin_live_module_name:
+            return None
+        if (ans := self._builtin_live_module) is None:
+            from calibre.live import Strategy, load_module
+            ans = self._builtin_live_module = load_module(self.builtin_live_module_name, strategy=Strategy.fast)
+        return ans
+
+    @property
+    def is_ready_for_use(self) -> bool:
+        if not self.builtin_live_module_name:
+            return False
+        return self.builtin_live_module.is_ready_for_use()
+
+    def initialize(self):
+        self._builtin_live_module = None
+
+    def customization_help(self):
+        return ''
+
+    def config_widget(self):
+        '''
+        The config widget for an AI plugin must support validate() and additionally the property
+        is_ready_for_use which must be true iff the plugin is ready to be used,
+        i.e. it does not require configuration such as an API key or the API key is already set.
+        '''
+        if self.builtin_live_module_name:
+            return self.builtin_live_module.config_widget()
+        raise NotImplementedError()
+
+    def save_settings(self, config_widget):
+        if self.builtin_live_module_name:
+            return self.builtin_live_module.save_settings(config_widget)
+        raise NotImplementedError()
+
+    def text_chat(self, messages: Iterable[ChatMessage], use_model: str = '') -> Iterator[ChatResponse]:
+        '''
+        Send the specified chat messages to the AI and return an iterable over its streaming responses.
+        The :code:`use_model` parameter will cause the plugin to use a specific model, useful when having
+        a conversation, to ensure the same model responds for every subsequent query.
+        '''
+        if not self.builtin_live_module_name:
+            raise NotImplementedError()
+        yield from self.builtin_live_module.text_chat(messages, use_model)
+
+    def human_readable_model_name(self, model_id: str) -> str:
+        ' Return a human readable model name for the specified model id'
+        if not self.builtin_live_module_name:
+            return model_id
+        return self.builtin_live_module.human_readable_model_name(model_id)
 # }}}

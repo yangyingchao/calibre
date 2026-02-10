@@ -11,7 +11,6 @@ from collections import OrderedDict, namedtuple
 from calibre.ebooks.mobi.reader.headers import NULL_INDEX
 from calibre.ebooks.mobi.reader.index import CNCX, INDEX_HEADER_FIELDS, get_tag_section_start, parse_index_record, parse_indx_header, parse_tagx_section
 from calibre.ebooks.mobi.reader.ncx import default_entry, tag_fieldname_map
-from polyglot.builtins import iteritems
 
 File = namedtuple('File',
     'file_number name divtbl_count start_position length')
@@ -51,7 +50,7 @@ def read_variable_len_data(data, header):
         header['tagx_block_size'] = 0
     trailing_bytes = data[idxt_offset+idxt_size:]
     if trailing_bytes.rstrip(b'\0'):
-        raise ValueError('Traling bytes after last IDXT entry: %r' % trailing_bytes.rstrip(b'\0'))
+        raise ValueError('Trailing bytes after last IDXT entry: {!r}'.format(trailing_bytes.rstrip(b'\0')))
     header['indices'] = indices
 
 
@@ -96,24 +95,24 @@ class Index:
         a = ans.append
         if self.header is not None:
             for field in INDEX_HEADER_FIELDS:
-                a('%-12s: %r'%(FIELD_NAMES.get(field, field), self.header[field]))
+                a(f'{FIELD_NAMES.get(field, field):<12}: {self.header[field]!r}')
         ans.extend(['', ''])
-        ans += ['*'*10 + ' Index Record Headers (%d records) ' % len(self.index_headers) + '*'*10]
+        ans += ['*'*10 + f' Index Record Headers ({len(self.index_headers)} records) ' + '*'*10]
         for i, header in enumerate(self.index_headers):
-            ans += ['*'*10 + ' Index Record %d ' % i + '*'*10]
+            ans += ['*'*10 + f' Index Record {i} ' + '*'*10]
             for field in INDEX_HEADER_FIELDS:
-                a('%-12s: %r'%(FIELD_NAMES.get(field, field), header[field]))
+                a(f'{FIELD_NAMES.get(field, field):<12}: {header[field]!r}')
 
         if self.cncx:
             a('*'*10 + ' CNCX ' + '*'*10)
-            for offset, val in iteritems(self.cncx):
-                a('%10s: %s'%(offset, val))
+            for offset, val in self.cncx.items():
+                a(f'{offset:10}: {val}')
             ans.extend(['', ''])
 
         if self.table is not None:
-            a('*'*10 + ' %d Index Entries '%len(self.table) + '*'*10)
-            for k, v in iteritems(self.table):
-                a('%s: %r'%(k, v))
+            a('*'*10 + f' {len(self.table)} Index Entries ' + '*'*10)
+            for k, v in self.table.items():
+                a(f'{k}: {v!r}')
 
         if self.records:
             ans.extend(['', '', '*'*10 + ' Parsed Entries ' + '*'*10])
@@ -139,8 +138,7 @@ class SKELIndex(Index):
             for i, text in enumerate(self.table):
                 tag_map = self.table[text]
                 if set(tag_map) != {1, 6}:
-                    raise ValueError('SKEL Index has unknown tags: %s'%
-                            (set(tag_map)-{1,6}))
+                    raise ValueError(f'SKEL Index has unknown tags: {set(tag_map)-{1,6}}')
                 self.records.append(File(
                     i,  # file_number
                     text,  # name
@@ -160,8 +158,7 @@ class SECTIndex(Index):
             for i, text in enumerate(self.table):
                 tag_map = self.table[text]
                 if set(tag_map) != {2, 3, 4, 6}:
-                    raise ValueError('Chunk Index has unknown tags: %s'%
-                            (set(tag_map)-{2, 3, 4, 6}))
+                    raise ValueError(f'Chunk Index has unknown tags: {set(tag_map)-{2,3,4,6}}')
 
                 toc_text = self.cncx[tag_map[2][0]]
                 self.records.append(Elem(
@@ -185,8 +182,7 @@ class GuideIndex(Index):
             for i, text in enumerate(self.table):
                 tag_map = self.table[text]
                 if set(tag_map) not in ({1, 6}, {1, 2, 3}):
-                    raise ValueError('Guide Index has unknown tags: %s'%
-                            tag_map)
+                    raise ValueError(f'Guide Index has unknown tags: {tag_map}')
 
                 title = self.cncx[tag_map[1][0]]
                 self.records.append(GuideRef(
@@ -207,7 +203,7 @@ class NCXIndex(Index):
             NCXEntry = namedtuple('NCXEntry', 'index start length depth parent '
         'first_child last_child title pos_fid kind')
 
-            for num, x in enumerate(iteritems(self.table)):
+            for num, x in enumerate(self.table.items()):
                 text, tag_map = x
                 entry = e = default_entry.copy()
                 entry['name'] = text
@@ -222,9 +218,9 @@ class NCXIndex(Index):
                             # offset
                             fieldvalue = tuple(tag_map[tag])
                         entry[fieldname] = fieldvalue
-                        for which, name in iteritems({3:'text', 5:'kind', 70:'description',
+                        for which, name in {3:'text', 5:'kind', 70:'description',
                                 71:'author', 72:'image_caption',
-                                73:'image_attribution'}):
+                                73:'image_attribution'}.items():
                             if tag == which:
                                 entry[name] = self.cncx.get(fieldvalue,
                                         default_entry[name])

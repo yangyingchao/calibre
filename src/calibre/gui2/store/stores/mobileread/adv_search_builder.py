@@ -11,6 +11,7 @@ from qt.core import QDialog, QDialogButtonBox
 
 from calibre.gui2.store.stores.mobileread.adv_search_builder_ui import Ui_Dialog
 from calibre.library.caches import CONTAINS_MATCH, EQUALS_MATCH
+from calibre.utils.localization import localize_user_manual_link
 
 
 class AdvSearchBuilderDialog(QDialog, Ui_Dialog):
@@ -18,6 +19,8 @@ class AdvSearchBuilderDialog(QDialog, Ui_Dialog):
     def __init__(self, parent):
         QDialog.__init__(self, parent)
         self.setupUi(self)
+        self.search_interface_label.setText(self.search_interface_label.text().format(localize_user_manual_link(
+            'https://manual.calibre-ebook.com/gui.html#the-search-interface')))
 
         self.buttonBox.accepted.connect(self.advanced_search_button_pushed)
         self.tab_2_button_box.accepted.connect(self.accept)
@@ -73,8 +76,7 @@ class AdvSearchBuilderDialog(QDialog, Ui_Dialog):
             self.mc = '='
         else:
             self.mc = '~'
-        all, any, phrase, none = list(map(lambda x: type(u'')(x.text()),
-                (self.all, self.any, self.phrase, self.none)))
+        all, any, phrase, none = [type(u'')(x.text()) for x in (self.all, self.any, self.phrase, self.none)]
         all, any, none = list(map(self.tokens, (all, any, none)))
         phrase = phrase.strip()
         all = ' and '.join(all)

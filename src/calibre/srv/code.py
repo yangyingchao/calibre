@@ -15,10 +15,11 @@ from calibre import as_unicode
 from calibre.constants import in_develop_mode
 from calibre.customize.ui import available_input_formats
 from calibre.db.view import sanitize_sort_field_name
+from calibre.ebooks.metadata.book.render import resolve_default_author_link
 from calibre.srv.ajax import search_result
-from calibre.srv.errors import BookNotFound, HTTPBadRequest, HTTPForbidden, HTTPNotFound, HTTPRedirect
+from calibre.srv.errors import BookNotFound, HTTPBadRequest, HTTPForbidden, HTTPNotFound, HTTPRedirect, HTTPTempRedirect
 from calibre.srv.last_read import last_read_cache
-from calibre.srv.metadata import book_as_json, categories_as_json, categories_settings, icon_map
+from calibre.srv.metadata import book_as_json, categories_as_json, categories_settings, get_gpref, icon_map, web_search_link
 from calibre.srv.routes import endpoint, json
 from calibre.srv.utils import get_library_data, get_use_roman
 from calibre.utils.config import prefs, tweaks
@@ -27,7 +28,6 @@ from calibre.utils.localization import _, get_lang, lang_code_for_user_manual, l
 from calibre.utils.resources import get_path as P
 from calibre.utils.search_query_parser import ParseException
 from calibre.utils.serialize import json_dumps
-from polyglot.builtins import iteritems, itervalues
 
 POSTABLE = frozenset({'GET', 'POST', 'HEAD'})
 
@@ -172,6 +172,7 @@ def basic_interface_data(ctx, rd):
         'default_book_list_mode': rd.opts.book_list_mode,
         'donate_link': localize_website_link('https://calibre-ebook.com/donate'),
         'lang_code_for_user_manual': lang_code_for_user_manual(),
+        'default_author_link': resolve_default_author_link(get_gpref('default_author_link')),
     }
     ans['library_map'], ans['default_library_id'] = ctx.library_info(rd)
     if ans['username']:
@@ -220,7 +221,7 @@ def get_library_init_data(ctx, rd, db, num, sorts, orders, vl):
         sf.pop('ondevice', None)
         ans['sortable_fields'] = sorted(
             ((sanitize_sort_field_name(db.field_metadata, k), v)
-             for k, v in iteritems(sf)),
+             for k, v in sf.items()),
             key=lambda field_name: sort_key(field_name[1])
         )
         ans['field_metadata'] = db.field_metadata.all_metadata()
@@ -230,6 +231,7 @@ def get_library_init_data(ctx, rd, db, num, sorts, orders, vl):
         ans['fts_enabled'] = db.is_fts_enabled()
         ans['book_details_vertical_categories'] = db._pref('book_details_vertical_categories', ())
         ans['fields_that_support_notes'] = tuple(db._field_supports_notes())
+        ans['categories_using_hierarchy'] = db._pref('categories_using_hierarchy', ())
         mdata = ans['metadata'] = {}
         try:
             extra_books = {
@@ -258,7 +260,7 @@ def books(ctx, rd):
     try:
         num = int(rd.query.get('num', rd.opts.num_per_page))
     except Exception:
-        raise HTTPNotFound('Invalid number of books: %r' % rd.query.get('num'))
+        raise HTTPNotFound('Invalid number of books: {!r}'.format(rd.query.get('num')))
     library_id, db, sorts, orders, vl = get_basic_query_data(ctx, rd)
     ans = get_library_init_data(ctx, rd, db, num, sorts, orders, vl)
     ans['library_id'] = library_id
@@ -290,7 +292,7 @@ def interface_data(ctx, rd):
     try:
         num = int(rd.query.get('num', rd.opts.num_per_page))
     except Exception:
-        raise HTTPNotFound('Invalid number of books: %r' % rd.query.get('num'))
+        raise HTTPNotFound('Invalid number of books: {!r}'.format(rd.query.get('num')))
     ans.update(get_library_init_data(ctx, rd, db, num, sorts, orders, vl))
     return ans
 
@@ -324,16 +326,16 @@ def more_books(ctx, rd):
     try:
         num = int(rd.query.get('num', rd.opts.num_per_page))
     except Exception:
-        raise HTTPNotFound('Invalid number of books: %r' % rd.query.get('num'))
+        raise HTTPNotFound('Invalid number of books: {!r}'.format(rd.query.get('num')))
     try:
         search_query = load_json_file(rd.request_body_file)
         query, offset, sorts, orders, vl = search_query['query'], search_query[
             'offset'
         ], search_query['sort'], search_query['sort_order'], search_query['vl']
     except KeyError as err:
-        raise HTTPBadRequest('Search query missing key: %s' % as_unicode(err))
+        raise HTTPBadRequest(f'Search query missing key: {as_unicode(err)}')
     except Exception as err:
-        raise HTTPBadRequest('Invalid query: %s' % as_unicode(err))
+        raise HTTPBadRequest(f'Invalid query: {as_unicode(err)}')
     ans = {}
     with db.safe_read_lock:
         ans['search_result'] = search_result(
@@ -360,7 +362,7 @@ def set_session_data(ctx, rd):
             if not isinstance(new_data, dict):
                 raise Exception('session data must be a dict')
         except Exception as err:
-            raise HTTPBadRequest('Invalid data: %s' % as_unicode(err))
+            raise HTTPBadRequest(f'Invalid data: {as_unicode(err)}')
         ud = ctx.user_manager.get_session_data(rd.username)
         ud.update(new_data)
         ctx.user_manager.set_session_data(rd.username, ud)
@@ -377,7 +379,7 @@ def get_books(ctx, rd):
     try:
         num = int(rd.query.get('num', rd.opts.num_per_page))
     except Exception:
-        raise HTTPNotFound('Invalid number of books: %r' % rd.query.get('num'))
+        raise HTTPNotFound('Invalid number of books: {!r}'.format(rd.query.get('num')))
     searchq = rd.query.get('search', '')
     db = get_library_data(ctx, rd)[0]
     ans = {}
@@ -390,7 +392,7 @@ def get_books(ctx, rd):
         except ParseException as err:
             # This must not be translated as it is used by the front end to
             # detect invalid search expressions
-            raise HTTPBadRequest('Invalid search expression: %s' % as_unicode(err))
+            raise HTTPBadRequest(f'Invalid search expression: {as_unicode(err)}')
         for book_id in ans['search_result']['book_ids']:
             data = book_as_json(db, book_id)
             if data is not None:
@@ -419,6 +421,28 @@ def book_metadata(ctx, rd, book_id):
     return data
 
 
+@endpoint('/web-search/{book_id}/{field}/{item_val}', postprocess=json)
+def web_search(ctx, rd, book_id, field, item_val):
+    '''
+    Redirect to a web search URL for the specified item.
+    Optional: ?library_id=<default library>
+    '''
+    db, library_id = get_library_data(ctx, rd)[:2]
+    try:
+        book_id = int(book_id)
+    except Exception:
+        raise HTTPNotFound(f'Book with id {book_id!r} does not exist')
+    if db is None:
+        raise HTTPNotFound(f'Library {library_id!r} not found')
+    with db.safe_read_lock:
+        if not ctx.has_id(rd, db, book_id):
+            raise BookNotFound(book_id, db)
+        url, tooltip = web_search_link(db, book_id, field, item_val)
+        if url:
+            raise HTTPTempRedirect(url)
+    raise HTTPNotFound(f'No web search URL for {field} {item_val}')
+
+
 @endpoint('/interface-data/tag-browser')
 def tag_browser(ctx, rd):
     '''
@@ -430,7 +454,7 @@ def tag_browser(ctx, rd):
     opts = categories_settings(rd.query, db, gst_container=tuple)
     vl = rd.query.get('vl') or ''
     etag = json_dumps([db.last_modified().isoformat(), rd.username, library_id, vl, list(opts)])
-    etag = hashlib.sha1(etag).hexdigest()
+    etag = hashlib.sha256(etag).hexdigest()
 
     def generate():
         return json(ctx, rd, tag_browser, categories_as_json(ctx, rd, db, opts, vl))
@@ -441,7 +465,7 @@ def tag_browser(ctx, rd):
 def all_lang_names():
     ans = getattr(all_lang_names, 'ans', None)
     if ans is None:
-        ans = all_lang_names.ans = tuple(sorted(itervalues(lang_map_for_ui()), key=numeric_sort_key))
+        ans = all_lang_names.ans = tuple(sorted(lang_map_for_ui().values(), key=numeric_sort_key))
     return ans
 
 

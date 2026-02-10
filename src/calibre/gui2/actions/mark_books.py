@@ -37,7 +37,7 @@ class MarkWithTextDialog(QDialog):
 
         history = textbox.all_items
         button_rows = min(4, len(history)-1)
-        for i in range(0, button_rows):
+        for i in range(button_rows):
             if i == 0:
                 layout.addWidget(QLabel(_('Recently used values:')), 0, 0, 1, 2)
             button = QPushButton()
@@ -132,7 +132,7 @@ class MarkBooksAction(InterfaceActionWithLibraryDrop):
             try:
                 w = x.widgetForAction(self.qaction)
                 w.installEventFilter(self)
-            except:
+            except Exception:
                 continue
 
     def eventFilter(self, obj, ev):
@@ -147,14 +147,14 @@ class MarkBooksAction(InterfaceActionWithLibraryDrop):
         db = self.gui.current_db
         marked_ids = db.data.marked_ids
         num = len(frozenset(marked_ids).intersection(db.new_api.all_book_ids()))
-        text = _('Show marked book') if num == 1 else (_('Show marked books') + (' (%d)' % num))
+        text = _('Show marked book') if num == 1 else (_('Show marked books') + f' ({num})')
         self.show_marked_action.setText(text)
-        counts = dict()
+        counts = {}
         for v in marked_ids.values():
             counts[v] = counts.get(v, 0) + 1
         labels = sorted(counts.keys(), key=sort_key)
         self.show_marked_with_text.clear()
-        if len(labels):
+        if labels:
             labs = labels[0:40]
             self.show_marked_with_text.setEnabled(True)
             for t in labs:

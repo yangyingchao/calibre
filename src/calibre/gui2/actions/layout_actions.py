@@ -8,6 +8,7 @@ from qt.core import QComboBox, QDialog, QDialogButtonBox, QFormLayout, QIcon, QL
 
 from calibre.gui2 import error_dialog, gprefs, question_dialog
 from calibre.gui2.actions import InterfaceAction, show_menu_under_widget
+from calibre.gui2.geometry import _restore_geometry, delete_geometry, save_geometry
 from calibre.utils.icu import sort_key
 
 
@@ -19,6 +20,7 @@ class Panel(Enum):
     GRID_VIEW = 'gv'
     COVER_BROWSER = 'cb'
     QUICKVIEW = 'qv'
+    BOOKSHELF = 'bs'
 
 
 class SaveLayoutDialog(QDialog):
@@ -85,8 +87,8 @@ class LayoutActions(InterfaceAction):
                         menu=self.hidden_menu,
                         unique_name='Main window layout',
                         shortcut=None,
-                        text=_("Save and restore layout item sizes, and add/remove/toggle "
-                               "layout items such as the search bar, tag browser, etc. "),
+                        text=_('Save and restore layout item sizes, and add/remove/toggle '
+                               'layout items such as the search bar, tag browser, etc. '),
                         icon='layout.png',
                         triggered=self.show_menu)
 
@@ -166,8 +168,12 @@ class LayoutActions(InterfaceAction):
 
          Throws KeyError if the name doesn't exist.
         '''
-        layouts = gprefs['saved_layouts']
         # This can be called by plugins so let the exception fly
+
+        # Restore the application window geometry if we have it.
+        _restore_geometry(self.gui, gprefs, f'saved_layout_{name}')
+        # Now the panel sizes inside the central widget
+        layouts = gprefs['saved_layouts']
         settings = layouts[name]
         # Order is important here. change_layout() must be called before
         # unserializing the settings or panes like book details won't display
@@ -201,6 +207,9 @@ class LayoutActions(InterfaceAction):
         :param:`name` The name for the settings.
         :param:`settings`: The gui layout settings to save.
         '''
+        # Save the main window geometry.
+        save_geometry(self.gui, gprefs, f'saved_layout_{name}')
+        # Now the panel sizes inside the central widget
         layouts = gprefs['saved_layouts']
         layouts.update({name: settings})
         gprefs['saved_layouts'] = layouts
@@ -218,6 +227,9 @@ class LayoutActions(InterfaceAction):
                                    _('Do you really want to delete the saved layout {0}?').format(name),
                                    skip_dialog_name='delete_saved_gui_layout'):
                 return
+
+        # The information is stored as 2 preferences. Delete them both.
+        delete_geometry(gprefs, f'saved_layout_{name}')
         layouts = gprefs['saved_layouts']
         layouts.pop(name, None)
         self.populate_menu()
@@ -257,6 +269,7 @@ class LayoutActions(InterfaceAction):
             GRID_VIEW: 'gv'
             COVER_BROWSER: 'cb'
             QUICKVIEW: 'qv'
+            BOOKSHELF: 'bs'
         :param show: If True, show the panel, otherwise hide the panel
         '''
         self._change_item(self._button_from_enum(name), show)
@@ -272,6 +285,7 @@ class LayoutActions(InterfaceAction):
             GRID_VIEW: 'gv'
             COVER_BROWSER: 'cb'
             QUICKVIEW: 'qv'
+            BOOKSHELF: 'bs'
         '''
         self._button_from_enum(name).isChecked()
 

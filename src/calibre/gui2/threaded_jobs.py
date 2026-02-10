@@ -9,12 +9,12 @@ import json
 import os
 import tempfile
 import time
+from queue import Queue
 from threading import Event, RLock, Thread
 
 from calibre.ptempfile import base_dir
 from calibre.utils.ipc.job import BaseJob
 from calibre.utils.logging import GUILog
-from polyglot.queue import Queue
 
 
 class ThreadedJob(BaseJob):
@@ -86,13 +86,13 @@ class ThreadedJob(BaseJob):
         except Exception as e:
             self.exception = e
             self.failed = True
-            self.log.exception('Job: "%s" failed with error:'%self.description)
+            self.log.exception(f'Job: "{self.description}" failed with error:')
             self.log.debug('Called with args:', self.args, self.kwargs)
 
         self.duration = time.time() - self.start_time
         try:
             self.callback(self)
-        except:
+        except Exception:
             import traceback
             traceback.print_exc()
         self._cleanup()
@@ -101,7 +101,7 @@ class ThreadedJob(BaseJob):
 
         try:
             self.consolidate_log()
-        except:
+        except Exception:
             if self.log is not None:
                 self.log.exception('Log consolidation failed')
 
@@ -165,7 +165,7 @@ class ThreadedJobWorker(Thread):
     def run(self):
         try:
             self.job.start_work()
-        except:
+        except Exception:
             import traceback
 
             from calibre import prints
@@ -199,7 +199,7 @@ class ThreadedJobServer(Thread):
         while self.keep_going:
             try:
                 self.run_once()
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
             time.sleep(0.1)

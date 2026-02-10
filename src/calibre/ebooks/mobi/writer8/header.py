@@ -12,13 +12,19 @@ from io import BytesIO
 from struct import pack
 
 from calibre.ebooks.mobi.utils import align_block
-from polyglot.builtins import as_bytes, iteritems
+from polyglot.builtins import as_bytes
 
 NULL = 0xffffffff
+
+
 def zeroes(x):
     return (b'\x00' * x)
+
+
 def nulls(x):
     return (b'\xff' * x)
+
+
 def short(x):
     return pack(b'>H', x)
 
@@ -49,33 +55,33 @@ class Header(OrderedDict):
             else:
                 val = 0
             if name in self:
-                raise ValueError('Duplicate field in definition: %r'%name)
+                raise ValueError(f'Duplicate field in definition: {name!r}')
             self[name] = val
 
     @property
     def dynamic_fields(self):
-        return tuple(k for k, v in iteritems(self) if v is None)
+        return tuple(k for k, v in self.items() if v is None)
 
     def __call__(self, **kwargs):
         positions = {}
-        for name, val in iteritems(kwargs):
+        for name, val in kwargs.items():
             if name not in self:
-                raise KeyError('Not a valid header field: %r'%name)
+                raise KeyError(f'Not a valid header field: {name!r}')
             self[name] = val
 
         buf = BytesIO()
         buf.write(as_bytes(self.HEADER_NAME))
-        for name, val in iteritems(self):
+        for name, val in self.items():
             val = self.format_value(name, val)
             positions[name] = buf.tell()
             if val is None:
-                raise ValueError('Dynamic field %r not set'%name)
+                raise ValueError(f'Dynamic field {name!r} not set')
             if isinstance(val, numbers.Integral):
                 fmt = b'H' if name in self.SHORT_FIELDS else b'I'
                 val = pack(b'>'+fmt, val)
             buf.write(val)
 
-        for pos_field, field in iteritems(self.POSITIONS):
+        for pos_field, field in self.POSITIONS.items():
             buf.seek(positions[pos_field])
             buf.write(pack(b'>I', positions[field]))
 

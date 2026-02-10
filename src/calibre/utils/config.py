@@ -31,7 +31,6 @@ from calibre.utils.config_base import (
     tweaks,
 )
 from calibre.utils.localization import _
-from polyglot.builtins import native_string_type, string_or_bytes
 
 # optparse uses gettext.gettext instead of _ from builtins, so we
 # monkey patch it.
@@ -39,7 +38,7 @@ optparse._ = _
 
 if False:
     # Make pyflakes happy
-    Config, ConfigProxy, Option, OptionValues, StringConfig, OptionSet,
+    Config, ConfigProxy, Option, OptionValues, StringConfig, OptionSet
     ConfigInterface, tweaks, plugin_dir, prefs, from_json, to_json, make_config_dir
 
 
@@ -59,8 +58,7 @@ class CustomHelpFormatter(optparse.IndentedHelpFormatter):
 
     def format_heading(self, heading):
         from calibre.utils.terminal import colored
-        return "%*s%s:\n" % (self.current_indent, '',
-                                 colored(heading, fg='blue', bold=True))
+        return  ' '*self.current_indent + '{}:\n'.format(colored(heading, fg='blue', bold=True))
 
     def format_option(self, option):
         import textwrap
@@ -71,12 +69,10 @@ class CustomHelpFormatter(optparse.IndentedHelpFormatter):
         opts = self.option_strings[option]
         opt_width = self.help_position - self.current_indent - 2
         if len(opts) > opt_width:
-            opts = "%*s%s\n" % (self.current_indent, "",
-                                    colored(opts, fg='green'))
+            opts = ' '*self.current_indent + '{}\n'.format(colored(opts, fg='green'))
             indent_first = self.help_position
         else:                       # start help on same line as opts
-            opts = "%*s%-*s  " % (self.current_indent, "", opt_width +
-                    len(colored('', fg='green')), colored(opts, fg='green'))
+            opts = ' '*self.current_indent + '%-*s  ' % (opt_width+len(colored('', fg='green')), colored(opts, fg='green'))  # noqa: UP031
             indent_first = 0
         result.append(opts)
         if option.help:
@@ -85,12 +81,11 @@ class CustomHelpFormatter(optparse.IndentedHelpFormatter):
 
             for line in help_text:
                 help_lines.extend(textwrap.wrap(line, self.help_width))
-            result.append("%*s%s\n" % (indent_first, "", help_lines[0]))
-            result.extend(["%*s%s\n" % (self.help_position, "", line)
-                           for line in help_lines[1:]])
-        elif opts[-1] != "\n":
-            result.append("\n")
-        return "".join(result)+'\n'
+            result.append(' '*indent_first + f'{help_lines[0]}\n')
+            result.extend(' '*self.help_position + f'{line}\n' for line in help_lines[1:])
+        elif opts[-1] != '\n':
+            result.append('\n')
+        return ''.join(result)+'\n'
 
 
 class OptionParser(optparse.OptionParser):
@@ -111,17 +106,17 @@ class OptionParser(optparse.OptionParser):
             epilog = _('Created by ')+colored(__author__, fg='cyan')
         usage += '\n\n'+_('''Whenever you pass arguments to %prog that have spaces in them, '''
                           '''enclose the arguments in quotation marks. For example: "{}"''').format(
-                               "C:\\some path with spaces" if iswindows else '/some path/with spaces') +'\n'
+                               'C:\\some path with spaces' if iswindows else '/some path/with spaces') +'\n'
         if version is None:
-            version = '%%prog (%s %s)'%(__appname__, get_version())
+            version = f'%prog ({__appname__} {get_version()})'
         optparse.OptionParser.__init__(self, usage=usage, version=version, epilog=epilog,
                                formatter=CustomHelpFormatter(),
                                conflict_handler=conflict_handler, **kwds)
         self.gui_mode = gui_mode
         if False:
             # Translatable string from optparse
-            _("Options")
-            _("show this help message and exit")
+            _('Options')
+            _('show this help message and exit')
             _("show program's version number and exit")
 
     def print_usage(self, file=None):
@@ -177,11 +172,11 @@ class OptionParser(optparse.OptionParser):
 
     def options_iter(self):
         for opt in self.option_list:
-            if native_string_type(opt).strip():
+            if str(opt).strip():
                 yield opt
         for gr in self.option_groups:
             for opt in gr.option_list:
-                if native_string_type(opt).strip():
+                if str(opt).strip():
                     yield opt
 
     def option_by_dest(self, dest):
@@ -204,9 +199,9 @@ class OptionParser(optparse.OptionParser):
                 upper.__dict__[dest] = lower.__dict__[dest]
 
     def add_option_group(self, *args, **kwargs):
-        if isinstance(args[0], string_or_bytes):
+        if isinstance(args[0], (str, bytes)):
             args = list(args)
-            args[0] = native_string_type(args[0])
+            args[0] = str(args[0])
         return optparse.OptionParser.add_option_group(self, *args, **kwargs)
 
 
@@ -261,8 +256,7 @@ class DynamicConfig(dict):
                 try:
                     d = json_loads(raw)
                 except Exception as err:
-                    print('Failed to de-serialize JSON representation of stored dynamic data for {} with error: {}'.format(
-                        self.name, err))
+                    print(f'Failed to de-serialize JSON representation of stored dynamic data for {self.name} with error: {err}')
             else:
                 d = self.read_old_serialized_representation()
                 migrate = bool(d)
@@ -302,7 +296,6 @@ dynamic = DynamicConfig()
 
 
 class XMLConfig(dict):
-
     '''
     Similar to :class:`DynamicConfig`, except that it uses an XML storage
     backend instead of a pickle file.
@@ -313,8 +306,9 @@ class XMLConfig(dict):
 
     EXTENSION = '.plist'
 
-    def __init__(self, rel_path_to_cf_file, base_path=config_dir):
+    def __init__(self, rel_path_to_cf_file, base_path=config_dir, permissions=0o666):
         dict.__init__(self)
+        self.file_permissions = permissions
         self.no_commit = False
         self.defaults = {}
         self.file_path = os.path.join(base_path,
@@ -338,11 +332,11 @@ class XMLConfig(dict):
             pass
 
     def raw_to_object(self, raw):
-        from polyglot.plistlib import loads
+        from plistlib import loads
         return loads(raw)
 
     def to_raw(self):
-        from polyglot.plistlib import dumps
+        from plistlib import dumps
         return dumps(self)
 
     def decouple(self, prefix):
@@ -360,7 +354,7 @@ class XMLConfig(dict):
                 d = self.raw_to_object(raw) if raw.strip() else {}
             except SystemError:
                 pass
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
                 d = {}
@@ -401,11 +395,9 @@ class XMLConfig(dict):
     def commit(self):
         if self.no_commit:
             return
-        if getattr(self, 'file_path', None):
-            dpath = os.path.dirname(self.file_path)
-            if not os.path.exists(dpath):
-                os.makedirs(dpath, mode=CONFIG_DIR_MODE)
-            commit_data(self.file_path, self.to_raw())
+        if path := getattr(self, 'file_path', None):
+            os.makedirs(os.path.dirname(path), exist_ok=True, mode=CONFIG_DIR_MODE)
+            commit_data(path, self.to_raw(), self.file_permissions)
 
     def __enter__(self):
         self.no_commit = True

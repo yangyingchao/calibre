@@ -3,7 +3,7 @@ __copyright__ = '2008, Kovid Goyal <kovid at kovidgoyal.net>'
 '''
 Defines various abstract base classes that can be subclassed to create powerful news fetching recipes.
 '''
-__docformat__ = "restructuredtext en"
+__docformat__ = 'restructuredtext en'
 
 
 import io
@@ -33,13 +33,11 @@ from calibre.web.feeds import Feed, feed_from_xml, feeds_from_index, templates
 from calibre.web.fetch.simple import AbortArticle, RecursiveFetcher
 from calibre.web.fetch.simple import option_parser as web2disk_option_parser
 from calibre.web.fetch.utils import prepare_masthead_image
-from polyglot.builtins import string_or_bytes
 
 
 def classes(classes):
     q = frozenset(classes.split(' '))
-    return dict(attrs={
-        'class': lambda x: x and frozenset(x.split()).intersection(q)})
+    return dict(attrs={'class': lambda x: x and frozenset(x.split()).intersection(q)})
 
 
 def prefixed_classes(classes):
@@ -243,7 +241,7 @@ class BasicNewsRecipe(Recipe):
     #:
     #:    {
     #:     name      : 'tag name',   #e.g. 'div'
-    #:     attrs     : a dictionary, #e.g. {'class': 'advertisment'}
+    #:     attrs     : a dictionary, #e.g. {'class': 'advertisement'}
     #:    }
     #:
     #: All keys are optional. For a full explanation of the search criteria, see
@@ -366,11 +364,12 @@ class BasicNewsRecipe(Recipe):
     ignore_duplicate_articles = None
 
     # The following parameters control how the recipe attempts to minimize
-    # JPEG image sizes
+    # image sizes. Note that if compression is enabled PNG images are converted
+    # to JPEG.
 
     #: Set this to False to ignore all scaling and compression parameters and
     #: pass images through unmodified. If True and the other compression
-    #: parameters are left at their default values, JPEG images will be scaled to fit
+    #: parameters are left at their default values, images will be scaled to fit
     #: in the screen dimensions set by the output profile and compressed to size at
     #: most (w * h)/16 where w x h are the scaled image dimensions.
     compress_news_images = False
@@ -410,7 +409,32 @@ class BasicNewsRecipe(Recipe):
     #: with the URL scheme of your particular website.
     resolve_internal_links = False
 
-    #: Set to False if you do not want to use gzipped transfers. Note that some old servers flake out with gzip
+    #: Specify options specific to this recipe. These will be available for the user to customize
+    #: in the Advanced tab of the Fetch News dialog or at the ebook-convert command line. The options
+    #: are specified as a dictionary mapping option name to metadata about the option. For example::
+    #:
+    #:   recipe_specific_options = {
+    #:       'edition_date': {
+    #:           'short': 'The issue date to download',
+    #:           'long':  'Specify a date in the format YYYY-mm-dd to download the issue corresponding to that date',
+    #:           'default': 'current',
+    #:       }
+    #:   }
+    #:
+    #: When the recipe is run, self.recipe_specific_options will be a dict mapping option name to the option value
+    #: specified by the user. When the option is unspecified by the user, it will have the value specified by 'default'.
+    #: If no default is specified, the option will not be in the dict at all, when unspecified by the user.
+    recipe_specific_options = None
+
+    #: The simulated browser engine to use when downloading from servers. The default is to use the Python mechanize
+    #: browser engine, which supports logging in. However, if you don't need logging in, consider changing this
+    #: to either 'webengine' which uses an actual Chromium browser to do the network requests or 'qt' which
+    #: uses the Qt Networking backend. Both 'webengine' and 'qt' support HTTP/2, which mechanize does not and
+    #: are thus harder to fingerprint for bot protection services.
+    browser_type = 'mechanize'
+
+    #: Set to False if you do not want to use gzipped transfers with the mechanize browser.
+    #: Note that some old servers flake out with gzip.
     handle_gzip = True
 
     # See the built-in recipes for examples of these settings.
@@ -498,7 +522,7 @@ class BasicNewsRecipe(Recipe):
     def image_url_processor(cls, baseurl, url):
         '''
         Perform some processing on image urls (perhaps removing size restrictions for
-        dynamically generated images, etc.) and return the precessed URL. Return None
+        dynamically generated images, etc.) and return the processed URL. Return None
         or an empty string to skip fetching the image.
         '''
         return url
@@ -516,14 +540,23 @@ class BasicNewsRecipe(Recipe):
         Return a browser instance used to fetch documents from the web. By default
         it returns a `mechanize <https://mechanize.readthedocs.io/en/latest/>`_
         browser instance that supports cookies, ignores robots.txt, handles
-        refreshes and has a mozilla firefox user agent.
+        refreshes and has a random common user agent.
 
-        If your recipe requires that you login first, override this method
-        in your subclass. For example, the following code is used in the New York
-        Times recipe to login for full access::
+        To customize the browser override this method in your sub-class as::
 
-            def get_browser(self):
-                br = BasicNewsRecipe.get_browser(self)
+            def get_browser(self, *a, **kw):
+                br = super().get_browser(*a, **kw)
+                # Add some headers
+                br.addheaders += [
+                    ('My-Header', 'one'),
+                    ('My-Header2', 'two'),
+                ]
+                # Set some cookies
+                br.set_cookie('name', 'value')
+                br.set_cookie('name2', 'value2', domain='.mydomain.com')
+                # Make a POST request with some data
+                br.open('https://someurl.com', {'username': 'def', 'password': 'pwd'}).read()
+                # Do a login via a simple web form (only supported with mechanize browsers)
                 if self.username is not None and self.password is not None:
                     br.open('https://www.nytimes.com/auth/login')
                     br.select_form(name='login')
@@ -538,6 +571,10 @@ class BasicNewsRecipe(Recipe):
             ua = getattr(self, 'last_used_user_agent', None) or self.calibre_most_common_ua or random_user_agent(allow_ie=False)
             kwargs['user_agent'] = self.last_used_user_agent = ua
         self.log('Using user agent:', kwargs['user_agent'])
+        if self.browser_type != 'mechanize':
+            from calibre.scraper.qt import Browser, WebEngineBrowser
+            return {'qt': Browser, 'webengine': WebEngineBrowser}[self.browser_type](
+                user_agent=kwargs['user_agent'], verify_ssl_certificates=kwargs.get('verify_ssl_certificates', False))
         br = browser(*args, **kwargs)
         br.addheaders += [('Accept', '*/*')]
         if self.handle_gzip:
@@ -563,7 +600,7 @@ class BasicNewsRecipe(Recipe):
 
     @property
     def cloned_browser(self):
-        if hasattr(self.get_browser, 'is_base_class_implementation'):
+        if hasattr(self.get_browser, 'is_base_class_implementation') and self.browser_type == 'mechanize':
             # We are using the default get_browser, which means no need to
             # clone
             br = BasicNewsRecipe.get_browser(self)
@@ -585,7 +622,7 @@ class BasicNewsRecipe(Recipe):
         for key in article.keys():
             if key.endswith('_origlink'):
                 url = article[key]
-                if url and (url.startswith('http://') or url.startswith('https://')):
+                if url and (url.startswith(('http://', 'https://'))):
                     return url
         ans = article.get('link', None)
         if not ans and getattr(article, 'links', None):
@@ -607,7 +644,7 @@ class BasicNewsRecipe(Recipe):
         `soup`: A `BeautifulSoup <https://www.crummy.com/software/BeautifulSoup/bs4/doc/>`__
         instance containing the downloaded :term:`HTML`.
         '''
-        return None
+        return
 
     def abort_article(self, msg=None):
         ''' Call this method inside any of the preprocess methods to abort the
@@ -633,8 +670,8 @@ class BasicNewsRecipe(Recipe):
         if self.auto_cleanup:
             try:
                 raw_html = self.extract_readable_article(raw_html, url)
-            except:
-                self.log.exception('Auto cleanup of URL: %r failed'%url)
+            except Exception:
+                self.log.exception(f'Auto cleanup of URL: {url!r} failed')
 
         return raw_html
 
@@ -686,7 +723,7 @@ class BasicNewsRecipe(Recipe):
         try:
             parts = urlparse(url)
         except Exception:
-            self.log.error('Failed to parse url: %r, ignoring' % url)
+            self.log.error(f'Failed to parse url: {url!r}, ignoring')
             return frozenset()
         nl = parts.netloc
         path = parts.path or ''
@@ -714,7 +751,7 @@ class BasicNewsRecipe(Recipe):
             with closing(open_func(url_or_raw, timeout=self.timeout)) as f:
                 _raw = f.read()
             if not _raw:
-                raise RuntimeError('Could not fetch index from %s'%url_or_raw)
+                raise RuntimeError(f'Could not fetch index from {url_or_raw}')
         else:
             _raw = url_or_raw
         if raw:
@@ -744,9 +781,10 @@ class BasicNewsRecipe(Recipe):
         Extracts main article content from 'html', cleans up and returns as a (article_html, extracted_title) tuple.
         Based on the original readability algorithm by Arc90.
         '''
-        from lxml.html import document_fromstring, fragment_fromstring, tostring
+        from lxml.html import tostring
 
         from calibre.ebooks.readability import readability
+        from calibre.utils.xml_parse import document_fromstring, fragment_fromstring
 
         doc = readability.Document(html, self.log, url=url,
                 keep_elements=self.auto_cleanup_keep)
@@ -755,20 +793,18 @@ class BasicNewsRecipe(Recipe):
 
         try:
             frag = fragment_fromstring(article_html)
-        except:
+        except Exception:
             doc = document_fromstring(article_html)
             frag = doc.xpath('//body')[-1]
         if frag.tag == 'html':
             root = frag
         elif frag.tag == 'body':
             root = document_fromstring(
-                '<html><head><title>%s</title></head></html>' %
-                extracted_title)
+                f'<html><head><title>{extracted_title}</title></head></html>')
             root.append(frag)
         else:
             root = document_fromstring(
-                '<html><head><title>%s</title></head><body/></html>' %
-                extracted_title)
+                f'<html><head><title>{extracted_title}</title></head><body/></html>')
             root.xpath('//body')[0].append(frag)
 
         body = root.xpath('//body')[0]
@@ -873,7 +909,7 @@ class BasicNewsRecipe(Recipe):
 
         src = src.replace('\\', '/')
         if re.search(r'feed_\d+/article_\d+/images/img', src, flags=re.I) is None:
-            self.log.warn('Ignoring invalid TOC thumbnail image: %r'%src)
+            self.log.warn(f'Ignoring invalid TOC thumbnail image: {src!r}')
             return
         article.toc_thumbnail = re.sub(r'^.*?feed', 'feed',
                 src, flags=re.IGNORECASE)
@@ -988,6 +1024,19 @@ class BasicNewsRecipe(Recipe):
         self.failed_downloads = []
         self.partial_failures = []
         self.aborted_articles = []
+        self.recipe_specific_options_metadata = rso = self.recipe_specific_options or {}
+        self.recipe_specific_options = {k: rso[k]['default'] for k in rso if 'default' in rso[k]}
+        for x in (options.recipe_specific_option or ()):
+            k, sep, v = x.partition(':')
+            if not sep:
+                raise ValueError(f'{x} is not a valid recipe specific option')
+            if k not in rso:
+                raise KeyError(f'{k} is not an option supported by: {self.title}')
+            self.recipe_specific_options[k] = v
+        if self.recipe_specific_options:
+            log('Recipe specific options:')
+            for k, v in self.recipe_specific_options.items():
+                log(' ', f'{k} = {v}')
 
     def _postprocess_html(self, soup, first_fetch, job_info):
         if self.no_stylesheets:
@@ -1045,15 +1094,18 @@ class BasicNewsRecipe(Recipe):
         # Nuke HTML5 tags
         for x in ans.findAll(['article', 'aside', 'header', 'footer', 'nav',
             'figcaption', 'figure', 'section']):
+            if x.get('class'):
+                x.get_attribute_list('class').append(f'calibre-nuked-tag-{x.name}')
+            else:
+                x['class'] = f'calibre-nuked-tag-{x.name}'
             x.name = 'div'
 
         if job_info:
             url, f, a, feed_len = job_info
             try:
                 article = self.feed_objects[f].articles[a]
-            except:
+            except Exception:
                 self.log.exception('Failed to get article object for postprocessing')
-                pass
             else:
                 self.populate_article_metadata(article, ans, first_fetch)
         return ans
@@ -1093,7 +1145,7 @@ class BasicNewsRecipe(Recipe):
             lang = self.language.replace('_', '-').partition('-')[0].lower()
             if lang == 'und':
                 lang = None
-        except:
+        except Exception:
             lang = None
         return lang
 
@@ -1103,7 +1155,7 @@ class BasicNewsRecipe(Recipe):
         templ = templ(lang=self.lang_for_html)
         css = self.template_css + '\n\n' +(self.get_extra_css() or '')
         timefmt = self.timefmt
-        return templ.generate(self.title, "mastheadImage.jpg", timefmt, feeds,
+        return templ.generate(self.title, 'mastheadImage.jpg', timefmt, feeds,
                               extra_css=css).render(doctype='xhtml')
 
     @classmethod
@@ -1127,7 +1179,7 @@ class BasicNewsRecipe(Recipe):
             from calibre.utils.cleantext import clean_xml_chars
 
             # Truncating the string could cause a dangling UTF-16 half-surrogate, which will cause lxml to barf, clean it
-            ans = clean_xml_chars(ans) + '\u2026'
+            ans = clean_xml_chars(ans) + '…'
         return ans
 
     def feed2index(self, f, feeds):
@@ -1144,14 +1196,14 @@ class BasicNewsRecipe(Recipe):
                 if bn:
                     bn = bn.rpartition('/')[-1]
                     if bn:
-                        img = os.path.join(imgdir, 'feed_image_%d%s'%(self.image_counter, os.path.splitext(bn)[-1]))
+                        img = os.path.join(imgdir, f'feed_image_{self.image_counter}{os.path.splitext(bn)[-1]}')
                         try:
                             with open(img, 'wb') as fi, closing(self.browser.open(feed.image_url, timeout=self.timeout)) as r:
                                 fi.write(r.read())
                             self.image_counter += 1
                             feed.image_url = img
                             self.image_map[feed.image_url] = img
-                        except:
+                        except Exception:
                             pass
             if isinstance(feed.image_url, bytes):
                 feed.image_url = feed.image_url.decode(sys.getfilesystemencoding(), 'strict')
@@ -1233,8 +1285,7 @@ class BasicNewsRecipe(Recipe):
                             seen.add(val)
 
         for feed, article in remove:
-            self.log.debug('Removing duplicate article: %s from section: %s'%(
-                article.title, feed.title))
+            self.log.debug(f'Removing duplicate article: {article.title} from section: {feed.title}')
             feed.remove_article(article)
 
         if self.remove_empty_feeds:
@@ -1285,21 +1336,21 @@ class BasicNewsRecipe(Recipe):
 
         self.feed_objects = feeds
         for f, feed in enumerate(feeds):
-            feed_dir = os.path.join(self.output_dir, 'feed_%d'%f)
+            feed_dir = os.path.join(self.output_dir, f'feed_{f}')
             if not os.path.isdir(feed_dir):
                 os.makedirs(feed_dir)
 
             for a, article in enumerate(feed):
                 if a >= self.max_articles_per_feed:
                     break
-                art_dir = os.path.join(feed_dir, 'article_%d'%a)
+                art_dir = os.path.join(feed_dir, f'article_{a}')
                 if not os.path.isdir(art_dir):
                     os.makedirs(art_dir)
                 try:
                     url = self.print_version(article.url)
                 except NotImplementedError:
                     url = article.url
-                except:
+                except Exception:
                     self.log.exception('Failed to find print version for: '+article.url)
                     url = None
                 if not url:
@@ -1333,8 +1384,8 @@ class BasicNewsRecipe(Recipe):
                 break
 
         for f, feed in enumerate(feeds):
-            html = self.feed2index(f,feeds)
-            feed_dir = os.path.join(self.output_dir, 'feed_%d'%f)
+            html = self.feed2index(f, feeds)
+            feed_dir = os.path.join(self.output_dir, f'feed_{f}')
             with open(os.path.join(feed_dir, 'index.html'), 'wb') as fi:
                 fi.write(html)
         self.create_opf(feeds)
@@ -1389,7 +1440,7 @@ class BasicNewsRecipe(Recipe):
         self.cover_path = None
         try:
             self._download_cover()
-        except:
+        except Exception:
             self.log.exception('Failed to download cover')
             self.cover_path = None
 
@@ -1421,14 +1472,14 @@ class BasicNewsRecipe(Recipe):
     def download_masthead(self, url):
         try:
             self._download_masthead(url)
-        except:
-            self.log.exception("Failed to download supplied masthead_url")
+        except Exception:
+            self.log.exception('Failed to download supplied masthead_url')
 
     def resolve_masthead(self):
         self.masthead_path = None
         try:
             murl = self.get_masthead_url()
-        except:
+        except Exception:
             self.log.exception('Failed to get masthead url')
             murl = None
 
@@ -1437,11 +1488,11 @@ class BasicNewsRecipe(Recipe):
             # Failure sets self.masthead_path to None
             self.download_masthead(murl)
         if self.masthead_path is None:
-            self.log.info("Synthesizing mastheadImage")
+            self.log.info('Synthesizing mastheadImage')
             self.masthead_path = os.path.join(self.output_dir, 'mastheadImage.jpg')
             try:
                 self.default_masthead_image(self.masthead_path)
-            except:
+            except Exception:
                 self.log.exception('Failed to generate default masthead image')
                 self.masthead_path = None
 
@@ -1457,7 +1508,7 @@ class BasicNewsRecipe(Recipe):
             img_data = create_cover(title, [date])
             cover_file.write(img_data)
             cover_file.flush()
-        except:
+        except Exception:
             self.log.exception('Failed to generate default cover')
             return False
         return True
@@ -1532,7 +1583,7 @@ class BasicNewsRecipe(Recipe):
             ref.title = 'Masthead Image'
             opf.guide.append(ref)
 
-        manifest = [os.path.join(dir, 'feed_%d'%i) for i in range(len(feeds))]
+        manifest = [os.path.join(dir, f'feed_{i}') for i in range(len(feeds))]
         manifest.append(os.path.join(dir, 'index.html'))
         manifest.append(os.path.join(dir, 'index.ncx'))
 
@@ -1541,7 +1592,7 @@ class BasicNewsRecipe(Recipe):
         if cpath is None:
             pf = open(os.path.join(dir, 'cover.jpg'), 'wb')
             if self.default_cover(pf):
-                cpath =  pf.name
+                cpath = pf.name
         if cpath is not None and os.access(cpath, os.R_OK):
             opf.cover = cpath
             manifest.append(cpath)
@@ -1569,7 +1620,7 @@ class BasicNewsRecipe(Recipe):
             f = feeds[num]
             for j, a in enumerate(f):
                 if getattr(a, 'downloaded', False):
-                    adir = 'feed_%d/article_%d/'%(num, j)
+                    adir = f'feed_{num}/article_{j}/'
                     auth = a.author
                     if not auth:
                         auth = None
@@ -1579,12 +1630,12 @@ class BasicNewsRecipe(Recipe):
                     else:
                         desc = self.description_limiter(desc)
                     tt = a.toc_thumbnail if a.toc_thumbnail else None
-                    entries.append('%sindex.html'%adir)
+                    entries.append(f'{adir}index.html')
                     po = self.play_order_map.get(entries[-1], None)
                     if po is None:
                         self.play_order_counter += 1
                         po = self.play_order_counter
-                    arelpath = '%sindex.html'%adir
+                    arelpath = f'{adir}index.html'
                     for curl in self.canonicalize_internal_url(a.orig_url, is_link=False):
                         aumap[curl].add(arelpath)
                     article_toc_entry = parent.add_item(arelpath, None,
@@ -1600,7 +1651,7 @@ class BasicNewsRecipe(Recipe):
                                 arelpath, entry['anchor'], entry['title'] or _('Unknown section'),
                                 play_order=po
                             )
-                    last = os.path.join(self.output_dir, ('%sindex.html'%adir).replace('/', os.sep))
+                    last = os.path.join(self.output_dir, (f'{adir}index.html').replace('/', os.sep))
                     for sp in a.sub_pages:
                         prefix = os.path.commonprefix([opf_path, sp])
                         relp = sp[len(prefix):]
@@ -1627,7 +1678,7 @@ class BasicNewsRecipe(Recipe):
 
         if len(feeds) > 1:
             for i, f in enumerate(feeds):
-                entries.append('feed_%d/index.html'%i)
+                entries.append(f'feed_{i}/index.html')
                 po = self.play_order_map.get(entries[-1], None)
                 if po is None:
                     self.play_order_counter += 1
@@ -1638,11 +1689,11 @@ class BasicNewsRecipe(Recipe):
                 desc = getattr(f, 'description', None)
                 if not desc:
                     desc = None
-                feed_index(i, toc.add_item('feed_%d/index.html'%i, None,
+                feed_index(i, toc.add_item(f'feed_{i}/index.html', None,
                     f.title, play_order=po, description=desc, author=auth))
 
         else:
-            entries.append('feed_%d/index.html'%0)
+            entries.append('feed_0/index.html')
             feed_index(0, toc)
 
         for i, p in enumerate(entries):
@@ -1664,7 +1715,7 @@ class BasicNewsRecipe(Recipe):
         article = request.article
         self.log.debug('Downloaded article:', article.title, 'from', article.url)
         article.orig_url = article.url
-        article.url = 'article_%d/index.html'%a
+        article.url = f'article_{a}/index.html'
         article.downloaded = True
         article.sub_pages  = result[1][1:]
         self.jobs_done += 1
@@ -1675,7 +1726,7 @@ class BasicNewsRecipe(Recipe):
 
     def error_in_article_download(self, request, traceback):
         self.jobs_done += 1
-        if traceback and re.search('^AbortArticle:', traceback, flags=re.M) is not None:
+        if traceback and re.search(r'^AbortArticle:', traceback, flags=re.M) is not None:
             self.log.warn('Aborted download of article:', request.article.title,
                           'from', request.article.url)
             self.report_progress(float(self.jobs_done)/len(self.jobs),
@@ -1699,7 +1750,7 @@ class BasicNewsRecipe(Recipe):
         parsed_feeds = []
         br = self.browser
         for obj in feeds:
-            if isinstance(obj, string_or_bytes):
+            if isinstance(obj, (str, bytes)):
                 title, url = None, obj
             else:
                 title, url = obj
@@ -1709,7 +1760,7 @@ class BasicNewsRecipe(Recipe):
                 url = url.decode('utf-8')
             if url.startswith('feed://'):
                 url = 'http'+url[4:]
-            self.report_progress(0, _('Fetching feed')+' %s...'%(title if title else url))
+            self.report_progress(0, _('Fetching feed')+f' {title if title else url}...')
             try:
                 purl = urlparse(url, allow_fragments=False)
                 if purl.username or purl.password:
@@ -1729,7 +1780,7 @@ class BasicNewsRecipe(Recipe):
                 ))
             except Exception as err:
                 feed = Feed()
-                msg = 'Failed feed: %s'%(title if title else url)
+                msg = f'Failed feed: {title if title else url}'
                 feed.populate_from_preparsed_feed(msg, [])
                 feed.description = as_unicode(err)
                 parsed_feeds.append(feed)
@@ -1760,7 +1811,7 @@ class BasicNewsRecipe(Recipe):
         '''
         if tag is None:
             return ''
-        if isinstance(tag, string_or_bytes):
+        if isinstance(tag, (str, bytes)):
             return tag
         if callable(getattr(tag, 'xpath', None)) and not hasattr(tag, 'contents'):  # a lxml tag
             from lxml.etree import tostring
@@ -1806,24 +1857,41 @@ class BasicNewsRecipe(Recipe):
             item.extract()
             divtag = soup.new_tag('div')
             brtag  = soup.new_tag('br')
-            oldParent.insert(myIndex,divtag)
+            oldParent.insert(myIndex, divtag)
             divtag.append(item)
             divtag.append(brtag)
         return soup
 
     def internal_postprocess_book(self, oeb, opts, log):
-        if self.resolve_internal_links and self.article_url_map:
-            seen = set()
-            for item in oeb.spine:
-                for a in item.data.xpath('//*[local-name()="a" and @href]'):
-                    if a.get('rel') == 'calibre-downloaded-from':
-                        continue
-                    url = a.get('href')
+        seen = set()
+        for i, item in enumerate(oeb.spine):
+            for a in item.data.xpath('//*[local-name()="a" and @href]'):
+                if (rel := a.get('rel')) == 'calibre-downloaded-from':
+                    continue
+                url = a.get('href')
+                if not url:
+                    continue
+                if rel in ('articlenextlink', 'articleprevlink'):
+                    abshref = item.abshref(url)
+                    if abshref not in oeb.manifest.hrefs:
+                        if rel == 'articlenextlink':
+                            nextitem = oeb.spine[i + 1] if i + 1 < len(oeb.spine) else None
+                        else:
+                            nextitem = oeb.spine[i - 1] if i else None
+                        if nextitem is None:
+                            a.text = None
+                            a.attrib.pop('href')
+                        else:
+                            a.set('href', item.relhref(nextitem.href))
+                    continue
+                if self.resolve_internal_links and self.article_url_map:
                     for curl in self.canonicalize_internal_url(url):
                         articles = self.article_url_map.get(curl)
                         if articles:
                             arelpath = sorted(articles, key=numeric_sort_key)[0]
                             a.set('href', item.relhref(arelpath))
+                            if a.text and len(a) == 0:
+                                a.text = a.text + '·'  # mark as local link
                             if url not in seen:
                                 log.debug(f'Resolved internal URL: {url} -> {arelpath}')
                                 seen.add(url)
@@ -1895,8 +1963,7 @@ class CalibrePeriodical(BasicNewsRecipe):
         self.log('Fetching downloaded recipe')
         try:
             raw = self.browser.open_novisit(
-                'https://news.calibre-ebook.com/subscribed_files/%s/0/temp.downloaded_recipe'
-                % self.calibre_periodicals_slug
+                f'https://news.calibre-ebook.com/subscribed_files/{self.calibre_periodicals_slug}/0/temp.downloaded_recipe'
                     ).read()
         except Exception as e:
             if hasattr(e, 'getcode') and e.getcode() == 403:
@@ -1917,6 +1984,6 @@ class CalibrePeriodical(BasicNewsRecipe):
             recipe = compile_recipe(open(glob('*.recipe')[0],
                 'rb').read())
             self.conversion_options = recipe.conversion_options
-        except:
+        except Exception:
             self.log.exception('Failed to compile downloaded recipe')
         return os.path.abspath('index.html')

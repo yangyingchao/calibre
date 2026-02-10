@@ -34,7 +34,6 @@ from operator import itemgetter
 from pprint import pformat, pprint
 
 from calibre import as_unicode, prints
-from polyglot.builtins import iteritems, itervalues
 
 try:
     import winreg
@@ -44,13 +43,12 @@ except ImportError:
 
 # Data and function type definitions {{{
 
-
 class GUID(Structure):
     _fields_ = [
-        ("data1", DWORD),
-        ("data2", WORD),
-        ("data3", WORD),
-        ("data4", c_ubyte * 8)]
+        ('data1', DWORD),
+        ('data2', WORD),
+        ('data3', WORD),
+        ('data4', c_ubyte * 8)]
 
     def __init__(self, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8):
         self.data1 = l
@@ -66,12 +64,12 @@ class GUID(Structure):
         self.data4[7] = b8
 
     def __str__(self):
-        return "{{{:08x}-{:04x}-{:04x}-{}-{}}}".format(
+        return '{{{:08x}-{:04x}-{:04x}-{}-{}}}'.format(
             self.data1,
             self.data2,
             self.data3,
-            ''.join(["%02x" % d for d in self.data4[:2]]),
-            ''.join(["%02x" % d for d in self.data4[2:]]),
+            ''.join([f'{d:02x}' for d in self.data4[:2]]),
+            ''.join([f'{d:02x}' for d in self.data4[2:]]),
         )
 
 
@@ -130,7 +128,7 @@ class SP_DEVINFO_DATA(Structure):
     ]
 
     def __str__(self):
-        return f"ClassGuid:{self.ClassGuid} DevInst:{self.DevInst}"
+        return f'ClassGuid:{self.ClassGuid} DevInst:{self.DevInst}'
 
 
 PSP_DEVINFO_DATA = POINTER(SP_DEVINFO_DATA)
@@ -145,7 +143,7 @@ class SP_DEVICE_INTERFACE_DATA(Structure):
     ]
 
     def __str__(self):
-        return f"InterfaceClassGuid:{self.InterfaceClassGuid} Flags:{self.Flags}"
+        return f'InterfaceClassGuid:{self.InterfaceClassGuid} Flags:{self.Flags}'
 
 
 ANYSIZE_ARRAY = 1
@@ -153,8 +151,8 @@ ANYSIZE_ARRAY = 1
 
 class SP_DEVICE_INTERFACE_DETAIL_DATA(Structure):
     _fields_ = [
-        ("cbSize", DWORD),
-        ("DevicePath", c_wchar*ANYSIZE_ARRAY)
+        ('cbSize', DWORD),
+        ('DevicePath', c_wchar*ANYSIZE_ARRAY)
     ]
 
 
@@ -180,10 +178,10 @@ class USB_DEVICE_DESCRIPTOR(Structure):
     )
 
     def __repr__(self):
-        return 'USBDevice(class=0x%x sub_class=0x%x protocol=0x%x vendor_id=0x%x product_id=0x%x bcd=0x%x manufacturer=%d product=%d serial_number=%d)' % (
-            self.bDeviceClass, self.bDeviceSubClass, self.bDeviceProtocol,
-            self.idVendor, self.idProduct, self.bcdDevice, self.iManufacturer,
-            self.iProduct, self.iSerialNumber)
+        return (
+            f'USBDevice(class=0x{self.bDeviceClass:x} sub_class=0x{self.bDeviceSubClass:x} protocol=0x{self.bDeviceProtocol:x}'
+            f' vendor_id=0x{self.idVendor:x} product_id=0x{self.idProduct:x} bcd=0x{self.bcdDevice:x} manufacturer={self.iManufacturer}'
+            f'product={self.iProduct} serial_number={self.iSerialNumber})')
 
 
 class USB_ENDPOINT_DESCRIPTOR(Structure):
@@ -307,27 +305,27 @@ SPDRP_LOCATION_PATHS = DWORD(0x00000023)
 
 CR_CODES, CR_CODE_NAMES = {}, {}
 for line in '''\
-#define CR_SUCCESS                  			0x00000000
+#define CR_SUCCESS                        0x00000000
 #define CR_DEFAULT                        0x00000001
 #define CR_OUT_OF_MEMORY                  0x00000002
 #define CR_INVALID_POINTER                0x00000003
 #define CR_INVALID_FLAG                   0x00000004
 #define CR_INVALID_DEVNODE                0x00000005
-#define CR_INVALID_DEVINST          			CR_INVALID_DEVNODE
+#define CR_INVALID_DEVINST                CR_INVALID_DEVNODE
 #define CR_INVALID_RES_DES                0x00000006
 #define CR_INVALID_LOG_CONF               0x00000007
 #define CR_INVALID_ARBITRATOR             0x00000008
 #define CR_INVALID_NODELIST               0x00000009
 #define CR_DEVNODE_HAS_REQS               0x0000000A
-#define CR_DEVINST_HAS_REQS         			CR_DEVNODE_HAS_REQS
+#define CR_DEVINST_HAS_REQS               CR_DEVNODE_HAS_REQS
 #define CR_INVALID_RESOURCEID             0x0000000B
 #define CR_DLVXD_NOT_FOUND                0x0000000C
 #define CR_NO_SUCH_DEVNODE                0x0000000D
-#define CR_NO_SUCH_DEVINST          			CR_NO_SUCH_DEVNODE
+#define CR_NO_SUCH_DEVINST                CR_NO_SUCH_DEVNODE
 #define CR_NO_MORE_LOG_CONF               0x0000000E
 #define CR_NO_MORE_RES_DES                0x0000000F
 #define CR_ALREADY_SUCH_DEVNODE           0x00000010
-#define CR_ALREADY_SUCH_DEVINST     			CR_ALREADY_SUCH_DEVNODE
+#define CR_ALREADY_SUCH_DEVINST           CR_ALREADY_SUCH_DEVNODE
 #define CR_INVALID_RANGE_LIST             0x00000011
 #define CR_INVALID_RANGE                  0x00000012
 #define CR_FAILURE                        0x00000013
@@ -395,7 +393,7 @@ def cwrap(name, restype, *argtypes, **kw):
     lib = cfgmgr if name.startswith('CM') else setupapi
     func = prototype((name, kw.pop('lib', lib)))
     if kw:
-        raise TypeError('Unknown keyword arguments: %r' % kw)
+        raise TypeError(f'Unknown keyword arguments: {kw!r}')
     if errcheck is not None:
         func.errcheck = errcheck
     return func
@@ -415,7 +413,7 @@ def bool_err_check(result, func, args):
 
 def config_err_check(result, func, args):
     if result != CR_CODES['CR_SUCCESS']:
-        raise WinError(result, 'The cfgmgr32 function failed with err: %s' % CR_CODE_NAMES.get(result, result))
+        raise WinError(result, f'The cfgmgr32 function failed with err: {CR_CODE_NAMES.get(result, result)}')
     return args
 
 
@@ -576,7 +574,7 @@ def get_device_id(devinst, buf=None):
             buf = create_unicode_buffer(devid_size.value)
             continue
         if ret != CR_CODES['CR_SUCCESS']:
-            raise WinError(ret, 'The cfgmgr32 function failed with err: %s' % CR_CODE_NAMES.get(ret, ret))
+            raise WinError(ret, f'The cfgmgr32 function failed with err: {CR_CODE_NAMES.get(ret, ret)}')
         break
     return wstring_at(buf), buf
 
@@ -611,7 +609,7 @@ def convert_registry_data(raw, size, dtype):
         if size == 0:
             return 0
         return cast(raw, POINTER(QWORD)).contents.value
-    raise ValueError('Unsupported data type: %r' % dtype)
+    raise ValueError(f'Unsupported data type: {dtype!r}')
 
 
 def get_device_registry_property(dev_list, p_devinfo, property_type=SPDRP_HARDWAREID, buf=None):
@@ -665,20 +663,20 @@ def get_volume_information(drive_letter):
     flags, serial_number, max_component_length = DWORD(0), DWORD(0), DWORD(0)
     GetVolumeInformation(drive_letter, vname, len(vname), byref(serial_number), byref(max_component_length), byref(flags), fsname, len(fsname))
     flags = flags.value
-    ans =  {
+    ans = {
         'name': vname.value,
         'filesystem': fsname.value,
         'serial_number': serial_number.value,
         'max_component_length': max_component_length.value,
     }
 
-    for name, num in iteritems({'FILE_CASE_PRESERVED_NAMES':0x00000002, 'FILE_CASE_SENSITIVE_SEARCH':0x00000001, 'FILE_FILE_COMPRESSION':0x00000010,
+    for name, num in {'FILE_CASE_PRESERVED_NAMES':0x00000002, 'FILE_CASE_SENSITIVE_SEARCH':0x00000001, 'FILE_FILE_COMPRESSION':0x00000010,
               'FILE_NAMED_STREAMS':0x00040000, 'FILE_PERSISTENT_ACLS':0x00000008, 'FILE_READ_ONLY_VOLUME':0x00080000,
               'FILE_SEQUENTIAL_WRITE_ONCE':0x00100000, 'FILE_SUPPORTS_ENCRYPTION':0x00020000, 'FILE_SUPPORTS_EXTENDED_ATTRIBUTES':0x00800000,
               'FILE_SUPPORTS_HARD_LINKS':0x00400000, 'FILE_SUPPORTS_OBJECT_IDS':0x00010000, 'FILE_SUPPORTS_OPEN_BY_FILE_ID':0x01000000,
               'FILE_SUPPORTS_REPARSE_POINTS':0x00000080, 'FILE_SUPPORTS_SPARSE_FILES':0x00000040, 'FILE_SUPPORTS_TRANSACTIONS':0x00200000,
               'FILE_SUPPORTS_USN_JOURNAL':0x02000000, 'FILE_UNICODE_ON_DISK':0x00000004, 'FILE_VOLUME_IS_COMPRESSED':0x00008000,
-              'FILE_VOLUME_QUOTAS':0x00000020}):
+              'FILE_VOLUME_QUOTAS':0x00000020}.items():
         ans[name] = bool(num & flags)
     return ans
 
@@ -701,8 +699,8 @@ def get_volume_pathnames(volume_id, buf=None):
 
 # }}}
 
-# def scan_usb_devices(): {{{
 
+# def scan_usb_devices(): {{{
 
 _USBDevice = namedtuple('USBDevice', 'vendor_id product_id bcd devid devinst')
 
@@ -713,9 +711,8 @@ class USBDevice(_USBDevice):
         def r(x):
             if x is None:
                 return 'None'
-            return '0x%x' % x
-        return 'USBDevice(vendor_id={} product_id={} bcd={} devid={} devinst={})'.format(
-            r(self.vendor_id), r(self.product_id), r(self.bcd), self.devid, self.devinst)
+            return f'0x{x:x}'
+        return f'USBDevice(vendor_id={r(self.vendor_id)} product_id={r(self.product_id)} bcd={r(self.bcd)} devid={self.devid} devinst={self.devinst})'
 
 
 def parse_hex(x):
@@ -829,7 +826,7 @@ def get_storage_number_map(drive_types=(DRIVE_REMOVABLE, DRIVE_FIXED), debug=Fal
     ' Get a mapping of drive letters to storage numbers for all drives on system (of the specified types) '
     mask = GetLogicalDrives()
     type_map = {letter:GetDriveType(letter + ':' + os.sep) for i, letter in enumerate(string.ascii_uppercase) if mask & (1 << i)}
-    drives = (letter for letter, dt in iteritems(type_map) if dt in drive_types)
+    drives = (letter for letter, dt in type_map.items() if dt in drive_types)
     ans = defaultdict(list)
     for letter in drives:
         try:
@@ -839,7 +836,7 @@ def get_storage_number_map(drive_types=(DRIVE_REMOVABLE, DRIVE_FIXED), debug=Fal
             if debug:
                 prints(f'Failed to get storage number for drive: {letter} with error: {as_unicode(err)}')
             continue
-    for val in itervalues(ans):
+    for val in ans.values():
         val.sort(key=itemgetter(0))
     return dict(ans)
 
@@ -879,7 +876,7 @@ def get_storage_number_map_alt(debug=False):
             if debug:
                 prints(f'Failed to get storage number for drive: {name[0]} with error: {as_unicode(err)}')
             continue
-    for val in itervalues(ans):
+    for val in ans.values():
         val.sort(key=itemgetter(0))
     return dict(ans)
 
@@ -924,7 +921,7 @@ def get_usb_info(usbdev, debug=False):  # {{{
     try:
         buf, dd = get_device_descriptor(handle, device_port)
         if dd.idVendor == usbdev.vendor_id and dd.idProduct == usbdev.product_id and dd.bcdDevice == usbdev.bcd:
-            # Dont need to read language since we only care about english names
+            # Don't need to read language since we only care about english names
             # buf, langs = get_device_languages(handle, device_port)
             # print(111, langs)
             for index, name in ((dd.iManufacturer, 'manufacturer'), (dd.iProduct, 'product'), (dd.iSerialNumber, 'serial_number')):
@@ -937,7 +934,7 @@ def get_usb_info(usbdev, debug=False):  # {{{
                             # randomly after some time of my Kindle being
                             # connected. Disconnecting and reconnecting causes
                             # it to start working again.
-                            prints('Failed to read %s from device, with error: [%d] %s' % (name, err.winerror, as_unicode(err)))
+                            prints(f'Failed to read {name} from device, with error: [{err.winerror}] {as_unicode(err)}')
     finally:
         CloseHandle(handle)
     return ans
@@ -977,7 +974,7 @@ def get_device_string(hub_handle, device_port, index, buf=None, lang=0x409):
     data = cast(buf, PUSB_DESCRIPTOR_REQUEST).contents.Data
     sz, dtype = data.bLength, data.bType
     if dtype != 0x03:
-        raise OSError(errno.EINVAL, 'Invalid datatype for string descriptor: 0x%x' % dtype)
+        raise OSError(errno.EINVAL, f'Invalid datatype for string descriptor: 0x{dtype:x}')
     return buf, wstring_at(addressof(data.String), sz // 2).rstrip('\0')
 
 
@@ -997,7 +994,7 @@ def get_device_languages(hub_handle, device_port, buf=None):
     data = cast(buf, PUSB_DESCRIPTOR_REQUEST).contents.Data
     sz, dtype = data.bLength, data.bType
     if dtype != 0x03:
-        raise OSError(errno.EINVAL, 'Invalid datatype for string descriptor: 0x%x' % dtype)
+        raise OSError(errno.EINVAL, f'Invalid datatype for string descriptor: 0x{dtype:x}')
     data = cast(data.String, POINTER(USHORT*(sz//2)))
     return buf, list(filter(None, data.contents))
 

@@ -4,11 +4,10 @@
 
 import os
 from functools import partial
+from queue import Empty, Queue
 from threading import Event, Thread
 
 from calibre import detect_ncpus, filesystem_encoding, force_unicode, human_readable
-from polyglot.builtins import iteritems
-from polyglot.queue import Empty, Queue
 
 
 class Worker(Thread):
@@ -98,12 +97,12 @@ def compress_images(container, report=None, names=None, jpeg_quality=None, webp_
         if not keep_going:
             abort.set()
     progress_callback(0, num_to_process, '')
-    [Worker(abort, 'CompressImage%d' % i, queue, results, jpeg_quality, webp_quality, pc) for i in range(min(detect_ncpus(), num_to_process))]
+    [Worker(abort, f'CompressImage{i}', queue, results, jpeg_quality, webp_quality, pc) for i in range(min(detect_ncpus(), num_to_process))]
     queue.join()
     before_total = after_total = 0
     processed_num = 0
     changed = False
-    for name, (ok, res) in iteritems(results):
+    for name, (ok, res) in results.items():
         name = force_unicode(name, filesystem_encoding)
         if ok:
             before, after = res

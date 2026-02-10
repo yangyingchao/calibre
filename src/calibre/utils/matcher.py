@@ -11,6 +11,7 @@ from collections import OrderedDict
 from itertools import islice
 from math import ceil
 from operator import itemgetter
+from queue import Queue
 from threading import Lock, Thread
 from unicodedata import normalize
 
@@ -20,8 +21,6 @@ from calibre.constants import filesystem_encoding
 from calibre.utils.icu import lower as icu_lower
 from calibre.utils.icu import primary_collator, primary_find, primary_sort_key
 from calibre.utils.icu import upper as icu_upper
-from polyglot.builtins import iteritems, itervalues
-from polyglot.queue import Queue
 
 DEFAULT_LEVEL1 = '/'
 DEFAULT_LEVEL2 = '-_ 0123456789'
@@ -67,7 +66,7 @@ def split(tasks, pool_size):
     and i is the index of the element x in the original list.
     '''
     ans, count = [], 0
-    delta = int(ceil(len(tasks) / pool_size))
+    delta = ceil(len(tasks) / pool_size)
     while tasks:
         section = [(count + i, task) for i, task in enumerate(tasks[:delta])]
         tasks = tasks[delta:]
@@ -99,7 +98,7 @@ class Matcher:
                 w = [Worker(requests, results) for i in range(max(1, cpu_count()))]
                 [x.start() for x in w]
                 workers.extend(w)
-        items = map(lambda x: normalize('NFC', str(x)), filter(None, items))
+        items = (normalize('NFC', str(x)) for x in filter(None, items))
         self.items = items = tuple(items)
         tasks = split(items, len(workers))
         self.task_maps = [{j: i for j, (i, _) in enumerate(task)} for task in tasks]
@@ -136,7 +135,7 @@ class Matcher:
                     error = x
 
         if error is not None:
-            raise Exception('Failed to score items: %s' % error)
+            raise Exception(f'Failed to score items: {error}')
         items = sorted(((-scores[i], item, positions[i])
                         for i, item in enumerate(self.items)),
                        key=itemgetter(0))
@@ -166,7 +165,6 @@ class FilesystemMatcher(Matcher):
 
 
 # Python implementation of the scoring algorithm {{{
-
 
 def calc_score_for_char(ctx, prev, current, distance):
     factor = 1.0
@@ -226,7 +224,12 @@ def process_item(ctx, haystack, needle):
 
 class PyScorer:
     __slots__ = (
-        'level1', 'level2', 'level3', 'max_score_per_char', 'items', 'memory'
+        'items',
+        'level1',
+        'level2',
+        'level3',
+        'max_score_per_char',
+        'memory',
     )
 
     def __init__(
@@ -245,7 +248,6 @@ class PyScorer:
             self.max_score_per_char = (1.0 / len(item) + 1.0 / len(needle)) / 2.0
             self.memory = {}
             yield process_item(self, item, needle)
-
 
 # }}}
 
@@ -277,7 +279,7 @@ def test(return_tests=False):
 
     class Test(unittest.TestCase):
 
-        @unittest.skipIf(is_sanitized, 'Sanitizer enabled can\'t check for leaks')
+        @unittest.skipIf(is_sanitized, "Sanitizer enabled can't check for leaks")
         def test_mem_leaks(self):
             import gc
 
@@ -310,7 +312,7 @@ def test(return_tests=False):
         def test_non_bmp(self):
             raw = '_\U0001f431-'
             m = Matcher([raw], scorer=CScorer)
-            positions = next(itervalues(m(raw)))
+            positions = next(iter(m(raw).values()))
             self.assertEqual(
                 positions, (0, 1, 2)
             )
@@ -343,7 +345,7 @@ def main(basedir=None, query=None):
     from calibre.utils.terminal import ColoredStream
     if basedir is None:
         try:
-            basedir = input_unicode('Enter directory to scan [%s]: ' % os.getcwd()
+            basedir = input_unicode(f'Enter directory to scan [{os.getcwd()}]: '
                                 ).strip() or os.getcwd()
         except (EOFError, KeyboardInterrupt):
             return
@@ -357,7 +359,7 @@ def main(basedir=None, query=None):
                 break
             if not query:
                 break
-        for path, positions in islice(iteritems(m(query)), 0, 10):
+        for path, positions in islice(m(query).items(), 0, 10):
             positions = list(positions)
             p = 0
             while positions:

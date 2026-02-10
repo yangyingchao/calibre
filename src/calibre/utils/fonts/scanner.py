@@ -15,14 +15,13 @@ from calibre.utils.fonts.metadata import FontMetadata, UnsupportedFont
 from calibre.utils.icu import lower as icu_lower
 from calibre.utils.icu import sort_key
 from calibre.utils.resources import get_path as P
-from polyglot.builtins import itervalues
 
 
 class NoFonts(ValueError):
     pass
 
-# Font dirs {{{
 
+# Font dirs {{{
 
 def default_font_dirs():
     return [
@@ -43,7 +42,7 @@ def fc_list():
         return default_font_dirs()
     try:
         lib = ctypes.CDLL(lib)
-    except:
+    except Exception:
         return default_font_dirs()
 
     prototype = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
@@ -76,7 +75,7 @@ def fc_list():
             try:
                 ans.append(d.decode(filesystem_encoding))
             except ValueError:
-                prints('Ignoring undecodeable font path: %r' % d)
+                prints(f'Ignoring undecodeable font path: {d!r}')
                 continue
     end(str_list)
     if len(ans) < 3:
@@ -123,8 +122,8 @@ def font_dirs():
     return fc_list()
 # }}}
 
-# Build font family maps {{{
 
+# Build font family maps {{{
 
 def font_priority(font):
     '''
@@ -157,14 +156,14 @@ def path_significance(path, folders):
 
 def build_families(cached_fonts, folders, family_attr='font-family'):
     families = defaultdict(list)
-    for f in itervalues(cached_fonts):
+    for f in cached_fonts.values():
         if not f:
             continue
         lf = icu_lower(f.get(family_attr) or '')
         if lf:
             families[lf].append(f)
 
-    for fonts in itervalues(families):
+    for fonts in families.values():
         # Look for duplicate font files and choose the copy that is from a
         # more significant font directory (prefer user directories over
         # system directories).
@@ -188,8 +187,7 @@ def build_families(cached_fonts, folders, family_attr='font-family'):
         fonts.sort(key=font_priority)
 
     font_family_map = dict.copy(families)
-    font_families = tuple(sorted((f[0]['font-family'] for f in
-            itervalues(font_family_map)), key=sort_key))
+    font_families = tuple(sorted((f[0]['font-family'] for f in font_family_map.values()), key=sort_key))
     return font_family_map, font_families
 # }}}
 
@@ -224,7 +222,7 @@ class FontScanner(Thread):
         try:
             return self.font_family_map[icu_lower(family)]
         except KeyError:
-            raise NoFonts('No fonts found for the family: %r'%family)
+            raise NoFonts(f'No fonts found for the family: {family!r}')
 
     def legacy_fonts_for_family(self, family):
         '''
@@ -270,7 +268,7 @@ class FontScanner(Thread):
         '''
         from calibre.utils.fonts.utils import get_printable_characters, panose_to_css_generic_family, supports_text
         if not isinstance(text, str):
-            raise TypeError('%r is not unicode'%text)
+            raise TypeError(f'{text!r} is not unicode')
         text = get_printable_characters(text)
         found = {}
 
@@ -278,7 +276,7 @@ class FontScanner(Thread):
             try:
                 raw = self.get_font_data(font)
                 return supports_text(raw, text)
-            except:
+            except Exception:
                 pass
             return False
 
@@ -288,7 +286,7 @@ class FontScanner(Thread):
                 continue
             generic_family = panose_to_css_generic_family(faces[0]['panose'])
             if generic_family in allowed_families or generic_family == preferred_families[0]:
-                return (family, faces)
+                return family, faces
             elif generic_family not in found:
                 found[generic_family] = (family, faces)
 
@@ -315,8 +313,8 @@ class FontScanner(Thread):
         self.reload_cache()
 
         if isworker:
-            # Dont scan font files in worker processes, use whatever is
-            # cached. Font files typically dont change frequently enough to
+            # Don't scan font files in worker processes, use whatever is
+            # cached. Font files typically don't change frequently enough to
             # justify a rescan in a worker process.
             self.build_families()
             return
@@ -390,10 +388,10 @@ class FontScanner(Thread):
         for family in self.font_families:
             prints(family)
             for font in self.fonts_for_family(family):
-                prints('\t%s: %s'%(font['full_name'], font['path']))
+                prints('\t{}: {}'.format(font['full_name'], font['path']))
                 prints(end='\t')
                 for key in ('font-stretch', 'font-weight', 'font-style'):
-                    prints('%s: %s'%(key, font[key]), end=' ')
+                    prints(f'{key}: {font[key]}', end=' ')
                 prints()
                 prints('\tSub-family:', font['wws_subfamily_name'] or
                         font['preferred_subfamily_name'] or

@@ -2,7 +2,6 @@
 # License: GPLv3 Copyright: 2009, Kovid Goyal <kovid at kovidgoyal.net>
 
 
-import atexit
 import glob
 import os
 import shutil
@@ -60,6 +59,7 @@ class Develop(Command):
             ''')
     short_description = 'Setup a development environment for calibre'
     MODE = 0o755
+    drop_privileges_for_subcommands = True
 
     sub_commands = ['build', 'resources', 'iso639', 'iso3166', 'gui',]
 
@@ -68,7 +68,7 @@ class Develop(Command):
                       dest='fatal_errors', help='If set die on post install errors.')
         parser.add_option('--no-postinstall', action='store_false',
             dest='postinstall', default=True,
-            help='Don\'t run post install actions like creating MAN pages, setting'+
+            help="Don't run post install actions like creating MAN pages, setting"+
                     ' up desktop integration and so on')
 
     def add_options(self, parser):
@@ -128,13 +128,6 @@ class Develop(Command):
                     'supported on linux. On other platforms, see the User Manual'
                     ' for help with setting up a development environment.')
             raise SystemExit(1)
-
-        if os.geteuid() == 0:
-            # We drop privileges for security, regaining them when installing
-            # files. Also ensures that any config files created as a side
-            # effect of the build process are not owned by root.
-            self.drop_privileges()
-
         # Ensure any config files created as a side effect of importing calibre
         # during the build process are in /tmp
         os.environ['CALIBRE_CONFIG_DIRECTORY'] = os.environ.get('CALIBRE_CONFIG_DIRECTORY', '/tmp/calibre-install-config')
@@ -142,7 +135,6 @@ class Develop(Command):
     def run(self, opts):
         self.manifest = []
         self.opts = opts
-        self.regain_privileges()
         self.consolidate_paths()
         self.install_files()
         self.write_templates()
@@ -288,18 +280,20 @@ class Install(Develop):
 class Sdist(Command):
 
     description = 'Create a source distribution'
-    DEST = os.path.join('dist', '%s-%s.tar.xz'%(__appname__, __version__))
+    DEST = os.path.join('dist', f'{__appname__}-{__version__}.tar.xz')
 
     def run(self, opts):
         if not self.e(self.d(self.DEST)):
             os.makedirs(self.d(self.DEST))
-        tdir = tempfile.mkdtemp()
-        atexit.register(shutil.rmtree, tdir)
-        tdir = self.j(tdir, 'calibre-%s' % __version__)
+        with tempfile.TemporaryDirectory() as tdir:
+            tdir = self.j(tdir, f'calibre-{__version__}')
+            self.run_with_tdir(tdir)
+
+    def run_with_tdir(self, tdir):
         self.info('\tRunning git export...')
         os.mkdir(tdir)
         subprocess.check_call('git archive HEAD | tar -x -C ' + tdir, shell=True)
-        for x in open('.gitignore').readlines():
+        for x in open('.gitignore'):
             if not x.startswith('/resources/'):
                 continue
             x = x[1:]
@@ -336,7 +330,7 @@ class Sdist(Command):
         self.info('\tCreating tarfile...')
         dest = self.DEST.rpartition('.')[0]
         shutil.rmtree(os.path.join(tdir, '.github'))
-        subprocess.check_call(['tar', '--mtime=now', '-cf', self.a(dest), 'calibre-%s' % __version__], cwd=self.d(tdir))
+        subprocess.check_call(['tar', '--mtime=now', '-cf', self.a(dest), f'calibre-{__version__}'], cwd=self.d(tdir))
         self.info('\tCompressing tarfile...')
         if os.path.exists(self.a(self.DEST)):
             os.remove(self.a(self.DEST))
@@ -360,24 +354,39 @@ class Bootstrap(Command):
     def add_options(self, parser):
         parser.add_option('--ephemeral', default=False, action='store_true',
             help='Do not download all history for the translations. Speeds up first time download but subsequent downloads will be slower.')
+        parser.add_option('--path-to-translations',
+                          help='Path to existing out-of-tree translations checkout. Use this to avoid downloading translations at all.')
 
     def pre_sub_commands(self, opts):
         tdir = self.j(self.d(self.SRC), 'translations')
         clone_cmd = [
             'git', 'clone', f'https://github.com/{self.TRANSLATIONS_REPO}.git', 'translations']
-        if opts.ephemeral:
+        if opts.path_to_translations:
+            if os.path.exists(tdir):
+                shutil.rmtree(tdir)
+            shutil.copytree(opts.path_to_translations, tdir)
+            # Change permissions for the top-level folder
+            os.chmod(tdir, 0o755)
+            for root, dirs, files in os.walk(tdir):
+                # set perms on sub-directories
+                for momo in dirs:
+                    os.chmod(os.path.join(root, momo), 0o755)
+                # set perms on files
+                for momo in files:
+                    os.chmod(os.path.join(root, momo), 0o644)
+
+        elif opts.ephemeral:
             if os.path.exists(tdir):
                 shutil.rmtree(tdir)
 
             st = time.time()
             clone_cmd.insert(2, '--depth=1')
             subprocess.check_call(clone_cmd, cwd=self.d(self.SRC))
-            print('Downloaded translations in %d seconds' % int(time.time() - st))
+            print(f'Downloaded translations in {int(time.time() - st)} seconds')
+        elif os.path.exists(tdir):
+            subprocess.check_call(['git', 'pull'], cwd=tdir)
         else:
-            if os.path.exists(tdir):
-                subprocess.check_call(['git', 'pull'], cwd=tdir)
-            else:
-                subprocess.check_call(clone_cmd, cwd=self.d(self.SRC))
+            subprocess.check_call(clone_cmd, cwd=self.d(self.SRC))
 
     def run(self, opts):
-        self.info('\n\nAll done! You should now be able to run "%s setup.py install" to install calibre' % sys.executable)
+        self.info(f'\n\nAll done! You should now be able to run "{sys.executable} setup.py install" to install calibre')

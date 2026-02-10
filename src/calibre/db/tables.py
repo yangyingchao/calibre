@@ -7,17 +7,18 @@ __docformat__ = 'restructuredtext en'
 
 import numbers
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 
 from calibre.ebooks.metadata import author_to_author_sort
 from calibre.utils.date import UNDEFINED_DATE, parse_date, utc_tz
 from calibre.utils.icu import lower as icu_lower
 from calibre_extensions.speedup import parse_date as _c_speedup
-from polyglot.builtins import iteritems, itervalues
 
 
 def identity(x):
     return x
+
 
 def c_parse(val):
     try:
@@ -29,7 +30,7 @@ def c_parse(val):
             return datetime(int(val), 1, 3, tzinfo=utc_tz)
         if val is None:
             return UNDEFINED_DATE
-    except:
+    except Exception:
         pass
     else:
         try:
@@ -64,11 +65,13 @@ class Table:
             'datetime': c_parse,
             'bool': bool
         }.get(dt)
+        self.serialize = None
         if name == 'authors':
             # Legacy
             self.unserialize = lambda x: x.replace('|', ',') if x else ''
+            self.serialize = lambda x: x.replace(',', '|')
         self.link_table = (link_table if link_table else
-                'books_%s_link'%self.metadata['table'])
+                'books_{}_link'.format(self.metadata['table']))
         if self.supports_notes and dt == 'rating':  # custom ratings table
             self.supports_notes = False
 
@@ -87,7 +90,6 @@ class Table:
 
 
 class VirtualTable(Table):
-
     '''
     A dummy table used for fields that only exist in memory like ondevice
     '''
@@ -99,7 +101,6 @@ class VirtualTable(Table):
 
 
 class OneToOneTable(Table):
-
     '''
     Represents data that is unique per book (it may not actually be unique) but
     each item is assigned to a book in a one-to-one mapping. For example: uuid,
@@ -158,10 +159,10 @@ class UUIDTable(OneToOneTable):
 
     def read(self, db):
         OneToOneTable.read(self, db)
-        self.uuid_to_id_map = {v:k for k, v in iteritems(self.book_col_map)}
+        self.uuid_to_id_map = {v:k for k, v in self.book_col_map.items()}
 
     def update_uuid_cache(self, book_id_val_map):
-        for book_id, uuid in iteritems(book_id_val_map):
+        for book_id, uuid in book_id_val_map.items():
             self.uuid_to_id_map.pop(self.book_col_map.get(book_id, None), None)  # discard old uuid
             self.uuid_to_id_map[uuid] = book_id
 
@@ -194,7 +195,6 @@ class CompositeTable(OneToOneTable):
 
 
 class ManyToOneTable(Table):
-
     '''
     Represents data where one data item can map to many books, for example:
     series or publisher.
@@ -231,7 +231,7 @@ class ManyToOneTable(Table):
             bcm[book] = item_id
 
     def fix_link_table(self, db):
-        linked_item_ids = {item_id for item_id in itervalues(self.book_col_map)}
+        linked_item_ids = set(self.book_col_map.values())
         extra_item_ids = linked_item_ids - set(self.id_map)
         if extra_item_ids:
             for item_id in extra_item_ids:
@@ -243,10 +243,10 @@ class ManyToOneTable(Table):
 
     def fix_case_duplicates(self, db):
         case_map = defaultdict(set)
-        for item_id, val in iteritems(self.id_map):
+        for item_id, val in self.id_map.items():
             case_map[icu_lower(val)].add(item_id)
 
-        for v in itervalues(case_map):
+        for v in case_map.values():
             if len(v) > 1:
                 main_id = min(v)
                 v.discard(main_id)
@@ -262,6 +262,30 @@ class ManyToOneTable(Table):
                     self.link_table, self.metadata['link_column']),
                     tuple((main_id, x) for x in v))
                 db.delete_category_items(self.name, self.metadata['table'], item_map)
+
+    def item_ids_for_names(self, db, item_names: Iterable[str], case_sensitive: bool = False) -> dict[str, int]:
+        item_names = tuple(item_names)
+        if case_sensitive:
+            colname = self.metadata['column']
+            serialized_names = tuple(map(self.serialize, item_names)) if self.serialize else item_names
+            if len(item_names) == 1:
+                iid = db.get(f'SELECT id FROM {self.metadata["table"]} WHERE {colname} = ?', ((serialized_names[0],)), all=False)
+                return {item_names[0]: iid}
+            inq = ('?,' * len(item_names))[:-1]
+            ans = dict.fromkeys(item_names)
+            res = db.get(f'SELECT {colname}, id FROM {self.metadata["table"]} WHERE {colname} IN ({inq})', serialized_names)
+            if self.unserialize:
+                res = ((self.unserialize(name), iid) for name, iid in res)
+            ans.update(res)
+            return ans
+        if len(item_names) == 1:
+            q = icu_lower(item_names[0])
+            for iid, name in self.id_map.items():
+                if icu_lower(name) == q:
+                    return {item_names[0]: iid}
+            return {item_names[0]: None}
+        rmap = {icu_lower(v) if isinstance(v, str) else v:k for k, v in self.id_map.items()}
+        return {name: rmap.get(icu_lower(name) if isinstance(name, str) else name, None) for name in item_names}
 
     def remove_books(self, book_ids, db):
         clean = set()
@@ -346,6 +370,7 @@ class ManyToOneTable(Table):
             # We have to replace
             new_id = existing_item
             self.id_map.pop(item_id, None)
+            self.link_map.pop(item_id, None)
             books = self.col_book_map.pop(item_id, set())
             for book_id in books:
                 self.book_col_map[book_id] = existing_item
@@ -371,9 +396,9 @@ class RatingTable(ManyToOneTable):
         ManyToOneTable.read_id_maps(self, db)
         # Ensure there are no records with rating=0 in the table. These should
         # be represented as rating:None instead.
-        bad_ids = {item_id for item_id, rating in iteritems(self.id_map) if rating == 0}
+        bad_ids = {item_id for item_id, rating in self.id_map.items() if rating == 0}
         if bad_ids:
-            self.id_map = {item_id:rating for item_id, rating in iteritems(self.id_map) if rating != 0}
+            self.id_map = {item_id:rating for item_id, rating in self.id_map.items() if rating != 0}
             db.executemany('DELETE FROM {} WHERE {}=?'.format(self.link_table, self.metadata['link_column']),
                                 tuple((x,) for x in bad_ids))
             db.execute('DELETE FROM {} WHERE {}=0'.format(
@@ -381,7 +406,6 @@ class RatingTable(ManyToOneTable):
 
 
 class ManyToManyTable(ManyToOneTable):
-
     '''
     Represents data that has a many-to-many mapping with books. i.e. each book
     can have more than one value and each value can be mapped to more than one
@@ -400,10 +424,10 @@ class ManyToManyTable(ManyToOneTable):
             cbm[item_id].add(book)
             bcm[book].append(item_id)
 
-        self.book_col_map = {k:tuple(v) for k, v in iteritems(bcm)}
+        self.book_col_map = {k:tuple(v) for k, v in bcm.items()}
 
     def fix_link_table(self, db):
-        linked_item_ids = {item_id for item_ids in itervalues(self.book_col_map) for item_id in item_ids}
+        linked_item_ids = {item_id for item_ids in self.book_col_map.values() for item_id in item_ids}
         extra_item_ids = linked_item_ids - set(self.id_map)
         if extra_item_ids:
             for item_id in extra_item_ids:
@@ -490,11 +514,13 @@ class ManyToManyTable(ManyToOneTable):
         if existing_item is None or existing_item == item_id:
             # A simple rename will do the trick
             self.id_map[item_id] = new_name
-            db.execute(f'UPDATE {table} SET {col}=? WHERE id=?', (new_name, item_id))
+            nn = self.serialize(new_name) if self.serialize else new_name
+            db.execute(f'UPDATE {table} SET {col}=? WHERE id=?', (nn, item_id))
         else:
             # We have to replace
             new_id = existing_item
             self.id_map.pop(item_id, None)
+            self.link_map.pop(item_id, None)
             books = self.col_book_map.pop(item_id, set())
             # Replacing item_id with existing_item could cause the same id to
             # appear twice in the book list. Handle that by removing existing
@@ -510,10 +536,10 @@ class ManyToManyTable(ManyToOneTable):
     def fix_case_duplicates(self, db):
         from calibre.db.write import uniq
         case_map = defaultdict(set)
-        for item_id, val in iteritems(self.id_map):
+        for item_id, val in self.id_map.items():
             case_map[icu_lower(val)].add(item_id)
 
-        for v in itervalues(case_map):
+        for v in case_map.values():
             if len(v) > 1:
                 done_books = set()
                 main_id = min(v)
@@ -563,19 +589,19 @@ class AuthorsTable(ManyToManyTable):
             lm[aid] = link
 
     def set_sort_names(self, aus_map, db):
-        aus_map = {aid:(a or '').strip() for aid, a in iteritems(aus_map)}
-        aus_map = {aid:a for aid, a in iteritems(aus_map) if a != self.asort_map.get(aid, None)}
+        aus_map = {aid:(a or '').strip() for aid, a in aus_map.items()}
+        aus_map = {aid:a for aid, a in aus_map.items() if a != self.asort_map.get(aid, None)}
         self.asort_map.update(aus_map)
         db.executemany('UPDATE authors SET sort=? WHERE id=?',
-            [(v, k) for k, v in iteritems(aus_map)])
+            [(v, k) for k, v in aus_map.items()])
         return aus_map
 
     def set_links(self, link_map, db):
-        link_map = {aid:(l or '').strip() for aid, l in iteritems(link_map)}
-        link_map = {aid:l for aid, l in iteritems(link_map) if l != self.link_map.get(aid, None)}
+        link_map = {aid:(l or '').strip() for aid, l in link_map.items()}
+        link_map = {aid:l for aid, l in link_map.items() if l != self.link_map.get(aid, None)}
         self.link_map.update(link_map)
         db.executemany('UPDATE authors SET link=? WHERE id=?',
-            [(v, k) for k, v in iteritems(link_map)])
+            [(v, k) for k, v in link_map.items()])
         return link_map
 
     def remove_books(self, book_ids, db):
@@ -588,7 +614,6 @@ class AuthorsTable(ManyToManyTable):
     def rename_item(self, item_id, new_name, db):
         ret = ManyToManyTable.rename_item(self, item_id, new_name, db)
         if item_id not in self.id_map:
-            self.link_map.pop(item_id, None)
             self.asort_map.pop(item_id, None)
         else:
             # Was a simple rename, update the author sort value
@@ -625,7 +650,7 @@ class FormatsTable(ManyToManyTable):
                 fnm[book][fmt] = name
                 sm[book][fmt] = sz
 
-        self.book_col_map = {k:tuple(sorted(v)) for k, v in iteritems(bcm)}
+        self.book_col_map = {k:tuple(sorted(v)) for k, v in bcm.items()}
 
     def remove_books(self, book_ids, db):
         clean = ManyToManyTable.remove_books(self, book_ids, db)
@@ -640,21 +665,21 @@ class FormatsTable(ManyToManyTable):
                         (fname, book_id, fmt))
 
     def remove_formats(self, formats_map, db):
-        for book_id, fmts in iteritems(formats_map):
+        for book_id, fmts in formats_map.items():
             self.book_col_map[book_id] = [fmt for fmt in self.book_col_map.get(book_id, []) if fmt not in fmts]
             for m in (self.fname_map, self.size_map):
-                m[book_id] = {k:v for k, v in iteritems(m[book_id]) if k not in fmts}
+                m[book_id] = {k:v for k, v in m[book_id].items() if k not in fmts}
             for fmt in fmts:
                 try:
                     self.col_book_map[fmt].discard(book_id)
                 except KeyError:
                     pass
         db.executemany('DELETE FROM data WHERE book=? AND format=?',
-            [(book_id, fmt) for book_id, fmts in iteritems(formats_map) for fmt in fmts])
+            [(book_id, fmt) for book_id, fmts in formats_map.items() for fmt in fmts])
 
         def zero_max(book_id):
             try:
-                return max(itervalues(self.size_map[book_id]))
+                return max(self.size_map[book_id].values())
             except ValueError:
                 return 0
 
@@ -684,7 +709,7 @@ class FormatsTable(ManyToManyTable):
         self.size_map[book_id][fmt] = size
         db.execute('INSERT OR REPLACE INTO data (book,format,uncompressed_size,name) VALUES (?,?,?,?)',
                         (book_id, fmt, size, fname))
-        return max(itervalues(self.size_map[book_id]))
+        return max(self.size_map[book_id].values())
 
 
 class IdentifiersTable(ManyToManyTable):
@@ -727,4 +752,4 @@ class IdentifiersTable(ManyToManyTable):
         raise NotImplementedError('Cannot rename identifiers')
 
     def all_identifier_types(self):
-        return frozenset(k for k, v in iteritems(self.col_book_map) if v)
+        return frozenset(k for k, v in self.col_book_map.items() if v)

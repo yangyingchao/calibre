@@ -29,26 +29,26 @@ plugboard_save_to_disk_value = 'save_to_disk'
 DEFAULT_TEMPLATE = '{author_sort}/{title}/{title} - {authors}'
 DEFAULT_SEND_TEMPLATE = '{author_sort}/{title} - {authors}'
 
-FORMAT_ARG_DESCS = dict(
-        title=_('The title'),
-        authors=_('The authors'),
-        author_sort=_('The author sort string. To use only the first letter '
+FORMAT_ARG_DESCS = {
+        'title': _('The title'),
+        'authors': _('The authors'),
+        'author_sort': _('The author sort string. To use only the first letter '
             'of the name use {author_sort[0]}'),
-        tags=_('The tags'),
-        series=_('The series'),
-        series_index=_('The series number. '
+        'tags': _('The tags'),
+        'series': _('The series'),
+        'series_index': _('The series number. '
             'To get leading zeros use {series_index:0>3s} or '
             '{series_index:>3s} for leading spaces'),
-        rating=_('The rating'),
-        isbn=_('The ISBN'),
-        publisher=_('The publisher'),
-        timestamp=_('The date'),
-        pubdate=_('The published date'),
-        last_modified=_('The date when the metadata for this book record'
+        'rating': _('The rating'),
+        'isbn': _('The ISBN'),
+        'publisher': _('The publisher'),
+        'timestamp': _('The date'),
+        'pubdate': _('The published date'),
+        'last_modified': _('The date when the metadata for this book record'
             ' was last modified'),
-        languages=_('The language(s) of this book'),
-        id=_('The calibre internal id')
-        )
+        'languages': _('The language(s) of this book'),
+        'id': _('The calibre internal id')
+}
 
 FORMAT_ARGS = {}
 for x in FORMAT_ARG_DESCS:
@@ -151,7 +151,7 @@ class Formatter(TemplateFormatter):
             key = key.lower()
             try:
                 b = self.book.get_user_metadata(key, False)
-            except:
+            except Exception:
                 traceback.print_exc()
                 b = None
             if b is not None and b['datatype'] == 'composite':
@@ -167,15 +167,12 @@ class Formatter(TemplateFormatter):
                     val = ','.join(val)
                 return val.replace('/', '_').replace('\\', '_')
             return ''
-        except:
+        except Exception:
             traceback.print_exc()
             return key
 
 
-def get_components(template, mi, id, timefmt='%b %Y', length=250,
-        sanitize_func=ascii_filename, replace_whitespace=False,
-        to_lowercase=False, safe_format=True, last_has_extension=True,
-        single_dir=False):
+def get_component_metadata(template, mi, book_id, timefmt='%b %Y'):
     tsorder = tweaks['save_template_title_series_sorting']
     format_args = FORMAT_ARGS.copy()
     format_args.update(mi.all_non_none_fields())
@@ -193,16 +190,13 @@ def get_components(template, mi, id, timefmt='%b %Y', length=250,
         format_args['author'] = format_args['authors']
     if mi.tags:
         format_args['tags'] = mi.format_tags()
-        if format_args['tags'].startswith('/'):
-            format_args['tags'] = format_args['tags'][1:]
+        format_args['tags'] = format_args['tags'].removeprefix('/')
     else:
         format_args['tags'] = ''
     if mi.series:
         format_args['series'] = title_sort(mi.series, order=tsorder)
         if mi.series_index is not None:
             format_args['series_index'] = mi.format_series_index()
-    else:
-        template = re.sub(r'\{series_index[^}]*?\}', '', template)
     if mi.rating is not None:
         format_args['rating'] = mi.format_rating(divide_by=2.0)
     if mi.identifiers:
@@ -214,11 +208,13 @@ def get_components(template, mi, id, timefmt='%b %Y', length=250,
         format_args['timestamp'] = strftime(timefmt, mi.timestamp.timetuple())
     if not is_date_undefined(mi.pubdate) and hasattr(mi.pubdate, 'timetuple'):
         format_args['pubdate'] = strftime(timefmt, mi.pubdate.timetuple())
+    else:
+        format_args.pop('pubdate', None)
     if (hasattr(mi, 'last_modified') and not is_date_undefined(mi.last_modified) and
                 hasattr(mi.last_modified, 'timetuple')):
         format_args['last_modified'] = strftime(timefmt, mi.last_modified.timetuple())
 
-    format_args['id'] = str(id)
+    format_args['id'] = str(book_id)
     # Now format the custom fields
     custom_metadata = mi.get_all_user_metadata(make_copy=False)
     for key in custom_metadata:
@@ -240,15 +236,22 @@ def get_components(template, mi, id, timefmt='%b %Y', length=250,
                     format_args[key] = str(format_args[key])
                 else:
                     format_args[key] = ''
+    return format_args
+
+
+def get_components(template, mi, book_id, timefmt='%b %Y', length=250,
+        sanitize_func=ascii_filename, replace_whitespace=False,
+        to_lowercase=False, safe_format=True, last_has_extension=True,
+        single_dir=False):
+    format_args = get_component_metadata(template, mi, book_id, timefmt)
     if safe_format:
-        components = Formatter().safe_format(template, format_args,
-                                            'G_C-EXCEPTION!', mi)
+        components = Formatter().safe_format(template, format_args, 'G_C-EXCEPTION!', mi)
     else:
         components = Formatter().unsafe_format(template, format_args, mi)
     components = [x.strip() for x in components.split('/')]
     components = [sanitize_func(x) for x in components if x]
     if not components:
-        components = [str(id)]
+        components = [str(book_id)]
     if to_lowercase:
         components = [x.lower() for x in components]
     if replace_whitespace:
@@ -313,7 +316,7 @@ def update_metadata(mi, fmt, stream, plugboards, cdata, error_report=None, plugb
         if cdata:
             newmi.cover_data = ('jpg', cdata)
         set_metadata(stream, newmi, fmt, report_error=None if error_report is None else report_error)
-    except:
+    except Exception:
         if error_report is None:
             prints('Failed to set metadata for the', fmt, 'format of', mi.title)
             traceback.print_exc()
@@ -387,7 +390,7 @@ def sanitize_args(root, opts):
     length -= 15
     length -= len(root)
     if length < 5:
-        raise ValueError('%r is too long.'%root)
+        raise ValueError(f'{root!r} is too long.')
     return root, opts, length
 
 
@@ -410,7 +413,7 @@ def save_to_disk(db, ids, root, opts=None, callback=None):
         try:
             failed, id, title = save_book_to_disk(x, db, root, opts, length)
             tb = _('Requested formats not available')
-        except:
+        except Exception:
             failed, id, title = True, x, db.title(x, index_is_id=True)
             tb = traceback.format_exc()
         if failed:
@@ -427,7 +430,7 @@ def read_serialized_metadata(data):
     mi = OPF(data['opf'], try_to_guess_cover=False, populate_spine=False, basedir=os.path.dirname(data['opf'])).to_book_metadata()
     try:
         mi.last_modified = parse_date(data['last_modified'])
-    except:
+    except Exception:
         pass
     mi.cover, mi.cover_data = None, (None, None)
     cdata = None

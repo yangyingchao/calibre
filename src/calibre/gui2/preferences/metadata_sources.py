@@ -5,8 +5,6 @@ __license__   = 'GPL v3'
 __copyright__ = '2011, Kovid Goyal <kovid@kovidgoyal.net>'
 __docformat__ = 'restructuredtext en'
 
-from operator import attrgetter
-
 from qt.core import (
     QAbstractListModel,
     QAbstractTableModel,
@@ -29,8 +27,8 @@ from calibre.ebooks.metadata.sources.prefs import msprefs
 from calibre.gui2 import error_dialog, question_dialog
 from calibre.gui2.preferences import ConfigWidgetBase, test_widget
 from calibre.gui2.preferences.metadata_sources_ui import Ui_Form
+from calibre.utils.icu import primary_sort_key
 from calibre.utils.localization import ngettext
-from polyglot.builtins import iteritems
 
 
 class SourcesModel(QAbstractTableModel):  # {{{
@@ -43,10 +41,16 @@ class SourcesModel(QAbstractTableModel):  # {{{
         self.enabled_overrides = {}
         self.cover_overrides = {}
 
+    def reload_plugins(self):
+        self.beginResetModel()
+        self.plugins = list(all_metadata_plugins())
+        self.plugins.sort(key=lambda p: primary_sort_key(p.name))
+        self.endResetModel()
+
     def initialize(self):
         self.beginResetModel()
         self.plugins = list(all_metadata_plugins())
-        self.plugins.sort(key=attrgetter('name'))
+        self.plugins.sort(key=lambda p: primary_sort_key(p.name))
         self.enabled_overrides = {}
         self.cover_overrides = {}
         self.endResetModel()
@@ -68,7 +72,7 @@ class SourcesModel(QAbstractTableModel):  # {{{
     def data(self, index, role):
         try:
             plugin = self.plugins[index.row()]
-        except:
+        except Exception:
             return None
         col = index.column()
 
@@ -96,7 +100,7 @@ class SourcesModel(QAbstractTableModel):  # {{{
     def setData(self, index, val, role):
         try:
             plugin = self.plugins[index.row()]
-        except:
+        except Exception:
             return False
         col = index.column()
         ret = False
@@ -131,7 +135,7 @@ class SourcesModel(QAbstractTableModel):  # {{{
         return Qt.ItemFlag.ItemIsEditable | ans
 
     def commit(self):
-        for plugin, val in iteritems(self.enabled_overrides):
+        for plugin, val in self.enabled_overrides.items():
             if val == Qt.CheckState.Checked:
                 enable_plugin(plugin)
             elif val == Qt.CheckState.Unchecked:
@@ -139,7 +143,7 @@ class SourcesModel(QAbstractTableModel):  # {{{
 
         if self.cover_overrides:
             cp = msprefs['cover_priorities']
-            for plugin, val in iteritems(self.cover_overrides):
+            for plugin, val in self.cover_overrides.items():
                 if val == 1:
                     cp.pop(plugin.name, None)
                 else:
@@ -172,8 +176,8 @@ class FieldsModel(QAbstractListModel):  # {{{
                 'comments': _('Comments'),
                 'pubdate': _('Published date'),
                 'publisher': _('Publisher'),
-                'rating' : _('Rating'),
-                'tags' : _('Tags'),
+                'rating': _('Rating'),
+                'tags': _('Tags'),
                 'title': _('Title'),
                 'series': ngettext('Series', 'Series', 1),
                 'languages': _('Languages'),
@@ -195,7 +199,7 @@ class FieldsModel(QAbstractListModel):  # {{{
         for x in fields:
             if not x.startswith('identifier:') and x not in self.exclude:
                 self.fields.append(x)
-        self.fields.sort(key=lambda x:self.descs.get(x, x))
+        self.fields.sort(key=lambda x: self.descs.get(x, x))
         self.endResetModel()
 
     def state(self, field, defaults=False):
@@ -206,7 +210,7 @@ class FieldsModel(QAbstractListModel):  # {{{
     def data(self, index, role):
         try:
             field = self.fields[index.row()]
-        except:
+        except Exception:
             return None
         if role == Qt.ItemDataRole.DisplayRole:
             return self.descs.get(field, field)
@@ -236,7 +240,7 @@ class FieldsModel(QAbstractListModel):  # {{{
     def setData(self, index, val, role):
         try:
             field = self.fields[index.row()]
-        except:
+        except Exception:
             return False
         ret = False
         if role == Qt.ItemDataRole.CheckStateRole:
@@ -249,7 +253,7 @@ class FieldsModel(QAbstractListModel):  # {{{
     def commit(self):
         ignored_fields = {x for x in msprefs['ignore_fields'] if x not in
             self.overrides}
-        changed = {k for k, v in iteritems(self.overrides) if v ==
+        changed = {k for k, v in self.overrides.items() if v ==
             Qt.CheckState.Unchecked}
         msprefs['ignore_fields'] = list(ignored_fields.union(changed))
 
@@ -265,7 +269,7 @@ class FieldsModel(QAbstractListModel):  # {{{
     def commit_user_defaults(self):
         default_ignored_fields = {x for x in msprefs['user_default_ignore_fields'] if x not in
             self.overrides}
-        changed = {k for k, v in iteritems(self.overrides) if v ==
+        changed = {k for k, v in self.overrides.items() if v ==
             Qt.CheckState.Unchecked}
         msprefs['user_default_ignore_fields'] = list(default_ignored_fields.union(changed))
 
@@ -342,15 +346,26 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
         self.select_default_button.clicked.connect(self.fields_model.select_user_defaults)
         self.select_default_button.clicked.connect(self.changed_signal)
         self.set_as_default_button.clicked.connect(self.fields_model.commit_user_defaults)
-        self.tag_map_rules = self.author_map_rules = self.publisher_map_rules = None
+        self.tag_map_rules = self.author_map_rules = self.publisher_map_rules = self.series_map_rules = None
         m = QMenu(self)
         m.addAction(_('Tags')).triggered.connect(self.change_tag_map_rules)
         m.addAction(_('Authors')).triggered.connect(self.change_author_map_rules)
         m.addAction(_('Publisher')).triggered.connect(self.change_publisher_map_rules)
+        m.addAction(ngettext('Series', 'Series', 1)).triggered.connect(self.change_series_map_rules)
         self.map_rules_button.setMenu(m)
         l = self.page.layout()
         l.setStretch(0, 1)
         l.setStretch(1, 1)
+        self.add_new_source_button.clicked.connect(self.add_new_source)
+
+    def add_new_source(self):
+        from calibre.gui2.dialogs.plugin_updater import FILTER_NOT_INSTALLED, Category, PluginUpdaterDialog
+        d = PluginUpdaterDialog(self, initial_filter=FILTER_NOT_INSTALLED, initial_category=Category.MetadataSource)
+        d.warn_about_neededing_restart = False
+        d.exec()
+        if d.number_installed:
+            self.sources_model.reload_plugins()
+            self.fields_model.initialize()
 
     def context_menu(self, pos):
         m = QMenu(self)
@@ -377,7 +392,7 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
     def pc_finished(self):
         try:
             self.pc.finished.disconnect()
-        except:
+        except Exception:
             pass
         self.stack.setCurrentIndex(0)
         self.stack.removeWidget(self.pc)
@@ -399,6 +414,15 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
             d.rules = list(msprefs['publisher_map_rules'])
         if d.exec() == QDialog.DialogCode.Accepted:
             self.publisher_map_rules = d.rules
+            self.changed_signal.emit()
+
+    def change_series_map_rules(self):
+        from calibre.gui2.series_mapper import RulesDialog
+        d = RulesDialog(self)
+        if msprefs.get('series_map_rules'):
+            d.rules = list(msprefs['series_map_rules'])
+        if d.exec() == QDialog.DialogCode.Accepted:
+            self.series_map_rules = d.rules
             self.changed_signal.emit()
 
     def change_author_map_rules(self):
@@ -432,6 +456,8 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
             msprefs['author_map_rules'] = self.author_map_rules or []
         if self.publisher_map_rules is not None:
             msprefs['publisher_map_rules'] = self.publisher_map_rules or []
+        if self.series_map_rules is not None:
+            msprefs['series_map_rules'] = self.series_map_rules or []
         return ConfigWidgetBase.commit(self)
 
 

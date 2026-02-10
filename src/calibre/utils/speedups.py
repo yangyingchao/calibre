@@ -6,17 +6,17 @@ import os
 
 
 class ReadOnlyFileBuffer:
-
     ''' A zero copy implementation of a file like object. Uses memoryviews for efficiency. '''
 
-    def __init__(self, raw):
+    def __init__(self, raw: bytes, name: str = ''):
         self.sz, self.mv = len(raw), (raw if isinstance(raw, memoryview) else memoryview(raw))
         self.pos = 0
+        self.name: str = name
 
     def tell(self):
         return self.pos
 
-    def read(self, n=None):
+    def read(self, n: int | None = None) -> memoryview:
         if n is None:
             ans = self.mv[self.pos:]
             self.pos = self.sz
@@ -34,6 +34,9 @@ class ReadOnlyFileBuffer:
             self.pos += pos
         self.pos = max(0, min(self.pos, self.sz))
         return self.pos
+
+    def seekable(self):
+        return True
 
     def getvalue(self):
         return self.mv
@@ -112,7 +115,7 @@ def svg_path_to_painter_path(d):
             x += parse_float()
             y += parse_float()
             path.moveTo(x, y)
-        elif cmd == closepath1 or cmd == closepath2:
+        elif cmd in (closepath1, closepath2):
             path.closeSubpath()
         elif cmd == lineto_abs:
             x, y = parse_floats(2)
@@ -140,7 +143,7 @@ def svg_path_to_painter_path(d):
             x1, y1, x2, y2, x, y = parse_floats(6, x, y)
             path.cubicTo(x1, y1, x2, y2, x, y)
         elif cmd == smoothcurveto_abs:
-            if last_cmd == curveto_abs or last_cmd == curveto_rel or last_cmd == smoothcurveto_abs or last_cmd == smoothcurveto_rel:
+            if last_cmd in (curveto_abs, curveto_rel, smoothcurveto_abs, smoothcurveto_rel):
                 x1 = 2 * x - x2
                 y1 = 2 * y - y2
             else:
@@ -148,7 +151,7 @@ def svg_path_to_painter_path(d):
             x2, y2, x, y = parse_floats(4)
             path.cubicTo(x1, y1, x2, y2, x, y)
         elif cmd == smoothcurveto_rel:
-            if last_cmd == curveto_abs or last_cmd == curveto_rel or last_cmd == smoothcurveto_abs or last_cmd == smoothcurveto_rel:
+            if last_cmd in (curveto_abs, curveto_rel, smoothcurveto_abs, smoothcurveto_rel):
                 x1 = 2 * x - x2
                 y1 = 2 * y - y2
             else:
@@ -192,11 +195,11 @@ def svg_path_to_painter_path(d):
                 raise ValueError('Extra parameters after close path command')
             elif last_cmd in (
                 lineto_abs, lineto_rel, hline_abs, hline_rel, vline_abs,
-                vline_rel, curveto_abs, curveto_rel,smoothcurveto_abs,
+                vline_rel, curveto_abs, curveto_rel, smoothcurveto_abs,
                 smoothcurveto_rel, quadcurveto_abs, quadcurveto_rel,
                 smoothquadcurveto_abs, smoothquadcurveto_rel
             ):
                 repeated_command = cmd = last_cmd
         else:
-            raise ValueError('Unknown path command: %s' % cmd)
+            raise ValueError(f'Unknown path command: {cmd}')
     return path

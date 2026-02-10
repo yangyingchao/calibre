@@ -16,6 +16,7 @@ from calibre.gui2.tweak_book.editor.smarts.utils import get_text_before_cursor, 
 def get_leading_whitespace_on_block(editor, previous=False):
     return expand_tabs(lw(editor, previous=previous))
 
+
 tw = 4  # The tab width (hardcoded to the pep8 value)
 
 
@@ -36,7 +37,7 @@ class Smarts(NullSmarts):
     def handle_key_press(self, ev, editor):
         key = ev.key()
 
-        if key == Qt.Key.Key_Tab:
+        if key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
             mods = ev.modifiers()
             if not mods & Qt.KeyboardModifier.ControlModifier and smart_tab(editor, ev):
                 return True

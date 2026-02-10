@@ -13,7 +13,6 @@ from calibre import prepare_string_for_xml, prints
 from calibre.gui2 import error_dialog
 from calibre.gui2.tweak_book.widgets import make_highlighted_text
 from calibre.utils.icu import string_length
-from polyglot.builtins import iteritems
 
 
 class ChoosePopupWidget(QWidget):
@@ -68,7 +67,7 @@ class ChoosePopupWidget(QWidget):
             text = make_highlighted_text('color: magenta', text, positions)
             desc = self.descriptions.get(otext)
             if desc:
-                text += ' - <i>%s</i>' % prepare_string_for_xml(desc)
+                text += f' - <i>{prepare_string_for_xml(desc)}</i>'
             color = self.palette().color(QPalette.ColorRole.Text).name()
             text = f'<span style="color: {color}">{text}</span>'
             st = self.rendered_text_cache[otext] = QStaticText(text)
@@ -82,8 +81,8 @@ class ChoosePopupWidget(QWidget):
             max_width = height = 0
             for text, positions in self.current_results:
                 sz = self.get_static_text(text, positions).size()
-                height += int(ceil(sz.height())) + self.BOTTOM_MARGIN
-                max_width = max(max_width, int(ceil(sz.width())))
+                height += ceil(sz.height()) + self.BOTTOM_MARGIN
+                max_width = max(max_width, ceil(sz.width()))
             self.current_size_hint = QSize(max_width + 2 * self.SIDE_MARGIN, height + self.BOTTOM_MARGIN + self.TOP_MARGIN)
         return self.current_size_hint
 
@@ -92,7 +91,7 @@ class ChoosePopupWidget(QWidget):
         bottom = self.rect().bottom()
         for i, (text, positions) in enumerate(self.current_results[self.current_top_index:]):
             st = self.get_static_text(text, positions)
-            height = self.BOTTOM_MARGIN + int(ceil(st.size().height()))
+            height = self.BOTTOM_MARGIN + ceil(st.size().height())
             if y + height > bottom:
                 break
             yield i + self.current_top_index, st, y, height
@@ -225,11 +224,10 @@ class ChoosePopupWidget(QWidget):
                     self.current_index = len(self.current_results) - 1
                 else:
                     self.current_index -= 1
+            elif self.current_index == len(self.current_results) - 1:
+                self.current_index = -1
             else:
-                if self.current_index == len(self.current_results) - 1:
-                    self.current_index = -1
-                else:
-                    self.current_index += 1
+                self.current_index += 1
             self.ensure_index_visible(self.current_index)
             self.update()
 
@@ -244,7 +242,7 @@ class CompletionPopup(ChoosePopupWidget):
 
     def set_items(self, items, descriptions=None, query=None):
         self.current_query = query
-        ChoosePopupWidget.set_items(self, tuple(iteritems(items)), descriptions=descriptions)
+        ChoosePopupWidget.set_items(self, tuple(items.items()), descriptions=descriptions)
 
     def choose_next_result(self, previous=False):
         ChoosePopupWidget.choose_next_result(self, previous=previous)

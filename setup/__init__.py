@@ -17,7 +17,7 @@ import time
 from contextlib import contextmanager
 from functools import lru_cache
 
-iswindows = re.search('win(32|64)', sys.platform)
+iswindows = re.search(r'win(32|64)', sys.platform)
 ismacos = 'darwin' in sys.platform
 isfreebsd = 'freebsd' in sys.platform
 isnetbsd = 'netbsd' in sys.platform
@@ -46,10 +46,10 @@ def newer(targets, sources):
     for f in targets:
         if not os.path.exists(f):
             return True
-    ttimes = map(lambda x: os.stat(x).st_mtime, targets)
+    ttimes = (os.stat(x).st_mtime for x in targets)
     oldest_target = min(ttimes)
     try:
-        stimes = map(lambda x: os.stat(x).st_mtime, sources)
+        stimes = (os.stat(x).st_mtime for x in sources)
         newest_source = max(stimes)
     except FileNotFoundError:
         newest_source = oldest_target +1
@@ -70,14 +70,15 @@ def curl_supports_etags():
     return '--etag-compare' in subprocess.check_output(['curl', '--help', 'all']).decode('utf-8')
 
 
-def download_securely(url):
+def _download_securely(url):
     # We use curl here as on some OSes (OS X) when bootstrapping calibre,
     # python will be unable to validate certificates until after cacerts is
     # installed
     if is_ci and iswindows:
         # curl is failing for wikipedia urls on CI (used for browser_data)
         from urllib.request import urlopen
-        return urlopen(url).read()
+        with urlopen(url) as f:
+            return f.read()
     if not curl_supports_etags():
         return subprocess.check_output(['curl', '-fsSL', url])
     url_hash = hashlib.sha1(url.encode('utf-8')).hexdigest()
@@ -89,6 +90,17 @@ def download_securely(url):
     )
     with open(os.path.join(cache_dir, 'data.bin'), 'rb') as f:
         return f.read()
+
+
+def download_securely(url, retry_count: int = 5 if is_ci else 3, sleep_time: float = 1):
+    for i in range(retry_count):
+        try:
+            return _download_securely(url)
+        except Exception as err:
+            if i >= retry_count - 1:
+                raise
+            print(f'Download of {url} failed with error {err}, retrying...', file=sys.stderr)
+            time.sleep(sleep_time)
 
 
 def build_cache_dir():
@@ -126,7 +138,7 @@ def initialize_constants():
     with open(os.path.join(SRC, 'calibre/constants.py'), 'rb') as f:
         src = f.read().decode('utf-8')
     nv = re.search(r'numeric_version\s+=\s+\((\d+), (\d+), (\d+)\)', src)
-    __version__ = '%s.%s.%s'%(nv.group(1), nv.group(2), nv.group(3))
+    __version__ = '.'.join((nv.group(1), nv.group(2), nv.group(3)))
     __appname__ = re.search(r'__appname__\s+=\s+(u{0,1})[\'"]([^\'"]+)[\'"]',
             src).group(2)
     with open(os.path.join(SRC, 'calibre/linux.py'), 'rb') as sf:
@@ -176,6 +188,7 @@ class Command:
     SRC = SRC
     RESOURCES = os.path.join(os.path.dirname(SRC), 'resources')
     description = ''
+    drop_privileges_for_subcommands = False
 
     sub_commands = []
 
@@ -191,26 +204,6 @@ class Command:
         self.real_gid = os.environ.get('SUDO_GID', None)
         self.real_user = os.environ.get('SUDO_USER', None)
 
-    def drop_privileges(self):
-        if not islinux or ismacos or isfreebsd:
-            return
-        if self.real_user is not None:
-            self.info('Dropping privileges to those of', self.real_user+':',
-                    self.real_uid)
-        if self.real_gid is not None:
-            os.setegid(int(self.real_gid))
-        if self.real_uid is not None:
-            os.seteuid(int(self.real_uid))
-
-    def regain_privileges(self):
-        if not islinux or ismacos or isfreebsd:
-            return
-        if os.geteuid() != 0 and self.orig_euid == 0:
-            self.info('Trying to get root privileges')
-            os.seteuid(0)
-            if os.getegid() != 0:
-                os.setegid(0)
-
     def pre_sub_commands(self, opts):
         pass
 
@@ -225,8 +218,26 @@ class Command:
     def run_cmd(self, cmd, opts):
         from setup.commands import command_names
         cmd.pre_sub_commands(opts)
-        for scmd in cmd.sub_commands:
-            self.run_cmd(scmd, opts)
+        if self.drop_privileges_for_subcommands and self.orig_euid is not None and os.getuid() == 0 and self.real_uid is not None:
+            if self.real_user is not None:
+                self.info('Dropping privileges to those of', self.real_user+':', self.real_uid)
+
+            pid = os.fork()
+            if pid == 0:
+                if self.real_gid is not None:
+                    os.setgid(int(self.real_gid))
+                if self.real_uid is not None:
+                    os.setuid(int(self.real_uid))
+                for scmd in cmd.sub_commands:
+                    self.run_cmd(scmd, opts)
+                raise SystemExit(0)
+            else:
+                rpid, st = os.waitpid(pid, 0)
+                if code := os.waitstatus_to_exitcode(st) != 0:
+                    sys.exit(code)
+        else:
+            for scmd in cmd.sub_commands:
+                self.run_cmd(scmd, opts)
 
         st = time.time()
         self.running(cmd)
@@ -239,7 +250,7 @@ class Command:
         self.run_cmd(self, opts)
 
     def add_command_options(self, command, parser):
-        import setup.commands as commands
+        from setup import commands
         command.sub_commands = [getattr(commands, cmd) for cmd in
                 command.sub_commands]
         for cmd in command.sub_commands:
@@ -296,3 +307,9 @@ def installer_names(include_source=True):
         yield f'{base}-{__version__}-{arch}.txz'
     if include_source:
         yield f'{base}-{__version__}.tar.xz'
+
+
+@lru_cache
+def manual_build_dir():
+    # cant use tempfile.gettempdir() as calibre.startup overrides it
+    return os.path.join('/tmp', 'user-manual-build')

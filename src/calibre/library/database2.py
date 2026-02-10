@@ -55,7 +55,6 @@ from calibre.utils.localization import _, calibre_langcode_to_name, canonicalize
 from calibre.utils.recycle_bin import delete_file, delete_tree
 from calibre.utils.resources import get_path as P
 from calibre.utils.search_query_parser import saved_searches, set_saved_searches
-from polyglot.builtins import iteritems, string_or_bytes
 
 copyfile = os.link if hasattr(os, 'link') else shutil.copyfile
 SPOOL_SIZE = 30*1024*1024
@@ -90,7 +89,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
 
     @user_version.setter
     def user_version(self, val):
-        self.conn.execute('pragma user_version=%d'%int(val))
+        self.conn.execute(f'pragma user_version={int(val)}')
         self.conn.commit()
 
     @property
@@ -108,10 +107,10 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
     @library_id.setter
     def library_id(self, val):
         self._library_id_ = str(val)
-        self.conn.executescript('''
+        self.conn.executescript(f'''
                 DELETE FROM library_id;
-                INSERT INTO library_id (uuid) VALUES ("%s");
-                '''%self._library_id_)
+                INSERT INTO library_id (uuid) VALUES ("{self._library_id_}");
+                ''')
         self.conn.commit()
 
     def connect(self):
@@ -152,12 +151,15 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
 
     def __init__(self, library_path, row_factory=False, default_prefs=None,
             read_only=False, is_second_db=False, progress_callback=None,
-            restore_all_prefs=False):
+            restore_all_prefs=False, temp_db_path=None):
+        if temp_db_path is not None:
+            raise ValueError("temp_db_path isn't supported in by the obsolete "
+                             "library.database2. Use db.legacy.LibraryDatabase instead")
         self.is_second_db = is_second_db
         try:
             if isbytestring(library_path):
                 library_path = library_path.decode(filesystem_encoding)
-        except:
+        except Exception:
             traceback.print_exc()
         self.field_metadata = FieldMetadata()
         self.format_filename_cache = defaultdict(dict)
@@ -273,7 +275,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                         rules = migrate_old_rule(self.field_metadata, templ)
                         for templ in rules:
                             old_rules.append((col, templ))
-                    except:
+                    except Exception:
                         pass
             if old_rules:
                 self.prefs['column_color_rules'] += old_rules
@@ -300,7 +302,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                 for t in ogst:
                     ngst[icu_lower(t)] = ogst[t]
                 self.prefs.set('grouped_search_terms', ngst)
-            except:
+            except Exception:
                 pass
 
         # migrate the gui_restriction preference to a virtual library
@@ -330,14 +332,14 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                 catmap[ucl] = []
             catmap[ucl].append(uc)
         cats_changed = False
-        for uc in catmap:
-            if len(catmap[uc]) > 1:
-                prints('found user category case overlap', catmap[uc])
-                cat = catmap[uc][0]
+        for uc, user_cat in catmap.items():
+            if len(user_cat) > 1:
+                prints('found user category case overlap', user_cat)
+                cat = user_cat[0]
                 suffix = 1
                 while icu_lower(cat + str(suffix)) in catmap:
                     suffix += 1
-                prints('Renaming user category %s to %s'%(cat, cat+str(suffix)))
+                prints(f'Renaming user category {cat} to {cat+str(suffix)}')
                 user_cats[cat + str(suffix)] = user_cats[cat]
                 del user_cats[cat]
                 cats_changed = True
@@ -425,6 +427,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             '(SELECT identifiers_concat(type, val) FROM identifiers WHERE identifiers.book=books.id) identifiers',
             ('languages', 'languages', 'lang_code',
                 'sortconcat(link.id, languages.lang_code)'),
+            '(SELECT pages FROM books_pages_link WHERE books_pages_link.book=books.id) pages',
             ]
         lines = []
         for col in columns:
@@ -439,13 +442,16 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         custom_cols = sorted(custom_map.keys())
         lines.extend([custom_map[x] for x in custom_cols])
 
-        self.FIELD_MAP = {'id':0, 'title':1, 'authors':2, 'timestamp':3,
-             'size':4, 'rating':5, 'tags':6, 'comments':7, 'series':8,
-             'publisher':9, 'series_index':10, 'sort':11, 'author_sort':12,
-             'formats':13, 'path':14, 'pubdate':15, 'uuid':16, 'cover':17,
-             'au_map':18, 'last_modified':19, 'identifiers':20, 'languages':21}
+        self.FIELD_MAP = {
+            'id':0, 'title':1, 'authors':2, 'timestamp':3,
+            'size':4, 'rating':5, 'tags':6, 'comments':7, 'series':8,
+            'publisher':9, 'series_index':10, 'sort':11, 'author_sort':12,
+            'formats':13, 'path':14, 'pubdate':15, 'uuid':16, 'cover':17,
+            'au_map':18, 'last_modified':19, 'identifiers':20, 'languages':21,
+            'pages': 22,
+        }
 
-        for k,v in iteritems(self.FIELD_MAP):
+        for k,v in self.FIELD_MAP.items():
             self.field_metadata.set_field_record_index(k, v, prefer_custom=False)
 
         base = max(self.FIELD_MAP.values())
@@ -499,7 +505,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                 # user category. Print the exception and continue.
                 try:
                     self.field_metadata.add_user_category(label='@' + cat, name=cat)
-                except:
+                except Exception:
                     traceback.print_exc()
 
         if len(saved_searches().names()):
@@ -622,7 +628,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             author = author[:-1]
         if not author:
             author = ascii_filename(_('Unknown'))
-        path = author + '/' + title + ' (%d)'%id
+        path = author + '/' + title + f' ({id})'
         return path
 
     def construct_file_name(self, id):
@@ -728,7 +734,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                     try:
                         os.rename(os.path.join(curpath, oldseg),
                                 os.path.join(curpath, newseg))
-                    except:
+                    except Exception:
                         break  # Fail silently since nothing catastrophic has happened
                 curpath = os.path.join(curpath, newseg)
 
@@ -744,7 +750,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         for listener in self.listeners:
             try:
                 listener(event, ids)
-            except:
+            except Exception:
                 traceback.print_exc()
                 continue
 
@@ -792,7 +798,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         path = os.path.join(self.library_path, self.path(id, index_is_id=True), 'cover.jpg')
         try:
             return utcfromtimestamp(os.stat(path).st_mtime)
-        except:
+        except Exception:
             # Cover doesn't exist
             pass
         return self.last_modified()
@@ -839,18 +845,18 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         '''
         with self.dirtied_lock:
             dc_sequence = self.dirtied_cache.get(book_id, None)
-            # print 'clear_dirty: check book', book_id, dc_sequence
+            # print('clear_dirty: check book', book_id, dc_sequence)
             if dc_sequence is None or sequence is None or dc_sequence == sequence:
-                # print 'needs to be cleaned'
+                # print('needs to be cleaned')
                 self.conn.execute('DELETE FROM metadata_dirtied WHERE book=?',
                         (book_id,))
                 self.conn.commit()
                 try:
                     del self.dirtied_cache[book_id]
-                except:
+                except Exception:
                     pass
             elif dc_sequence is not None:
-                # print 'book needs to be done again'
+                # print('book needs to be done again')
                 pass
 
     def dump_metadata(self, book_ids=None, remove_from_dirtied=True,
@@ -885,7 +891,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                     f.write(raw)
                 if remove_from_dirtied:
                     self.clear_dirtied(book_id, sequence)
-            except:
+            except Exception:
                 pass
             if callback is not None:
                 callback(book_id, mi, True)
@@ -908,12 +914,12 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         self.update_last_modified(book_ids)
         for book in book_ids:
             with self.dirtied_lock:
-                # print 'dirtied: check id', book
+                # print('dirtied: check id', book)
                 if book in self.dirtied_cache:
                     self.dirtied_cache[book] = self.dirtied_sequence
                     self.dirtied_sequence += 1
                     continue
-                # print 'book not already dirty'
+                # print('book not already dirty')
 
                 self.conn.execute(
                     'INSERT OR IGNORE INTO metadata_dirtied (book) VALUES (?)',
@@ -937,8 +943,8 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                 # reason.
                 id_ = list(self.dirtied_cache.keys())[random.randint(0, l-1)]
                 sequence = self.dirtied_cache[id_]
-                return (id_, sequence)
-            return (None, None)
+                return id_, sequence
+            return None, None
 
     def dirty_queue_length(self):
         return len(self.dirtied_cache)
@@ -964,7 +970,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         # thread has not done the work between the put and the get_metadata
         with self.dirtied_lock:
             sequence = self.dirtied_cache.get(idx, None)
-        # print 'get_md_for_dump', idx, sequence
+        # print('get_md_for_dump', idx, sequence)
         try:
             # While a book is being created, the path is empty. Don't bother to
             # try to write the opf, because it will go to the wrong folder.
@@ -975,11 +981,11 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                 # no harm done. This way no need to call dirtied when
                 # cover is set/removed
                 mi.cover = 'cover.jpg'
-        except:
+        except Exception:
             # This almost certainly means that the book has been deleted while
             # the backup operation sat in the queue.
             pass
-        return (path, mi, sequence)
+        return path, mi, sequence
 
     def get_metadata(self, idx, index_is_id=False, get_cover=False,
                      get_user_categories=True, cover_as_data=False):
@@ -990,11 +996,11 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         idx = idx if index_is_id else self.id(idx)
         try:
             row = self.data._data[idx]
-        except:
+        except Exception:
             row = None
 
         if row is None:
-            raise ValueError('No book with id: %d'%idx)
+            raise ValueError(f'No book with id: {idx}')
 
         fm = self.FIELD_MAP
         mi = Metadata(None, template_cache=self.formatter_template_cache)
@@ -1118,7 +1124,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
 
     def find_identical_books(self, mi):
         fuzzy_title_patterns = [(re.compile(pat, re.IGNORECASE) if
-            isinstance(pat, string_or_bytes) else pat, repl) for pat, repl in
+            isinstance(pat, (str, bytes)) else pat, repl) for pat, repl in
                 [
                     (r'[\[\](){}<>\'";,:#]', ''),
                     (get_title_sort_pat(), ''),
@@ -1138,14 +1144,14 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             try:
                 quathors = mi.authors[:10]  # Too many authors causes parsing of
                 # the search expression to fail
-                query = ' and '.join(['author:"=%s"'%(a.replace('"', '')) for a in
+                query = ' and '.join(['author:"={}"'.format(a.replace('"', '')) for a in
                     quathors])
                 qauthors = mi.authors[10:]
             except ValueError:
                 return identical_book_ids
             try:
                 book_ids = self.data.parse(query)
-            except:
+            except Exception:
                 traceback.print_exc()
                 return identical_book_ids
             if qauthors and book_ids:
@@ -1263,7 +1269,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
 
     def format_files(self, index, index_is_id=False):
         id = index if index_is_id else self.id(index)
-        return [(v, k) for k, v in iteritems(self.format_filename_cache[id])]
+        return [(v, k) for k, v in self.format_filename_cache[id].items()]
 
     def formats(self, index, index_is_id=False, verify_formats=True):
         ''' Return available formats as a comma separated list or None if there are no available formats '''
@@ -1318,7 +1324,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
     def format_hash(self, id_, fmt):
         path = self.format_abspath(id_, fmt, index_is_id=True)
         if path is None:
-            raise NoSuchFormat('Record %d has no fmt: %s'%(id_, fmt))
+            raise NoSuchFormat(f'Record {id_} has no fmt: {fmt}')
         sha = hashlib.sha256()
         with open(path, 'rb') as f:
             while True:
@@ -1339,7 +1345,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         path = self.format_abspath(index, fmt, index_is_id=index_is_id)
         if path is None:
             id_ = index if index_is_id else self.id(index)
-            raise NoSuchFormat('Record %d has no format: %s'%(id_, fmt))
+            raise NoSuchFormat(f'Record {id_} has no format: {fmt}')
         return path
 
     def format_abspath(self, index, format, index_is_id=False):
@@ -1358,7 +1364,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         id = index if index_is_id else self.id(index)
         try:
             name = self.format_filename_cache[id][format.upper()]
-        except:
+        except Exception:
             return None
         if name:
             path = os.path.join(self.library_path, self.path(id, index_is_id=True))
@@ -1368,12 +1374,12 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                 return fmt_path
             try:
                 candidates = glob.glob(os.path.join(path, '*'+format))
-            except:  # If path contains strange characters this throws an exc
+            except Exception:  # If path contains strange characters this throws an exc
                 candidates = []
             if format and candidates and os.path.exists(candidates[0]):
                 try:
                     shutil.copyfile(candidates[0], fmt_path)
-                except:
+                except Exception:
                     # This can happen if candidates[0] or fmt_path is too long,
                     # which can happen if the user copied the library from a
                     # non windows machine to a windows machine.
@@ -1399,44 +1405,43 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         path = self.format_abspath(index, fmt, index_is_id=index_is_id)
         if path is None:
             id_ = index if index_is_id else self.id(index)
-            raise NoSuchFormat('Record %d has no %s file'%(id_, fmt))
+            raise NoSuchFormat(f'Record {id_} has no {fmt} file')
         if windows_atomic_move is not None:
-            if not isinstance(dest, string_or_bytes):
-                raise Exception("Error, you must pass the dest as a path when"
-                        " using windows_atomic_move")
+            if not isinstance(dest, (str, bytes)):
+                raise Exception('Error, you must pass the dest as a path when'
+                        ' using windows_atomic_move')
             if dest:
                 if samefile(path, dest):
                     # Ensure that the file has the same case as dest
                     try:
                         if path != dest:
                             os.rename(path, dest)
-                    except:
+                    except Exception:
                         pass  # Nothing too catastrophic happened, the cases mismatch, that's all
                 else:
                     windows_atomic_move.copy_path_to(path, dest)
-        else:
-            if hasattr(dest, 'write'):
-                with open(path, 'rb') as f:
-                    shutil.copyfileobj(f, dest)
-                if hasattr(dest, 'flush'):
-                    dest.flush()
-            elif dest:
-                if samefile(dest, path):
-                    if not self.is_case_sensitive and path != dest:
-                        # Ensure that the file has the same case as dest
-                        try:
-                            os.rename(path, dest)
-                        except:
-                            pass  # Nothing too catastrophic happened, the cases mismatch, that's all
-                else:
-                    if use_hardlink:
-                        try:
-                            hardlink_file(path, dest)
-                            return
-                        except:
-                            pass
-                    with open(path, 'rb') as f, open(dest, 'wb') as d:
-                        shutil.copyfileobj(f, d)
+        elif hasattr(dest, 'write'):
+            with open(path, 'rb') as f:
+                shutil.copyfileobj(f, dest)
+            if hasattr(dest, 'flush'):
+                dest.flush()
+        elif dest:
+            if samefile(dest, path):
+                if not self.is_case_sensitive and path != dest:
+                    # Ensure that the file has the same case as dest
+                    try:
+                        os.rename(path, dest)
+                    except Exception:
+                        pass  # Nothing too catastrophic happened, the cases mismatch, that's all
+            else:
+                if use_hardlink:
+                    try:
+                        hardlink_file(path, dest)
+                        return
+                    except Exception:
+                        pass
+                with open(path, 'rb') as f, open(dest, 'wb') as d:
+                    shutil.copyfileobj(f, d)
 
     def copy_cover_to(self, index, dest, index_is_id=False,
             windows_atomic_move=None, use_hardlink=False):
@@ -1457,35 +1462,34 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         id = index if index_is_id else self.id(index)
         path = os.path.join(self.library_path, self.path(id, index_is_id=True), 'cover.jpg')
         if windows_atomic_move is not None:
-            if not isinstance(dest, string_or_bytes):
-                raise Exception("Error, you must pass the dest as a path when"
-                        " using windows_atomic_move")
+            if not isinstance(dest, (str, bytes)):
+                raise Exception('Error, you must pass the dest as a path when'
+                        ' using windows_atomic_move')
             if os.access(path, os.R_OK) and dest and not samefile(dest, path):
                 windows_atomic_move.copy_path_to(path, dest)
                 return True
-        else:
-            if os.access(path, os.R_OK):
-                try:
-                    f = open(path, 'rb')
-                except OSError:
-                    time.sleep(0.2)
-                    f = open(path, 'rb')
-                with f:
-                    if hasattr(dest, 'write'):
-                        shutil.copyfileobj(f, dest)
-                        if hasattr(dest, 'flush'):
-                            dest.flush()
-                        return True
-                    elif dest and not samefile(dest, path):
-                        if use_hardlink:
-                            try:
-                                hardlink_file(path, dest)
-                                return True
-                            except:
-                                pass
-                        with open(dest, 'wb') as d:
-                            shutil.copyfileobj(f, d)
-                        return True
+        elif os.access(path, os.R_OK):
+            try:
+                f = open(path, 'rb')
+            except OSError:
+                time.sleep(0.2)
+                f = open(path, 'rb')
+            with f:
+                if hasattr(dest, 'write'):
+                    shutil.copyfileobj(f, dest)
+                    if hasattr(dest, 'flush'):
+                        dest.flush()
+                    return True
+                elif dest and not samefile(dest, path):
+                    if use_hardlink:
+                        try:
+                            hardlink_file(path, dest)
+                            return True
+                        except Exception:
+                            pass
+                    with open(dest, 'wb') as d:
+                        shutil.copyfileobj(f, d)
+                    return True
         return False
 
     def format(self, index, format, index_is_id=False, as_file=False,
@@ -1515,7 +1519,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                         d = os.path.join(bd, 'format_abspath')
                         try:
                             os.makedirs(d)
-                        except:
+                        except Exception:
                             pass
                         fname = os.path.basename(path)
                         ret = os.path.join(d, fname)
@@ -1569,14 +1573,13 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         if copy_function is not None:
             copy_function(dest)
             size = os.path.getsize(dest)
-        else:
-            if (not getattr(stream, 'name', False) or not samefile(dest,
-                stream.name)):
-                with open(dest, 'wb') as f:
-                    shutil.copyfileobj(stream, f)
-                    size = f.tell()
-            elif os.path.exists(dest):
-                size = os.path.getsize(dest)
+        elif (not getattr(stream, 'name', False) or not samefile(dest,
+            stream.name)):
+            with open(dest, 'wb') as f:
+                shutil.copyfileobj(stream, f)
+                size = f.tell()
+        elif os.path.exists(dest):
+            size = os.path.getsize(dest)
         self.conn.execute('INSERT OR REPLACE INTO data (book,format,uncompressed_size,name) VALUES (?,?,?,?)',
                           (id, format.upper(), size, name))
         self.update_last_modified([id], commit=False)
@@ -1599,8 +1602,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             return self.add_format(book_id, nfmt, f, index_is_id=True, notify=notify)
 
     def original_fmt(self, book_id, fmt):
-        fmt = fmt
-        nfmt = ('ORIGINAL_%s'%fmt).upper()
+        nfmt = (f'ORIGINAL_{fmt}').upper()
         opath = self.format_abspath(book_id, nfmt, index_is_id=True)
         return fmt if opath is None else nfmt
 
@@ -1622,7 +1624,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         '''
         try:
             path = os.path.join(self.library_path, self.path(id, index_is_id=True))
-        except:
+        except Exception:
             path = None
         if path and os.path.exists(path):
             self.rmtree(path, permanent=permanent)
@@ -1651,7 +1653,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                     path = self.format_abspath(id, format, index_is_id=True)
                     if path:
                         delete_file(path)
-                except:
+                except Exception:
                     traceback.print_exc()
             self.format_filename_cache[id].pop(format.upper(), None)
             self.conn.execute('DELETE FROM data WHERE book=? AND format=?', (id, format.upper()))
@@ -1665,13 +1667,13 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         # Don't bother with validity checking. Let the exception fly out so
         # we can see what happened
         def doit(table, ltable_col):
-            st = ('DELETE FROM books_%s_link WHERE (SELECT COUNT(id) '
-                    'FROM books WHERE id=book) < 1;')%table
+            st = (f'DELETE FROM books_{table}_link WHERE (SELECT COUNT(id) '
+                    'FROM books WHERE id=book) < 1;')
             self.conn.execute(st)
-            st = ('DELETE FROM %(table)s WHERE (SELECT COUNT(id) '
-                    'FROM books_%(table)s_link WHERE '
-                    '%(ltable_col)s=%(table)s.id) < 1;') % dict(
-                            table=table, ltable_col=ltable_col)
+            st = ('DELETE FROM {table} WHERE (SELECT COUNT(id) '
+                    'FROM books_{table}_link WHERE '
+                    '{ltable_col}={table}.id) < 1;').format(**dict(
+                            table=table, ltable_col=ltable_col))
             self.conn.execute(st)
 
         fm = self.field_metadata[field]
@@ -1684,13 +1686,13 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         Remove orphaned entries.
         '''
         def doit(ltable, table, ltable_col):
-            st = ('DELETE FROM books_%s_link WHERE (SELECT COUNT(id) '
-                    'FROM books WHERE id=book) < 1;')%ltable
+            st = (f'DELETE FROM books_{ltable}_link WHERE (SELECT COUNT(id) '
+                    'FROM books WHERE id=book) < 1;')
             self.conn.execute(st)
-            st = ('DELETE FROM %(table)s WHERE (SELECT COUNT(id) '
-                    'FROM books_%(ltable)s_link WHERE '
-                    '%(ltable_col)s=%(table)s.id) < 1;') % dict(
-                            ltable=ltable, table=table, ltable_col=ltable_col)
+            st = ('DELETE FROM {table} WHERE (SELECT COUNT(id) '
+                    'FROM books_{ltable}_link WHERE '
+                    '{ltable_col}={table}.id) < 1;').format(**dict(
+                            ltable=ltable, table=table, ltable_col=ltable_col))
             self.conn.execute(st)
 
         for ltable, table, ltable_col in [
@@ -1758,8 +1760,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             self.id = id
 
         def __unicode_representation__(self):
-            return 'n=%s s=%s c=%d rt=%d rc=%d id=%s' % (
-                self.n, self.s, self.c, self.rt, self.rc, self.id)
+            return f'n={self.n} s={self.s} c={self.c} rt={self.rt} rc={self.rc} id={self.id}'
 
         __str__ = __unicode_representation__
 
@@ -1780,7 +1781,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         try:
             if new_cats != user_cats:
                 self.prefs.set('user_categories', new_cats)
-        except:
+        except Exception:
             pass
         return new_cats
 
@@ -1864,7 +1865,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                 md.append((category, cat['rec_index'],
                            cat['is_multiple'].get('cache_to_list', None),
                            cat['datatype'] == 'composite'))
-        # print 'end phase "collection":', time.clock() - last, 'seconds'
+        # print('end phase "collection":', time.clock() - last, 'seconds')
         # last = time.clock()
 
         # Now scan every book looking for category items.
@@ -1896,7 +1897,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                             item.rc += 1
                         continue
                     try:
-                        (item_id, sort_val) = tid_cat[val]  # let exceptions fly
+                        item_id, sort_val = tid_cat[val]  # let exceptions fly
                         item = tcats_cat.get(val, None)
                         if not item:
                             item = tag_class(val, sort_val)
@@ -1907,7 +1908,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                         if rating > 0:
                             item.rt += rating
                             item.rc += 1
-                    except:
+                    except Exception:
                         prints('get_categories: item', val, 'is not in', cat, 'list!')
                 else:
                     vals = book[dex].split(mult)
@@ -1918,7 +1919,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                                 tid_cat[val] = (val, val)
                     for val in vals:
                         try:
-                            (item_id, sort_val) = tid_cat[val]  # let exceptions fly
+                            item_id, sort_val = tid_cat[val]  # let exceptions fly
                             item = tcats_cat.get(val, None)
                             if not item:
                                 item = tag_class(val, sort_val)
@@ -1929,10 +1930,10 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                             if rating > 0:
                                 item.rt += rating
                                 item.rc += 1
-                        except:
+                        except Exception:
                             prints('get_categories: item', val, 'is not in', cat, 'list!')
 
-        # print 'end phase "books":', time.clock() - last, 'seconds'
+        # print('end phase "books":', time.clock() - last, 'seconds')
         # last = time.clock()
 
         # Now do news
@@ -1941,11 +1942,11 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         tn = cat['table']
         cn = cat['column']
         if ids is None:
-            query = '''SELECT id, {}, count, avg_rating, sort
-                       FROM tag_browser_{}'''.format(cn, tn)
+            query = f'''SELECT id, {cn}, count, avg_rating, sort
+                       FROM tag_browser_{tn}'''
         else:
-            query = '''SELECT id, {}, count, avg_rating, sort
-                       FROM tag_browser_filtered_{}'''.format(cn, tn)
+            query = f'''SELECT id, {cn}, count, avg_rating, sort
+                       FROM tag_browser_filtered_{tn}'''
         # results will be sorted later
         data = self.conn.get(query)
         for r in data:
@@ -1953,7 +1954,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             item.set_all(c=r[2], rt=r[2]*r[3], rc=r[2], id=r[0])
             tcategories['news'][r[1]] = item
 
-        # print 'end phase "news":', time.clock() - last, 'seconds'
+        # print('end phase "news":', time.clock() - last, 'seconds')
         # last = time.clock()
 
         # Build the real category list by iterating over the temporary copy
@@ -1989,7 +1990,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             if datatype == 'rating':
                 def formatter(x):
                     return ('★' * int(x // 2))
-                def avgr(x):  # noqa
+                def avgr(x):
                     return x.n
                 # eliminate the zero ratings line as well as count == 0
                 items = [v for v in tcategories[category].values() if v.c > 0 and v.n != 0]
@@ -2030,7 +2031,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             else:
                 use_sort_as_name = False
             is_editable = (category not in ['news', 'rating', 'languages'] and
-                                datatype != "composite")
+                                datatype != 'composite')
             categories[category] = [tag_class(formatter(r.n), count=r.c, id=r.id,
                                         avg=avgr(r), sort=r.s,
                                         category=category,
@@ -2038,7 +2039,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                                         use_sort_as_name=use_sort_as_name)
                                     for r in items]
 
-        # print 'end phase "tags list":', time.clock() - last, 'seconds'
+        # print('end phase "tags list":', time.clock() - last, 'seconds')
         # last = time.clock()
 
         # Needed for legacy databases that have multiple ratings that
@@ -2118,8 +2119,8 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         # do the verification in the category loop much faster, at the cost of
         # temporarily duplicating the categories lists.
         taglist = {}
-        for c in categories.keys():
-            taglist[c] = dict(map(lambda t:(icu_lower(t.name), t), categories[c]))
+        for c, ct in categories.items():
+            taglist[c] = {icu_lower(t.name): t for t in ct}
 
         muc = self.prefs.get('grouped_search_make_user_categories', [])
         gst = self.prefs.get('grouped_search_terms', {})
@@ -2165,7 +2166,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                     sorted(items, key=lambda x: sort_key(x.sort))
             else:
                 categories[cat_name] = \
-                    sorted(items, key=lambda x:x.avg_rating, reverse=True)
+                    sorted(items, key=lambda x: x.avg_rating, reverse=True)
 
         # ### Finally, the saved searches category ####
         items = []
@@ -2176,13 +2177,13 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             items.append(Tag(srch,
                              sort=srch, category='search',
                              is_editable=False))
-        if len(items):
+        if items:
             if icon_map is not None:
                 icon_map['search'] = icon_map['search']
             categories['search'] = items
 
-        # print 'last phase ran in:', time.clock() - last, 'seconds'
-        # print 'get_categories ran in:', time.clock() - start, 'seconds'
+        # print('last phase ran in:', time.clock() - last, 'seconds')
+        # print('get_categories ran in:', time.clock() - start, 'seconds')
 
         return categories
 
@@ -2299,7 +2300,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         def doit(func, *args, **kwargs):
             try:
                 func(*args, **kwargs)
-            except:
+            except Exception:
                 if ignore_errors:
                     traceback.print_exc()
                 else:
@@ -2342,7 +2343,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         # force_changes has no effect on cover manipulation
         if mi.cover_data[1] is not None:
             doit(self.set_cover, id, mi.cover_data[1], commit=False)
-        elif isinstance(mi.cover, string_or_bytes) and mi.cover:
+        elif isinstance(mi.cover, (str, bytes)) and mi.cover:
             if os.access(mi.cover, os.R_OK):
                 with open(mi.cover, 'rb') as f:
                     raw = f.read()
@@ -2376,7 +2377,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             self.set_identifiers(id, mi_idents, notify=False, commit=False)
         elif mi_idents:
             identifiers = self.get_identifiers(id, index_is_id=True)
-            for key, val in iteritems(mi_idents):
+            for key, val in mi_idents.items():
                 if val and val.strip():  # Don't delete an existing identifier
                     identifiers[icu_lower(key)] = val
             self.set_identifiers(id, identifiers, notify=False, commit=False)
@@ -2509,7 +2510,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                 for bk in books_to_refresh:
                     ss = self.author_sort_from_book(id, index_is_id=True)
                     aus = self.author_sort(bk, index_is_id=True)
-                    if strcmp(aus, ss) ==  0:
+                    if strcmp(aus, ss) == 0:
                         self._update_author_in_cache(bk, ss, final_authors)
         # This can repeat what was done above in rare cases. Let it.
         ss = self.author_sort_from_book(id, index_is_id=True)
@@ -2649,7 +2650,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
     def set_pubdate(self, id, dt, notify=True, commit=True):
         if not dt:
             dt = UNDEFINED_DATE
-        if isinstance(dt, string_or_bytes):
+        if isinstance(dt, (str, bytes)):
             dt = parse_only_date(dt)
         self.conn.execute('UPDATE books SET pubdate=? WHERE id=?', (dt, id))
         self.data.set(id, self.FIELD_MAP['pubdate'], dt, row_is_id=True)
@@ -3047,8 +3048,8 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         # to be operated on
         tables = ('temp_bulk_tag_edit_books', 'temp_bulk_tag_edit_add',
                     'temp_bulk_tag_edit_remove')
-        drops = '\n'.join(['DROP TABLE IF EXISTS %s;'%t for t in tables])
-        creates = '\n'.join(['CREATE TEMP TABLE %s(id INTEGER PRIMARY KEY);'%t
+        drops = '\n'.join([f'DROP TABLE IF EXISTS {t};' for t in tables])
+        creates = '\n'.join([f'CREATE TEMP TABLE {t}(id INTEGER PRIMARY KEY);'
                 for t in tables])
         self.conn.executescript(drops + creates)
 
@@ -3067,17 +3068,16 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
 
         if remove:
             self.conn.execute(
-              '''DELETE FROM books_tags_link WHERE
-                    book IN (SELECT id FROM %s) AND
-                    tag IN (SELECT id FROM %s)'''
-              % (tables[0], tables[2]))
+              f'''DELETE FROM books_tags_link WHERE
+                    book IN (SELECT id FROM {tables[0]}) AND
+                    tag IN (SELECT id FROM {tables[2]})''')
 
         if add:
             self.conn.execute(
+            f'''
+            INSERT OR REPLACE INTO books_tags_link(book, tag) SELECT {tables[0]}.id, {tables[1]}.id FROM
+            {tables[0]}, {tables[1]}
             '''
-            INSERT OR REPLACE INTO books_tags_link(book, tag) SELECT {0}.id, {1}.id FROM
-            {0}, {1}
-            '''.format(tables[0], tables[1])
             )
         self.conn.executescript(drops)
         self.dirtied(ids, commit=False)
@@ -3187,7 +3187,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
 
     def set_series(self, id, series, notify=True, commit=True, allow_case_change=True):
         self.conn.execute('DELETE FROM books_series_link WHERE book=?',(id,))
-        (series, idx) = self._get_series_values(series)
+        series, idx = self._get_series_values(series)
         books_to_refresh = {id}
         if series:
             case_change = False
@@ -3230,7 +3230,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             idx = 1.0
         try:
             idx = float(idx)
-        except:
+        except Exception:
             idx = 1.0
         self.conn.execute('UPDATE books SET series_index=? WHERE id=?', (idx, id))
         self.dirtied([id], commit=False)
@@ -3329,8 +3329,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             self.conn.execute(
                 'INSERT OR REPLACE INTO identifiers (book, type, val) VALUES (?, ?, ?)', (id_, typ, val))
         if changed:
-            raw = ','.join(['%s:%s'%(k, v) for k, v in
-                iteritems(identifiers)])
+            raw = ','.join([f'{k}:{v}' for k, v in identifiers.items()])
             self.data.set(id_, self.FIELD_MAP['identifiers'], raw,
                     row_is_id=True)
             if commit:
@@ -3342,16 +3341,15 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         cleaned = {}
         if not identifiers:
             identifiers = {}
-        for typ, val in iteritems(identifiers):
+        for typ, val in identifiers.items():
             typ, val = self._clean_identifier(typ, val)
             if val:
                 cleaned[typ] = val
         self.conn.execute('DELETE FROM identifiers WHERE book=?', (id_,))
         self.conn.executemany(
             'INSERT INTO identifiers (book, type, val) VALUES (?, ?, ?)',
-            [(id_, k, v) for k, v in iteritems(cleaned)])
-        raw = ','.join(['%s:%s'%(k, v) for k, v in
-                iteritems(cleaned)])
+            [(id_, k, v) for k, v in cleaned.items()])
+        raw = ','.join([f'{k}:{v}' for k, v in cleaned.items()])
         self.data.set(id_, self.FIELD_MAP['identifiers'], raw,
                     row_is_id=True)
         if commit:
@@ -3383,7 +3381,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
                 self.conn.commit()
             try:
                 mi = get_metadata(stream, format)
-            except:
+            except Exception:
                 mi = Metadata(title, ['calibre'])
             stream.seek(0)
             mi.title, mi.authors = title, ['calibre']
@@ -3492,7 +3490,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         if cover is not None:
             try:
                 self.set_cover(id, cover)
-            except:
+            except Exception:
                 traceback.print_exc()
         return id
 
@@ -3545,8 +3543,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             paths    = [duplicate[0] for duplicate in duplicates]
             formats  = [duplicate[1] for duplicate in duplicates]
             metadata = [duplicate[2] for duplicate in duplicates]
-            return (paths, formats, metadata), (ids if return_ids else
-                    len(ids))
+            return (paths, formats, metadata), (ids if return_ids else len(ids))
         return None, (ids if return_ids else len(ids))
 
     def import_book(self, mi, formats, notify=True, import_hooks=True,
@@ -3644,12 +3641,12 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         self.connect()
         try:
             os.unlink(opath)
-        except:
+        except Exception:
             pass
         for dir in old_dirs:
             try:
                 shutil.rmtree(dir)
-            except:
+            except Exception:
                 pass
 
     def __iter__(self):
@@ -3679,7 +3676,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
     def add_custom_book_data(self, book_id, name, val):
         x = self.conn.get('SELECT id FROM books WHERE ID=?', (book_id,), all=False)
         if x is None:
-            raise ValueError('add_custom_book_data: no such book_id %d'%book_id)
+            raise ValueError(f'add_custom_book_data: no such book_id {book_id}')
         # Do the json encode first, in case it throws an exception
         s = json.dumps(val, default=to_json)
         self.conn.execute('''INSERT OR REPLACE INTO books_plugin_data(book, name, val)
@@ -3692,7 +3689,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
         self.conn.executemany(
             'INSERT OR REPLACE INTO books_plugin_data (book, name, val) VALUES (?, ?, ?)',
             [(book_id, name, json.dumps(val, default=to_json))
-                    for book_id, val in iteritems(vals)])
+                    for book_id, val in vals.items()])
         self.commit()
 
     def get_custom_book_data(self, book_id, name, default=None):
@@ -3702,7 +3699,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             if s is None:
                 return default
             return json.loads(s, object_hook=from_json)
-        except:
+        except Exception:
             pass
         return default
 
@@ -3716,7 +3713,7 @@ class LibraryDatabase2(LibraryDatabase, SchemaUpgrade, CustomColumns):
             for r in s:
                 res[r[0]] = json.loads(r[1], object_hook=from_json)
             return res
-        except:
+        except Exception:
             pass
         return default
 

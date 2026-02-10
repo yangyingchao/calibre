@@ -34,7 +34,7 @@ class gw_krakow(BasicNewsRecipe):
 
     # rules for gazeta.pl
     preprocess_regexps = [
-        (re.compile(u'<b>Czytaj więcej</b>.*', re.DOTALL), lambda m: '</body>')]
+        (re.compile(u'<b>Czytaj więcej</b>.*', re.DOTALL), lambda m: '</body>')]  # noqa: RUF039
     keep_only_tags = [dict(id='gazeta_article')]
     remove_tags = [dict(id=['gazeta_article_tools', 'gazeta_article_miniatures']), dict(
         attrs={'class': ['mod mod_sociallist', 'c0', 'fb', 'voteNeedLogin']})]
@@ -75,7 +75,7 @@ class gw_krakow(BasicNewsRecipe):
         try:
             baseurl = soup.find(name='meta', attrs={
                                 'property': 'og:url'})['content']
-        except:
+        except Exception:
             return 1
         link = tag.findAll('a')[-1]
         while link:

@@ -42,11 +42,12 @@ from calibre.gui2.tweak_book.widgets import Dialog, PlainTextEdit
 from calibre.utils.config import JSONConfig
 from calibre.utils.icu import string_length as strlen
 from calibre.utils.localization import localize_user_manual_link
-from polyglot.builtins import codepoint_to_chr, iteritems, itervalues
 
 
 def string_length(x):
-    return strlen(str(x))  # Needed on narrow python builds, as subclasses of unicode dont work
+    return strlen(str(x))  # Needed on narrow python builds, as subclasses of unicode don't work
+
+
 KEY = Qt.Key.Key_J
 MODIFIER = Qt.KeyboardModifier.MetaModifier if ismacos else Qt.KeyboardModifier.ControlModifier
 
@@ -108,6 +109,7 @@ obtain some advantage from it? But.</p>
 
 }  # }}}
 
+
 # Parsing of snippets {{{
 escape = unescape = None
 
@@ -115,11 +117,11 @@ escape = unescape = None
 def escape_funcs():
     global escape, unescape
     if escape is None:
-        escapem = {('\\' + x):codepoint_to_chr(i+1) for i, x in enumerate('\\${}')}
+        escapem = {('\\' + x):chr(i+1) for i, x in enumerate('\\${}')}
         escape_pat = re.compile('|'.join(map(re.escape, escapem)))
         def escape(x):
             return escape_pat.sub(lambda m: escapem[m.group()], x.replace('\\\\', '\x01'))
-        unescapem = {v:k[1] for k, v in iteritems(escapem)}
+        unescapem = {v:k[1] for k, v in escapem.items()}
         unescape_pat = re.compile('|'.join(unescapem))
         def unescape(x):
             return unescape_pat.sub(lambda m: unescapem[m.group()], x)
@@ -128,7 +130,7 @@ def escape_funcs():
 
 class TabStop(str):
 
-    def __new__(self, raw, start_offset, tab_stops, is_toplevel=True):
+    def __new__(self, raw, start_offset, tab_stops, is_toplevel=True):  # noqa: PLW0211
         if raw.endswith('}'):
             unescape = escape_funcs()[1]
             num, default = raw[2:-1].partition(':')[0::2]
@@ -156,8 +158,9 @@ class TabStop(str):
         return self
 
     def __repr__(self):
-        return 'TabStop(text=%s num=%d start=%d is_mirror=%s takes_selection=%s is_toplevel=%s)' % (
-            str.__repr__(self), self.num, self.start, self.is_mirror, self.takes_selection, self.is_toplevel)
+        return (
+            f'TabStop(text={str.__repr__(self)} num={self.num} start={self.start} is_mirror={self.is_mirror}'
+            f' takes_selection={self.takes_selection} is_toplevel={self.is_toplevel})')
 
 
 def parse_template(template, start_offset=0, is_toplevel=True, grouped=True):
@@ -199,11 +202,11 @@ def snippets(refresh=False):
             if snip['trigger'] and isinstance(snip['trigger'], str):
                 key = snip_key(snip['trigger'], *snip['syntaxes'])
                 _snippets[key] = {'template':snip['template'], 'description':snip['description']}
-        _snippets = sorted(iteritems(_snippets), key=(lambda key_snip:string_length(key_snip[0].trigger)), reverse=True)
+        _snippets = sorted(_snippets.items(), key=(lambda key_snip: string_length(key_snip[0].trigger)), reverse=True)
     return _snippets
 
-# Editor integration {{{
 
+# Editor integration {{{
 
 class EditorTabStop:
 
@@ -231,8 +234,9 @@ class EditorTabStop:
         self.join_previous_edit = False
 
     def __repr__(self):
-        return 'EditorTabStop(num={!r} text={!r} left={!r} right={!r} is_deleted={!r} mirrors={!r})'.format(
-            self.num, self.text, self.left, self.right, self.is_deleted, self.mirrors)
+        return (
+            f'EditorTabStop(num={self.num!r} text={self.text!r} left={self.left!r} right={self.right!r} '
+            f'is_deleted={self.is_deleted!r} mirrors={self.mirrors!r})')
     __str__ = __unicode__ = __repr__
 
     def apply_selected_text(self, text):
@@ -299,7 +303,7 @@ class EditorTabStop:
 
 class Template(list):
 
-    def __new__(self, tab_stops):
+    def __new__(self, tab_stops):  # noqa: PLW0211
         self = list.__new__(self)
         self.left_most_ts = self.right_most_ts = None
         self.extend(tab_stops)
@@ -373,7 +377,7 @@ def expand_template(editor, trigger, template):
     left = right - string_length(trigger)
     text, tab_stops = parse_template(template)
     c.setPosition(left), c.setPosition(right, QTextCursor.MoveMode.KeepAnchor), c.insertText(text)
-    editor_tab_stops = [EditorTabStop(left, ts, editor) for ts in itervalues(tab_stops)]
+    editor_tab_stops = [EditorTabStop(left, ts, editor) for ts in tab_stops.values()]
 
     tl = Template(editor_tab_stops)
     if tl.has_tab_stops:
@@ -428,9 +432,8 @@ class SnippetManager(QObject):
             if at is not None:
                 if at.jump_to_next(editor) is None:
                     self.active_templates.remove(at)
-                else:
-                    if not at.remains_active():
-                        self.active_templates.remove(at)
+                elif not at.remains_active():
+                    self.active_templates.remove(at)
                 ev.accept()
                 return True
             lst, self.last_selected_text = self.last_selected_text, editor.selected_text
@@ -457,8 +460,8 @@ class SnippetManager(QObject):
         return False
 # }}}
 
-# Config {{{
 
+# Config {{{
 
 class SnippetTextEdit(PlainTextEdit):
 
@@ -718,7 +721,7 @@ class UserSnippets(Dialog):
     def change_builtin(self):
         d = QDialog(self)
         lw = QListWidget(d)
-        for (trigger, syntaxes), snip in iteritems(builtin_snippets):
+        for (trigger, syntaxes), snip in builtin_snippets.items():
             snip = copy.deepcopy(snip)
             snip['trigger'], snip['syntaxes'] = trigger, syntaxes
             i = QListWidgetItem(self.snip_to_text(snip), lw)

@@ -14,7 +14,6 @@ from calibre import isbytestring, prints
 from calibre.constants import filesystem_encoding
 from calibre.utils.fonts.utils import get_font_characteristics, get_font_names, is_truetype_font
 from calibre.utils.resources import get_path as P
-from polyglot.builtins import iteritems
 
 
 class WinFonts:
@@ -27,7 +26,7 @@ class WinFonts:
 
         for f in ('Serif', 'Sans', 'Mono'):
             base = 'fonts/liberation/Liberation%s-%s.ttf'
-            self.app_font_families['Liberation %s'%f] = m = {}
+            self.app_font_families[f'Liberation {f}'] = m = {}
             for weight, is_italic in product((self.w.FW_NORMAL, self.w.FW_BOLD), (False, True)):
                 name = {(self.w.FW_NORMAL, False):'Regular',
                         (self.w.FW_NORMAL, True):'Italic',
@@ -72,27 +71,25 @@ class WinFonts:
                 try:
                     data = self.w.font_data(family, is_italic, weight)
                 except Exception as e:
-                    prints('Failed to get font data for font: %s [%s] with error: %s'%
-                            (family, self.get_normalized_name(is_italic, weight), e))
+                    prints(f'Failed to get font data for font: {family} [{self.get_normalized_name(is_italic, weight)}] with error: {e}')
                     continue
 
             ok, sig = is_truetype_font(data)
             if not ok:
-                prints('Not a supported font, sfnt_version: %r'%sig)
+                prints(f'Not a supported font, sfnt_version: {sig!r}')
                 continue
             ext = 'otf' if sig == b'OTTO' else 'ttf'
 
             try:
                 weight, is_italic, is_bold, is_regular = get_font_characteristics(data)[:4]
             except Exception as e:
-                prints('Failed to get font characteristic for font: %s [%s]'
-                        ' with error: %s'%(family,
-                            self.get_normalized_name(is_italic, weight), e))
+                prints(f'Failed to get font characteristic for font: {family} [{self.get_normalized_name(is_italic, weight)}]'
+                        f' with error: {e}')
                 continue
 
             try:
                 family_name, sub_family_name, full_name = get_font_names(data)
-            except:
+            except Exception:
                 pass
 
             if normalize:
@@ -114,7 +111,7 @@ class WinFonts:
                 try:
                     sub_family_name.encode('ascii')
                     subf = sub_family_name
-                except:
+                except Exception:
                     subf = ''
 
                 name = family + ((' ' + subf) if subf else '')
@@ -171,7 +168,7 @@ def test():
 
     for family in families:
         prints(family + ':')
-        for font, data in iteritems(w.fonts_for_family(family)):
+        for font, data in w.fonts_for_family(family).items():
             prints('  ', font, data[0], data[1], len(data[2]))
         print()
 

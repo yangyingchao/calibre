@@ -2,12 +2,19 @@
 # License: GPLv3 Copyright: 2016, Kovid Goyal <kovid at kovidgoyal.net>
 
 
+from datetime import UTC as utc_tz
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from calibre_extensions import speedup
 
-utc_tz = timezone.utc
-local_tz = datetime.now().astimezone().tzinfo
+try:
+    import tzlocal  # inside the try for people running from source without updated binaries
+    tz_name = tzlocal.get_localzone_name()
+    local_tz = ZoneInfo(tz_name)
+except Exception:
+    tz_name = ''
+    local_tz = datetime.now().astimezone().tzinfo
 UNDEFINED_DATE = datetime(101,1,1, tzinfo=utc_tz)
 
 
@@ -21,7 +28,7 @@ def parse_iso8601(date_string, assume_utc=False, as_utc=True, require_aware=Fals
             tz = utc_tz
         else:
             sign = '-' if tzseconds < 0 else '+'
-            description = "%s%02d:%02d" % (sign, abs(tzseconds) // 3600, (abs(tzseconds) % 3600) // 60)
+            description = f'{sign}{abs(tzseconds) // 3600:02}:{abs(tzseconds) % 3600 // 60:02}'
             tz = timezone(timedelta(seconds=tzseconds), description)
     elif require_aware:
         raise ValueError(f'{date_string} does not specify a time zone')

@@ -1,20 +1,21 @@
 #!/usr/bin/env python
 # License: GPLv3 Copyright: 2015, Kovid Goyal <kovid at kovidgoyal.net>
 import codecs
-import collections
-import collections.abc
 import locale
 import os
 import sys
+from collections import namedtuple
+from collections.abc import Mapping
+from contextlib import contextmanager
 from functools import lru_cache
 
 from polyglot.builtins import environ_item, hasenv
 
 __appname__   = 'calibre'
-numeric_version = (7, 10, 0)
+numeric_version = (9, 2, 1)
 __version__   = '.'.join(map(str, numeric_version))
 git_version   = None
-__author__    = "Kovid Goyal <kovid@kovidgoyal.net>"
+__author__    = 'Kovid Goyal <kovid@kovidgoyal.net>'
 
 '''
 Various run time constants.
@@ -54,7 +55,7 @@ TOC_DIALOG_APP_UID = 'com.calibre-ebook.toc-editor'
 try:
     preferred_encoding = locale.getpreferredencoding()
     codecs.lookup(preferred_encoding)
-except:
+except Exception:
     preferred_encoding = 'utf-8'
 
 dark_link_color = '#6cb4ee'
@@ -85,7 +86,6 @@ def get_osx_version():
     global _osx_ver
     if _osx_ver is None:
         import platform
-        from collections import namedtuple
         OSX = namedtuple('OSX', 'major minor tertiary')
         try:
             ver = platform.mac_ver()[0].split('.')
@@ -146,7 +146,7 @@ def _get_cache_dir():
 
     if iswindows:
         try:
-            candidate = os.path.join(winutil.special_folder_path(winutil.CSIDL_LOCAL_APPDATA), '%s-cache'%__appname__)
+            candidate = os.path.join(winutil.special_folder_path(winutil.CSIDL_LOCAL_APPDATA), f'{__appname__}-cache')
         except ValueError:
             return confcache
     elif ismacos:
@@ -258,11 +258,15 @@ class ExtensionsImporter:
             'rcc_backend',
             'icu',
             'speedup',
+            'piper',
             'html_as_json',
             'fast_css_transform',
+            'translator',
+            'fast_html_entities',
             'unicode_names',
             'html_syntax_highlighter',
             'hyphen',
+            'ffmpeg',
             'freetype',
             'imageops',
             'hunspell',
@@ -275,7 +279,7 @@ class ExtensionsImporter:
             'uchardet',
         )
         if iswindows:
-            extra = ('winutil', 'wpd', 'winfonts', 'winsapi', 'winspeech')
+            extra = ('winutil', 'wpd', 'winfonts', 'wintoast')
         elif ismacos:
             extra = ('usbobserver', 'cocoa', 'libusb', 'libmtp')
         elif isfreebsd or ishaiku or islinux:
@@ -314,7 +318,7 @@ if iswindows:
     from calibre_extensions import winutil
 
 
-class Plugins(collections.abc.Mapping):
+class Plugins(Mapping):
 
     def __iter__(self):
         from importlib.resources import contents
@@ -339,7 +343,7 @@ class Plugins(collections.abc.Mapping):
         try:
             return import_module('calibre_extensions.' + name), ''
         except ModuleNotFoundError:
-            raise KeyError('No plugin named %r'%name)
+            raise KeyError(f'No plugin named {name!r}')
         except Exception as err:
             return None, str(err)
 
@@ -389,7 +393,7 @@ else:
     config_dir = os.path.join(bdir, 'calibre')
     try:
         os.makedirs(config_dir, mode=CONFIG_DIR_MODE)
-    except:
+    except Exception:
         pass
     if not os.path.exists(config_dir) or \
             not os.access(config_dir, os.W_OK) or not \
@@ -403,11 +407,10 @@ else:
             try:
                 import shutil
                 shutil.rmtree(config_dir)
-            except:
+            except Exception:
                 pass
         atexit.register(cleanup_cdir)
 # }}}
-
 
 is_running_from_develop = False
 if getattr(sys, 'frozen', False):
@@ -488,7 +491,64 @@ def get_umask():
     return mask
 
 
-# call this at startup as it changed process global state, which doesn't work
+# call this at startup as it changes process global state, which doesn't work
 # with multi-threading. It's absurd there is no way to safely read the current
 # umask of a process.
 get_umask()
+
+
+@lru_cache(maxsize=2)
+def bundled_binaries_dir() -> str:
+    if ismacos and hasattr(sys, 'frameworks_dir'):
+        base = os.path.join(os.path.dirname(sys.frameworks_dir), 'utils.app', 'Contents', 'MacOS')
+        return base
+    if iswindows and hasattr(sys, 'frozen'):
+        base = sys.extensions_location if hasattr(sys, 'new_app_layout') else os.path.dirname(sys.executable)
+        return base
+    if (islinux or isbsd) and getattr(sys, 'frozen', False):
+        return os.path.join(sys.executables_location, 'bin')
+    return ''
+
+
+@contextmanager
+def sanitize_env_vars():
+    '''Unset various environment variables that calibre uses. This
+    is needed to prevent library conflicts when launching external utilities.'''
+
+    if islinux and isfrozen:
+        env_vars = {
+            'LD_LIBRARY_PATH':'/lib', 'OPENSSL_MODULES': '/lib/ossl-modules',
+        }
+    elif iswindows:
+        env_vars = {'OPENSSL_MODULES': None, 'QTWEBENGINE_DISABLE_SANDBOX': None}
+        if os.environ.get('CALIBRE_USE_SYSTEM_CERTIFICATES', '') != '1':
+            env_vars['SSL_CERT_FILE'] = None
+    elif ismacos:
+        env_vars = {k:None for k in (
+                    'FONTCONFIG_FILE FONTCONFIG_PATH OPENSSL_ENGINES OPENSSL_MODULES').split()}
+        if os.environ.get('CALIBRE_USE_SYSTEM_CERTIFICATES', '') != '1':
+            env_vars['SSL_CERT_FILE'] = None
+    else:
+        env_vars = {}
+
+    originals = {x:os.environ.get(x, '') for x in env_vars}
+    changed = {x:False for x in env_vars}
+    for var, suffix in env_vars.items():
+        paths = [x for x in originals[var].split(os.pathsep) if x]
+        npaths = [] if suffix is None else [x for x in paths if x != (sys.frozen_path + suffix)]
+        if len(npaths) < len(paths):
+            if npaths:
+                os.environ[var] = os.pathsep.join(npaths)
+            else:
+                del os.environ[var]
+            changed[var] = True
+
+    try:
+        yield
+    finally:
+        for var, orig in originals.items():
+            if changed[var]:
+                if orig:
+                    os.environ[var] = orig
+                elif var in os.environ:
+                    del os.environ[var]

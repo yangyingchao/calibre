@@ -35,11 +35,11 @@ def get_metadata(stream):
                                 nmi = zip_opf_metadata(path, zf)
                                 nmi.timestamp = None
                                 return nmi
-                            except:
+                            except Exception:
                                 pass
                         mi.timestamp = None
                         return mi
-    raise ValueError('No ebook found in ZIP archive (%s)' % os.path.basename(getattr(stream, 'name', '') or '<stream>'))
+    raise ValueError('No ebook found in ZIP archive ({})'.format(os.path.basename(getattr(stream, 'name', '') or '<stream>')))
 
 
 def zip_opf_metadata(opfpath, zf):

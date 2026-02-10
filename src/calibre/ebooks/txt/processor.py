@@ -14,7 +14,6 @@ from calibre import isbytestring, prepare_string_for_xml
 from calibre.ebooks.conversion.preprocess import DocAnalysis
 from calibre.ebooks.metadata.opf2 import OPFCreator
 from calibre.utils.cleantext import clean_ascii_chars
-from polyglot.builtins import iteritems
 
 HTML_TEMPLATE = '<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"/><title>%s </title></head><body>\n%s\n</body></html>'
 
@@ -31,16 +30,16 @@ def clean_txt(txt):
     txt = '\n'.join([line.rstrip() for line in txt.splitlines()])
 
     # Replace whitespace at the beginning of the line with &nbsp;
-    txt = re.sub('(?m)(?<=^)([ ]{2,}|\t+)(?=.)', '&nbsp;' * 4, txt)
+    txt = re.sub(r'(?m)(?<=^)([ ]{2,}|\t+)(?=.)', '&nbsp;' * 4, txt)
 
     # Condense redundant spaces
-    txt = re.sub('[ ]{2,}', ' ', txt)
+    txt = re.sub(r'[ ]{2,}', ' ', txt)
 
     # Remove blank space from the beginning and end of the document.
     txt = re.sub(r'^\s+(?=.)', '', txt)
     txt = re.sub(r'(?<=.)\s+$', '', txt)
     # Remove excessive line breaks.
-    txt = re.sub('\n{5,}', '\n\n\n\n', txt)
+    txt = re.sub(r'\n{5,}', '\n\n\n\n', txt)
     # remove ASCII invalid chars : 0 to 8 and 11-14 to 24
     txt = clean_ascii_chars(txt)
 
@@ -91,7 +90,7 @@ def convert_basic(txt, title='', epub_split_size_kb=0):
     for line in txt.split('\n'):
         if line.strip():
             blank_count = 0
-            lines.append('<p>%s</p>' % prepare_string_for_xml(line.replace('\n', ' ')))
+            lines.append('<p>{}</p>'.format(prepare_string_for_xml(line.replace('\n', ' '))))
         else:
             blank_count += 1
             if blank_count == 2:
@@ -103,7 +102,7 @@ def convert_basic(txt, title='', epub_split_size_kb=0):
 DEFAULT_MD_EXTENSIONS = ('footnotes', 'tables', 'toc')
 
 
-def create_markdown_object(extensions):
+def create_markdown_object(extensions=DEFAULT_MD_EXTENSIONS):
     # Need to load markdown extensions without relying on pkg_resources
     import importlib
 
@@ -146,7 +145,7 @@ def convert_markdown_with_metadata(txt, title='', extensions=DEFAULT_MD_EXTENSIO
     html = md.convert(txt)
     mi = Metadata(title or _('Unknown'))
     m = md.Meta
-    for k, v in iteritems({'date':'pubdate', 'summary':'comments'}):
+    for k, v in {'date':'pubdate', 'summary':'comments'}.items():
         if v not in m and k in m:
             m[v] = m.pop(k)
     for k in 'title authors series tags pubdate comments publisher rating'.split():
@@ -190,14 +189,14 @@ def separate_paragraphs_single_line(txt):
 
 
 def separate_paragraphs_print_formatted(txt):
-    txt = re.sub('(?miu)^(?P<indent>\t+|[ ]{2,})(?=.)', lambda mo: '\n%s' % mo.group('indent'), txt)
+    txt = re.sub(r'(?miu)^(?P<indent>\t+|[ ]{2,})(?=.)', lambda mo: '\n{}'.format(mo.group('indent')), txt)
     return txt
 
 
 def separate_hard_scene_breaks(txt):
     def sep_break(line):
         if len(line.strip()) > 0:
-            return '\n%s\n' % line
+            return f'\n{line}\n'
         else:
             return line
     txt = re.sub(r'(?miu)^[ \t-=~\/_]+$', lambda mo: sep_break(mo.group()), txt)
@@ -213,7 +212,7 @@ def preserve_spaces(txt):
     '''
     Replaces spaces multiple spaces with &nbsp; entities.
     '''
-    txt = re.sub('(?P<space>[ ]{2,})', lambda mo: ' ' + ('&nbsp;' * (len(mo.group('space')) - 1)), txt)
+    txt = re.sub(r'(?P<space>[ ]{2,})', lambda mo: ' ' + ('&nbsp;' * (len(mo.group('space')) - 1)), txt)
     txt = txt.replace('\t', '&nbsp;&nbsp;&nbsp;&nbsp;')
     return txt
 
@@ -222,7 +221,7 @@ def remove_indents(txt):
     '''
     Remove whitespace at the beginning of each line.
     '''
-    return re.sub(r'^[\r\t\f\v ]+', r'', txt, flags=re.MULTILINE)
+    return re.sub(r'^[\r\t\f\v ]+', '', txt, flags=re.MULTILINE)
 
 
 def opf_writer(path, opf_name, manifest, spine, mi):
@@ -234,7 +233,7 @@ def opf_writer(path, opf_name, manifest, spine, mi):
 
 
 def split_utf8(s, n):
-    """Split UTF-8 s into chunks of maximum length n."""
+    '''Split UTF-8 s into chunks of maximum length n.'''
     if n < 3:
         raise ValueError(f'Cannot split into chunks of less than {n} < 4 bytes')
     s = memoryview(s)
@@ -251,7 +250,7 @@ def split_string_separator(txt, size):
     '''
     Splits the text by putting \n\n at the point size.
     '''
-    if len(txt) > size and size > 3:
+    if len(txt) > size > 3:
         size -= 2
         ans = []
         for part in split_utf8(txt, size):
@@ -325,9 +324,9 @@ def detect_formatting_type(txt):
 
     # Check for markdown
     # Headings
-    markdown_count += len(re.findall('(?mu)^#+', txt))
-    markdown_count += len(re.findall('(?mu)^=+$', txt))
-    markdown_count += len(re.findall('(?mu)^-+$', txt))
+    markdown_count += len(re.findall(r'(?mu)^#+', txt))
+    markdown_count += len(re.findall(r'(?mu)^=+$', txt))
+    markdown_count += len(re.findall(r'(?mu)^-+$', txt))
     # Images
     markdown_count += len(re.findall(r'(?u)!\[.*?\](\[|\()', txt))
     # Links

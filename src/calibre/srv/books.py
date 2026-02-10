@@ -8,7 +8,7 @@ import os
 import tempfile
 import time
 from functools import partial
-from hashlib import sha1
+from hashlib import sha256
 from threading import Lock, RLock
 
 from calibre.constants import cache_dir, iswindows
@@ -24,7 +24,7 @@ from calibre.utils.filenames import rmtree
 from calibre.utils.localization import _
 from calibre.utils.resources import get_path as P
 from calibre.utils.serialize import json_dumps
-from polyglot.builtins import as_unicode, itervalues
+from polyglot.builtins import as_unicode
 
 cache_lock = RLock()
 queued_jobs = {}
@@ -58,7 +58,7 @@ def books_cache_dir():
 
 def book_hash(library_uuid, book_id, fmt, size, mtime):
     raw = json_dumps((library_uuid, book_id, fmt.upper(), size, mtime, RENDER_VERSION))
-    return as_unicode(sha1(raw).hexdigest())
+    return as_unicode(sha256(raw).hexdigest())
 
 
 staging_cleaned = False
@@ -103,12 +103,23 @@ def clean_final(interval=24 * 60 * 60):
     fdir = os.path.join(books_cache_dir(), 'f')
     for x in os.listdir(fdir):
         try:
-            tm = os.path.getmtime(os.path.join(fdir, x,  'calibre-book-manifest.json'))
+            tm = os.path.getmtime(os.path.join(fdir, x, 'calibre-book-manifest.json'))
         except OSError:
             continue
         if now - tm >= interval:
             # This book has not been accessed for a long time, delete it
             safe_remove(x)
+
+
+def rename_with_retry(a, b, sleep_time=1):
+    try:
+        os.rename(a, b)
+    except PermissionError:
+        if iswindows:
+            time.sleep(sleep_time)  # In case something has temporarily locked a file
+            os.rename(a, b)
+        else:
+            raise
 
 
 def job_done(job):
@@ -124,7 +135,7 @@ def job_done(job):
                 clean_final()
                 dest = os.path.join(books_cache_dir(), 'f', bhash)
                 safe_remove(dest, False)
-                os.rename(tdir, dest)
+                rename_with_retry(tdir, dest)
             except Exception:
                 import traceback
                 failed_jobs[bhash] = (False, traceback.format_exc())
@@ -135,7 +146,7 @@ def book_manifest(ctx, rd, book_id, fmt):
     db, library_id = get_library_data(ctx, rd)[:2]
     force_reload = rd.query.get('force_reload') == '1'
     if plugin_for_input_format(fmt) is None:
-        raise HTTPNotFound('The format %s cannot be viewed' % fmt.upper())
+        raise HTTPNotFound(f'The format {fmt.upper()} cannot be viewed')
     if not ctx.has_id(rd, db, book_id):
         raise BookNotFound(book_id, db)
     with db.safe_read_lock:
@@ -273,7 +284,7 @@ def update_annotations(ctx, rd, library_id, book_id, fmt):
     except Exception:
         raise HTTPNotFound('Invalid data')
     alist = []
-    for val in itervalues(amap):
+    for val in amap.values():
         if val:
             alist.extend(val)
     db.merge_annotations_for_book(book_id, fmt, alist, user_type='web', user=user)
@@ -302,8 +313,8 @@ def mathjax(ctx, rd, which):
     if not which:
         return rd.etagged_dynamic_response(manifest['etag'], manifest_as_json, content_type='application/json; charset=UTF-8')
     if which not in manifest['files']:
-        raise HTTPNotFound('No MathJax file named: %s' % which)
+        raise HTTPNotFound(f'No MathJax file named: {which}')
     path = os.path.abspath(P('mathjax/' + which, allow_user_override=False))
     if not path.startswith(P('mathjax', allow_user_override=False)):
-        raise HTTPNotFound('No MathJax file named: %s' % which)
+        raise HTTPNotFound(f'No MathJax file named: {which}')
     return rd.filesystem_file_with_constant_etag(open(path, 'rb'), manifest['etag'])

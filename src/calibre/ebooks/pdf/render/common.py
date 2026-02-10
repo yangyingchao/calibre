@@ -7,14 +7,13 @@ __docformat__ = 'restructuredtext en'
 
 import codecs
 import numbers
-import zlib
+from compression import zlib
 from datetime import datetime
 from io import BytesIO
 
 from calibre.utils.logging import default_log
 from calibre_extensions.speedup import pdf_float
 from polyglot.binary import as_hex_bytes
-from polyglot.builtins import codepoint_to_chr, iteritems
 
 EOL = b'\n'
 
@@ -74,12 +73,12 @@ def serialize(o, stream):
     elif o is None:
         stream.write_raw(b'null')
     elif isinstance(o, datetime):
-        val = o.strftime("D:%Y%m%d%H%M%%02d%z")%min(59, o.second)
+        val = o.strftime('D:%Y%m%d%H%M%%02d%z')%min(59, o.second)
         if datetime.tzinfo is not None:
-            val = "(%s'%s')"%(val[:-2], val[-2:])
+            val = f"({val[:-2]}'{val[-2:]}')"
         stream.write(val.encode('ascii'))
     else:
-        raise ValueError('Unknown object: %r'%o)
+        raise ValueError(f'Unknown object: {o!r}')
 
 
 class Name(str):
@@ -87,11 +86,11 @@ class Name(str):
     def pdf_serialize(self, stream):
         raw = self.encode('ascii')
         if len(raw) > 126:
-            raise ValueError('Name too long: %r'%self)
+            raise ValueError(f'Name too long: {self!r}')
         raw = bytearray(raw)
         sharp = ord(b'#')
         buf = (
-            codepoint_to_chr(x).encode('ascii') if 33 < x < 126 and x != sharp else
+            chr(x).encode('ascii') if 33 < x < 126 and x != sharp else
             f'#{x:x}'.encode('ascii') for x in raw)
         stream.write(b'/'+b''.join(buf))
 
@@ -162,7 +161,7 @@ class InlineDictionary(Dictionary):
 
     def pdf_serialize(self, stream):
         stream.write(b'<< ')
-        for k, v in iteritems(self):
+        for k, v in self.items():
             serialize(Name(k), stream)
             stream.write(b' ')
             serialize(v, stream)
@@ -226,11 +225,11 @@ class Reference:
         self.num, self.obj = num, obj
 
     def pdf_serialize(self, stream):
-        raw = '%d 0 R'%self.num
+        raw = f'{self.num} 0 R'
         stream.write(raw.encode('ascii'))
 
     def __repr__(self):
-        return '%d 0 R'%self.num
+        return f'{self.num} 0 R'
 
     def __str__(self):
         return repr(self)

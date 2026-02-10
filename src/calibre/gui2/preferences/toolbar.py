@@ -53,7 +53,7 @@ class BaseModel(QAbstractListModel):
                     dont_add_to=frozenset(['menubar', 'menubar-device']))
         try:
             return gui.iactions[name]
-        except:
+        except Exception:
             return None
 
     def rowCount(self, parent):
@@ -240,7 +240,7 @@ class CurrentModel(BaseModel):
     def restore_defaults(self):
         current = gprefs.defaults[self.gprefs_name]
         self.beginResetModel()
-        self._data =  [self.name_to_action(x, self.gui) for x in current]
+        self._data = [self.name_to_action(x, self.gui) for x in current]
         self.endResetModel()
 
 

@@ -12,6 +12,7 @@ import ssl
 import subprocess
 import sys
 import time
+from queue import Empty, Queue
 from threading import Lock, Thread
 
 from calibre.constants import islinux, ismacos, iswindows
@@ -22,8 +23,7 @@ from calibre.srv.standalone import create_option_parser
 from calibre.srv.utils import create_sock_pair
 from calibre.srv.web_socket import DummyHandler
 from calibre.utils.monotonic import monotonic
-from polyglot.builtins import error_message, itervalues, native_string_type
-from polyglot.queue import Empty, Queue
+from polyglot.builtins import error_message
 
 MAX_RETRIES = 10
 
@@ -31,8 +31,8 @@ MAX_RETRIES = 10
 class NoAutoReload(EnvironmentError):
     pass
 
-# Filesystem watcher {{{
 
+# Filesystem watcher {{{
 
 class WatcherBase:
 
@@ -157,7 +157,7 @@ elif iswindows:
         def loop(self):
             for w in self.watchers:
                 w.start()
-            with HandleInterrupt(lambda : self.modified_queue.put(None)):
+            with HandleInterrupt(lambda: self.modified_queue.put(None)):
                 while True:
                     path = self.modified_queue.get()
                     if path is None:
@@ -284,7 +284,7 @@ class Worker:
             if join_process(self.p) is None:
                 self.p.kill()
                 self.p.wait()
-            self.log('Killed server process %d with return code: %d' % (self.p.pid, self.p.returncode))
+            self.log(f'Killed server process {self.p.pid} with return code: {self.p.returncode}')
             self.p = None
 
     def restart(self, forced=False):
@@ -323,7 +323,7 @@ class Worker:
             s.settimeout(5)
             try:
                 if self.uses_ssl:
-                    s = ssl.wrap_socket(s)
+                    s = ssl._create_stdlib_context().wrap_socket(s)
                 s.connect(('localhost', self.port))
                 return
             except OSError:
@@ -332,8 +332,8 @@ class Worker:
                 s.close()
         self.log.error('Restarted server did not start listening on:', self.port)
 
-# WebSocket reload notifier {{{
 
+# WebSocket reload notifier {{{
 
 class ReloadHandler(DummyHandler):
 
@@ -352,14 +352,14 @@ class ReloadHandler(DummyHandler):
 
     def notify_reload(self):
         with self.conn_lock:
-            for connref in itervalues(self.connections):
+            for connref in self.connections.values():
                 conn = connref()
                 if conn is not None and conn.ready:
                     conn.send_websocket_message('reload')
 
     def ping(self):
         with self.conn_lock:
-            for connref in itervalues(self.connections):
+            for connref in self.connections.values():
                 conn = connref()
                 if conn is not None and conn.ready:
                     conn.send_websocket_message('ping')
@@ -390,7 +390,7 @@ class ReloadServer(Thread):
         while not self.loop.ready and self.is_alive():
             time.sleep(0.01)
         self.address = self.loop.bound_address[:2]
-        os.environ['CALIBRE_AUTORELOAD_PORT'] = native_string_type(self.address[1])
+        os.environ['CALIBRE_AUTORELOAD_PORT'] = str(self.address[1])
         return self
 
     def __exit__(self, *args):
@@ -412,7 +412,7 @@ def auto_reload(log, dirs=frozenset(), cmd=None, add_default_dirs=True, listen_o
         cmd.insert(1, 'calibre-server')
     dirs = find_dirs_to_watch(fpath, dirs, add_default_dirs)
     log('Auto-restarting server on changes press Ctrl-C to quit')
-    log('Watching %d directory trees for changes' % len(dirs))
+    log(f'Watching {len(dirs)} directory trees for changes')
     with ReloadServer(listen_on) as server, Worker(cmd, log, server) as worker:
         w = Watcher(dirs, worker, log)
         worker.wakeup = w.wakeup
