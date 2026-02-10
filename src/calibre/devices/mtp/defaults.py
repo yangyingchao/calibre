@@ -11,7 +11,7 @@ import traceback
 from calibre.constants import iswindows
 
 supernote_settings = {
-    'calibre_file_paths': {'metadata':'Document/metadata.calibre', 'driveinfo':'Document/driveinfo.calibre'},
+    'calibre_file_paths': {'metadata':'Documents/metadata.calibre', 'driveinfo':'Documents/driveinfo.calibre'},
     'send_to': ['Document', 'Documents'],
 }
 
